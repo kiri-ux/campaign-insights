@@ -1,150 +1,139 @@
 """
-block_audit_engine.py
-Answers: "placements we've flagged to block — are they actually blocked?"
+insights_engine.py
+Parses the AdLib "Insights" workbook (Client / Product / Strategy / Site+App
+Overview sheets) into structured insights: performance by business unit
+(partner), product, and strategy, plus waste/plausibility flags.
 
-In the AdLib Insights workbook, the Site Overview and App Overview sheets carry a
-'Final ... Name' column whose value is the literal sentinel "Block" when that
-placement is supposed to be blocked. Any such row that still shows impressions /
-billable spend is a BLOCK THAT ISN'T BEING ENFORCED — a leak.
-
-This engine finds those leaks and attributes the wasted spend/impressions to each
-Business Unit (partner), Client, Product, and Strategy.
+Pure functions -> import straight into the Flask app or a scheduled Render job.
+Defensive against the real-world dirtiness seen in the export:
+  - a leading TOTAL row per sheet
+  - full line-item strings leaking into the Product column
+  - mixed/blank numerics
 """
 import pandas as pd
 import numpy as np
 
-SENTINELS = {"block", "blocked"}
-
-SHEET_CONFIG = {
-    "Site Overview": {"kind": "site"},
-    "App Overview": {"kind": "app"},
+VALID_PRODUCTS = {
+    "Display", "Social Mirror", "Video", "CTV", "Native Display",
+    "Native Video", "Social Mirror CTV", "Online Audio",
 }
+NUM_COLS = ["Impressions", "Clicks", "Click Conversions", "View-throughs", "CPM", "Internal Cost"]
 
 
-def _find(cols, *tokens_any):
-    """Return first column whose lowercased name contains ALL tokens in any group."""
-    low = {c.lower(): c for c in cols}
-    for group in tokens_any:
-        for lc, orig in low.items():
-            if all(t in lc for t in group):
-                return orig
-    return None
+def _load_sheet(xls, name):
+    df = pd.read_excel(xls, sheet_name=name)
+    # drop the TOTAL summary row (first column == TOTAL)
+    df = df[df.iloc[:, 0].astype(str).str.strip().str.upper() != "TOTAL"].copy()
+    for c in NUM_COLS:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    return df
 
 
-def _detect(df, kind):
-    cols = df.columns
-    final = _find(cols, ("final", "site"), ("final", "app"), ("final", "domain"))
-    raw = _find(cols, ("site", "domain"), ("app", "name")) or final
-    return {
-        "final": final,
-        "raw": raw,
-        "impr": _find(cols, ("impression",)),
-        "clicks": _find(cols, ("click",)),
-        "spend": _find(cols, ("billable", "spend"), ("spend",), ("cost",)),
-        "date": _find(cols, ("date",)),
-        "bu": _find(cols, ("business", "unit")),
-        "client": _find(cols, ("client",)),
-        "product": _find(cols, ("product",)),
-        "strategy": _find(cols, ("strategy", "type"), ("strategy",)),
-    }
+def _bu_col(df):
+    for c in ("Business Unit", "Client Business Unit"):
+        if c in df.columns:
+            return c
+    return df.columns[0]
 
 
-def _normalize(df, c):
-    out = pd.DataFrame()
-    out["placement"] = df[c["raw"]].astype(str)
-    out["final"] = df[c["final"]].astype(str).str.strip()
-    out["impressions"] = pd.to_numeric(df[c["impr"]], errors="coerce").fillna(0) if c["impr"] else 0
-    out["clicks"] = pd.to_numeric(df[c["clicks"]], errors="coerce").fillna(0) if c["clicks"] else 0
-    out["spend"] = pd.to_numeric(df[c["spend"]], errors="coerce").fillna(0) if c["spend"] else 0
-    out["served_date"] = pd.to_datetime(df[c["date"]], errors="coerce") if c["date"] else pd.NaT
-    for dim in ("bu", "client", "product", "strategy"):
-        out[dim] = df[c[dim]].astype(str) if c[dim] else "(not in export)"
-    out["is_block"] = out["final"].str.lower().isin(SENTINELS)
-    out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
-    return out
-
-
-def _rollup(leak, dim):
-    if leak.empty:
-        return pd.DataFrame(columns=[dim, "leaked_impressions", "leaked_spend", "placements"])
-    g = (leak.groupby(dim)
-         .agg(leaked_impressions=("impressions", "sum"), leaked_spend=("spend", "sum"),
-              placements=("placement", "nunique"))
-         .reset_index().sort_values("leaked_spend", ascending=False))
-    return g
-
-
-def audit_block_leak(path_or_buffer):
+def load_workbook_frames(path_or_buffer):
     xls = pd.ExcelFile(path_or_buffer)
-    frames = []
-    truncation = {}
-    for sheet, cfg in SHEET_CONFIG.items():
-        if sheet not in xls.sheet_names:
-            continue
-        df = pd.read_excel(xls, sheet_name=sheet)
-        c = _detect(df, cfg["kind"])
-        if not c["final"]:
-            continue
-        norm = _normalize(df, c)
-        norm["placement_type"] = cfg["kind"]
-        frames.append(norm)
-        truncation[sheet] = len(df) >= 100000  # Tap export row cap heuristic
+    frames = {}
+    for want, aliases in {
+        "client": ["Client Overview"],
+        "product": ["Product Overview"],
+        "strategy": ["Strategy Overview"],
+        "siteapp": ["Site + App Overview"],
+    }.items():
+        for a in aliases:
+            if a in xls.sheet_names:
+                frames[want] = _load_sheet(xls, a)
+                break
+    return frames
 
-    if not frames:
-        raise ValueError("No Site/App Overview sheets with a 'Final ... Name' column found.")
 
-    allp = pd.concat(frames, ignore_index=True)
-    leak = allp[allp["is_block"] & (allp["impressions"] > 0)]
-    unresolved = allp[allp["is_unresolved"] & (allp["impressions"] > 0)]
+def by_business_unit(product_df, zero_conv_min_spend=300.0):
+    bu = _bu_col(product_df)
+    g = (product_df.groupby(bu)
+         .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
+              conversions=("Click Conversions", "sum"),
+              view_throughs=("View-throughs", "sum"),
+              internal_cost=("Internal Cost", "sum"))
+         .reset_index().rename(columns={bu: "business_unit"}))
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["cost_per_conv"] = np.where(g["conversions"] > 0, g["internal_cost"] / g["conversions"], np.nan)
+    g["zero_conversion_waste"] = (g["conversions"] == 0) & (g["internal_cost"] >= zero_conv_min_spend)
+    return g.sort_values("internal_cost", ascending=False)
 
-    # Recency: a trailing report shows impressions that may predate the block.
-    # Where a date exists (apps), use last-served to tell "stopped mid-window"
-    # (block likely took hold) from "still serving at the window edge" (verify).
-    window_end = allp["served_date"].max()
-    window_start = allp["served_date"].min()
-    ACTIVE_DAYS = 1  # served on/after window_end - 1 day = still active
 
-    by_type = (leak.groupby("placement_type")
-               .agg(rows=("placement", "size"), placements=("placement", "nunique"),
-                    impressions=("impressions", "sum"), spend=("spend", "sum")).reset_index())
+def by_product(product_df):
+    df = product_df.copy()
+    df["product_clean"] = df["Product"].where(df["Product"].isin(VALID_PRODUCTS), "Other/Uncategorized")
+    g = (df.groupby("product_clean")
+         .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
+              conversions=("Click Conversions", "sum"),
+              internal_cost=("Internal Cost", "sum"))
+         .reset_index().rename(columns={"product_clean": "product"}))
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["click_conv_rate"] = np.where(g["clicks"] > 0, g["conversions"] / g["clicks"], 0)
+    total = g["internal_cost"].sum() or 1
+    g["pct_of_spend"] = g["internal_cost"] / total
+    return g.sort_values("internal_cost", ascending=False)
 
-    offenders = (leak.groupby(["placement", "placement_type"])
-                 .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                      spend=("spend", "sum"), last_served=("served_date", "max"))
-                 .reset_index().sort_values("spend", ascending=False))
-    if pd.notna(window_end):
-        no_date = offenders["last_served"].isna()
-        offenders["days_since_last"] = (window_end - offenders["last_served"]).dt.days
-        offenders["still_active"] = (offenders["days_since_last"] <= ACTIVE_DAYS).astype("object")
-        offenders.loc[no_date, "still_active"] = pd.NA
-    else:
-        offenders["days_since_last"] = pd.NA
-        offenders["still_active"] = pd.NA
-    offenders["last_served"] = offenders["last_served"].dt.strftime("%Y-%m-%d").fillna("(no date)")
 
-    active = offenders[offenders["still_active"] == True]  # noqa: E712
+def by_strategy(strategy_df):
+    g = (strategy_df.groupby("Strategy Type")
+         .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
+              conversions=("Click Conversions", "sum"),
+              view_throughs=("View-throughs", "sum"),
+              internal_cost=("Internal Cost", "sum"))
+         .reset_index().rename(columns={"Strategy Type": "strategy_type"}))
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["cost_per_conv"] = np.where(g["conversions"] > 0, g["internal_cost"] / g["conversions"], np.nan)
+    return g.sort_values("internal_cost", ascending=False)
+
+
+def plausibility_flags(strategy_df, ctr_ceiling=0.03, min_impr=20000):
+    """High CTR + zero conversions = the 'looks great on paper, no outcome' pattern."""
+    df = strategy_df.copy()
+    df["ctr"] = np.where(df["Impressions"] > 0, df["Clicks"] / df["Impressions"], 0)
+    flag = df[(df["ctr"] > ctr_ceiling) & (df["Click Conversions"] == 0) & (df["Impressions"] > min_impr)]
+    bu = _bu_col(df)
+    keep = [bu, "Strategy Name", "Impressions", "Clicks", "ctr", "Internal Cost"]
+    keep = [c for c in keep if c in flag.columns]
+    return flag[keep].sort_values("ctr", ascending=False)
+
+
+def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
+    frames = load_workbook_frames(path_or_buffer)
+    prod = frames.get("product")
+    strat = frames.get("strategy")
+    if prod is None:
+        raise ValueError("Product Overview sheet not found.")
+
+    bu = by_business_unit(prod, zero_conv_min_spend)
+    pr = by_product(prod)
+    st = by_strategy(strat) if strat is not None else pd.DataFrame()
+    fl = plausibility_flags(strat) if strat is not None else pd.DataFrame()
+
+    zero = bu[bu["zero_conversion_waste"]]
+    sm = pr[pr["product"] == "Social Mirror"]
 
     summary = {
-        "leaked_spend": float(leak["spend"].sum()),
-        "leaked_impressions": float(leak["impressions"].sum()),
-        "leaked_placements": int(leak["placement"].nunique()),
-        "leaked_rows": int(len(leak)),
-        "by_type": by_type.to_dict("records"),
-        "truncated_sheets": [s for s, t in truncation.items() if t],
-        "unresolved_placements": int(unresolved["placement"].nunique()),
-        "unresolved_spend": float(unresolved["spend"].sum()),
-        "window_start": window_start.strftime("%b %d") if pd.notna(window_start) else None,
-        "window_end": window_end.strftime("%b %d") if pd.notna(window_end) else None,
-        "active_placements": int(len(active)),
-        "active_spend": float(active["spend"].sum()) if len(active) else 0.0,
-        "has_dates": bool(pd.notna(window_end)),
+        "total_impressions": float(prod["Impressions"].sum()),
+        "total_cost": float(prod["Internal Cost"].sum()),
+        "business_units": int(bu["business_unit"].nunique()),
+        "zero_conv_bu_count": int(len(zero)),
+        "zero_conv_spend": float(zero["internal_cost"].sum()),
+        "social_mirror_pct_spend": float(sm["pct_of_spend"].iloc[0]) if len(sm) else None,
+        "social_mirror_conv_rate": float(sm["click_conv_rate"].iloc[0]) if len(sm) else None,
+        "plausibility_flag_count": int(len(fl)),
     }
-
     return {
         "summary": summary,
-        "offenders": offenders,
-        "leak_by_bu": _rollup(leak, "bu"),
-        "leak_by_client": _rollup(leak, "client"),
-        "leak_by_product": _rollup(leak, "product"),
-        "leak_by_strategy": _rollup(leak, "strategy"),
+        "by_business_unit": bu,
+        "by_product": pr,
+        "by_strategy": st,
+        "plausibility_flags": fl,
     }
