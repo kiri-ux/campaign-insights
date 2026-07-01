@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdLib Placement &amp; Impact Insights</title>
+<style>
+  :root{--ink:#12213a;--muted:#5b6b84;--line:#e3e8f0;--brand:#1f5fbf;--bg:#f6f8fc;}
+  *{box-sizing:border-box}
+  body{font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:40px 20px;}
+  .wrap{max-width:720px;margin:0 auto;}
+  h1{font-size:24px;margin:0 0 6px;}
+  p.sub{color:var(--muted);margin:0 0 28px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
+  label{font-weight:bold;display:block;margin-bottom:6px;font-size:14px;}
+  .hint{color:var(--muted);font-size:13px;margin:2px 0 12px;}
+  input[type=file]{width:100%;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#fbfdff;}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:bold;}
+  .tag{display:inline-block;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:99px;background:#e8f0fe;color:var(--brand);margin-left:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AdLib Placement &amp; Impact Insights</h1>
+  <p class="sub">Proactive oversight layer — surface waste before the client does.</p>
+  <form action="/analyze" method="post" enctype="multipart/form-data">
+    <div class="card">
+      <label>Insights workbook <span class="tag">performance</span> <span class="tag">block check</span></label>
+      <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and a block-status check (placements flagged “Block” that still show delivery, with a last-served recency signal).</div>
+      <input type="file" name="insights_workbook" accept=".xlsx">
+    </div>
+    <button type="submit">Generate insights</button>
+  </form>
+</div>
+</body>
+</html>
