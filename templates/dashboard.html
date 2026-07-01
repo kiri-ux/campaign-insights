@@ -36,27 +36,28 @@
 
   {% if audit %}
     {% set a = audit.summary %}
-    <h2>Block-enforcement audit — placements flagged “Block” that are still serving</h2>
+    <h2>Block-status check — placements flagged “Block” with delivery{% if a.window_start %} ({{ a.window_start }}–{{ a.window_end }}){% endif %}</h2>
+    <p class="note">This is a trailing report, so impressions may predate when the block was applied — this is a list to <em>verify</em>, not proof a block failed. For apps, the last-served date tells you which stopped mid-window (block likely took hold) versus which were still serving at the window edge (worth checking in the DSP).</p>
     <div class="cards">
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(a.leaked_spend) }}</div><div class="l">Billable spend leaking through blocks</div></div>
-      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(a.leaked_impressions) }}</div><div class="l">Impressions on blocked placements</div></div>
-      <div class="kpi warn"><div class="n">{{ a.leaked_placements }}</div><div class="l">Distinct placements not enforced</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(a.leaked_rows) }}</div><div class="l">Delivery rows affected</div></div>
+      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(a.leaked_spend) }}</div><div class="l">Billable spend on blocked placements (this window)</div></div>
+      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(a.leaked_impressions) }}</div><div class="l">Impressions</div></div>
+      <div class="kpi"><div class="n">{{ a.leaked_placements }}</div><div class="l">Distinct placements</div></div>
+      {% if a.has_dates %}<div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(a.active_spend) }}</div><div class="l">On {{ a.active_placements }} apps still serving at window edge — verify these</div></div>{% endif %}
     </div>
-    {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — this leak is a floor, pull a filtered/dated export for the full figure.</p>{% endif %}
-    <p><a class="dl" href="/download/block_leak_offenders.csv">download offender list</a>
+    {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
+    <p><a class="dl" href="/download/block_leak_offenders.csv">download full list</a>
        <a class="dl" href="/download/block_leak_by_bu.csv">by business unit</a>
        <a class="dl" href="/download/block_leak_by_client.csv">by client</a>
        <a class="dl" href="/download/block_leak_by_product.csv">by product</a>
        <a class="dl" href="/download/block_leak_by_strategy.csv">by strategy</a></p>
 
-    <h2>Leaking placements <span style="font-weight:normal;color:var(--muted);font-size:13px">(top 25 by spend)</span></h2>
-    <table><tr><th>Placement</th><th>Type</th><th>Impr</th><th>Clicks</th><th>Spend</th></tr>
-    {% for r in audit.offenders %}<tr><td>{{ r.placement }}</td><td>{{ r.placement_type }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <h2>Placements <span style="font-weight:normal;color:var(--muted);font-size:13px">(top 25 by spend)</span></h2>
+    <table><tr><th>Placement</th><th>Type</th><th>Impr</th><th>Clicks</th><th>Spend</th><th>Last served</th><th>Status</th></tr>
+    {% for r in audit.offenders %}<tr><td>{{ r.placement }}</td><td>{{ r.placement_type }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td><td>{{ r.last_served }}</td><td>{% if r.still_active == True %}<span style="color:var(--warn);font-weight:bold">still serving</span>{% elif r.still_active == False %}stopped{% else %}—{% endif %}</td></tr>{% endfor %}
     </table>
 
-    <h2>Leak by business unit <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected)</span></h2>
-    <table><tr><th>Business unit</th><th>Leaked impr</th><th>Leaked spend</th><th>Placements</th></tr>
+    <h2>By business unit <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected)</span></h2>
+    <table><tr><th>Business unit</th><th>Impr</th><th>Spend</th><th>Placements</th></tr>
     {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
     </table>
   {% endif %}
@@ -92,25 +93,6 @@
     {% for r in insights.flags %}<tr><td>{{ r['Business Unit'] }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Impressions'] }}</td><td>{{ r['Clicks'] }}</td><td>{{ r.ctr }}</td><td>{{ r['Internal Cost'] }}</td></tr>{% endfor %}
     </table>
     {% else %}<p class="note">No line items tripped the high-CTR / zero-conversion threshold.</p>{% endif %}
-  {% endif %}
-
-  {% if placement %}
-    {% set p = placement.summary %}
-    <h2>Site / app block list</h2>
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ p.placements }}</div><div class="l">Placements scanned</div></div>
-      <div class="kpi warn"><div class="n">{{ p.block_count }}</div><div class="l">Flagged to block</div></div>
-      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(p.blocked_impressions) }}</div><div class="l">Blocked impressions</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(p.blocked_spend) }}</div><div class="l">Blocked spend</div></div>
-    </div>
-    <p><a class="dl" href="/download/block_list.csv">download block list</a>
-       <a class="dl" href="/download/waste_by_bu.csv">waste by BU</a>
-       <a class="dl" href="/download/waste_by_product.csv">waste by product</a>
-       <a class="dl" href="/download/waste_by_strategy.csv">waste by strategy</a></p>
-    {% if not p.has_dimensions %}<p class="note">Export had no BU/Product/Strategy columns — block list stands alone; add those columns to attribute waste to partners.</p>{% endif %}
-    <table><tr><th>Placement</th><th>Category</th><th>Impr</th><th>Clicks</th><th>Spend</th><th>Business unit</th></tr>
-    {% for r in placement.block_list %}<tr><td>{{ r.placement }}</td><td>{{ r.category }}</td><td>{{ r.impr }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td><td>{{ r.bu }}</td></tr>{% endfor %}
-    </table>
   {% endif %}
 </div>
 </body>

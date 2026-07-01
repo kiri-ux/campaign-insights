@@ -24,14 +24,9 @@
   <p class="sub">Proactive oversight layer — surface waste before the client does.</p>
   <form action="/analyze" method="post" enctype="multipart/form-data">
     <div class="card">
-      <label>Insights workbook <span class="tag">performance</span> <span class="tag">block audit</span></label>
-      <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and the block-enforcement audit (placements flagged “Block” that are still serving).</div>
+      <label>Insights workbook <span class="tag">performance</span> <span class="tag">block check</span></label>
+      <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and a block-status check (placements flagged “Block” that still show delivery, with a last-served recency signal).</div>
       <input type="file" name="insights_workbook" accept=".xlsx">
-    </div>
-    <div class="card">
-      <label>Site / App export <span class="tag">block list</span></label>
-      <div class="hint">Site/app-grain delivery export (site &times; impressions / clicks / conversions). Include Business Unit / Product / Strategy columns to attribute blocked waste to partners. .csv or .xlsx.</div>
-      <input type="file" name="siteapp_export" accept=".csv,.xlsx">
     </div>
     <button type="submit">Generate insights</button>
   </form>
