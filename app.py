@@ -12,6 +12,7 @@ import pandas as pd
 
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
+from ai_blocks import recommend_blocks, to_adlib_filter
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40 MB
@@ -36,7 +37,7 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    ctx = {"insights": None, "audit": None, "errors": []}
+    ctx = {"insights": None, "audit": None, "blocks": None, "ai": None, "errors": []}
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -88,6 +89,32 @@ def analyze():
                 "by_bu": _fmt(a["leak_by_bu"].head(15), money_cols=["leaked_spend"],
                               int_cols=["leaked_impressions", "placements"]).to_dict("records"),
             }
+
+            # Copyable AdLib filter syntax for placements ALREADY flagged "Block"
+            bs, bap = a["block_names"]["site"], a["block_names"]["app"]
+            ctx["blocks"] = {
+                "site_count": len(bs), "app_count": len(bap),
+                "site_filter": to_adlib_filter(bs, "site"),
+                "app_filter": to_adlib_filter(bap, "app"),
+            }
+
+            # Optional AI pass: recommend NEW blocks from non-flagged candidates
+            if request.form.get("ai_blocks"):
+                rec = recommend_blocks(a["candidates"])
+                rec_site = rec.get("site", pd.DataFrame())
+                rec_app = rec.get("app", pd.DataFrame())
+                _CACHE["ai_recommended_sites.csv"] = rec_site
+                _CACHE["ai_recommended_apps.csv"] = rec_app
+                ctx["ai"] = {
+                    "error": rec.get("error"),
+                    "site_count": len(rec_site), "app_count": len(rec_app),
+                    "sites": _fmt(rec_site.head(40), money_cols=["spend"],
+                                  int_cols=["impressions"]).to_dict("records"),
+                    "apps": _fmt(rec_app.head(40), money_cols=["spend"],
+                                 int_cols=["impressions"]).to_dict("records"),
+                    "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
+                    "app_filter": to_adlib_filter(rec_app["name"].tolist(), "app") if len(rec_app) else "",
+                }
             del a
         except Exception as e:
             ctx["errors"].append(f"Block audit: {e}")

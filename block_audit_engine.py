@@ -162,6 +162,28 @@ def audit_block_leak(path_or_buffer):
 
     active = offenders[offenders["still_active"] == True]  # noqa: E712
 
+    # Distinct names already flagged "Block" (for copyable AdLib filter syntax)
+    blocked = allp[allp["is_block"]]
+    block_names = {
+        "site": sorted(blocked.loc[blocked["placement_type"] == "site", "placement"].dropna().unique().tolist()),
+        "app": sorted(blocked.loc[blocked["placement_type"] == "app", "placement"].dropna().unique().tolist()),
+    }
+
+    # Candidates for the AI pass: placements NOT already flagged Block, with real
+    # delivery, aggregated distinct by spend (so we send Claude a ranked shortlist).
+    already = {k: set(v) for k, v in block_names.items()}
+    cand = allp[(~allp["is_block"]) & (allp["impressions"] > 0)]
+
+    def _candidates(kind):
+        d = (cand[cand["placement_type"] == kind]
+             .groupby("placement")
+             .agg(impressions=("impressions", "sum"), spend=("spend", "sum"))
+             .reset_index().rename(columns={"placement": "name"}))
+        d = d[~d["name"].isin(already.get(kind, set()))]
+        return d.sort_values("spend", ascending=False).reset_index(drop=True)
+
+    candidates = {"site": _candidates("site"), "app": _candidates("app")}
+
     summary = {
         "leaked_spend": float(leak["spend"].sum()),
         "leaked_impressions": float(leak["impressions"].sum()),
@@ -185,4 +207,6 @@ def audit_block_leak(path_or_buffer):
         "leak_by_client": _rollup(leak, "client"),
         "leak_by_product": _rollup(leak, "product"),
         "leak_by_strategy": _rollup(leak, "strategy"),
+        "block_names": block_names,
+        "candidates": candidates,
     }
