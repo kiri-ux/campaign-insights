@@ -177,7 +177,8 @@ def audit_block_leak(path_or_buffer):
     def _candidates(kind):
         d = (cand[cand["placement_type"] == kind]
              .groupby("placement")
-             .agg(impressions=("impressions", "sum"), spend=("spend", "sum"))
+             .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+                  spend=("spend", "sum"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
         return d.sort_values("spend", ascending=False).reset_index(drop=True)

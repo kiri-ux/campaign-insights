@@ -12,6 +12,7 @@ import pandas as pd
 
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
+from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter
 
 app = Flask(__name__)
@@ -37,7 +38,8 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    ctx = {"insights": None, "audit": None, "blocks": None, "ai": None, "errors": []}
+    ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
+           "clients": None, "exchanges": None, "errors": []}
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -69,6 +71,12 @@ def analyze():
                 "flags": _fmt(r["plausibility_flags"], pct_cols=["ctr"], money_cols=["Internal Cost"],
                               int_cols=["Impressions", "Clicks"]).to_dict("records"),
             }
+            cflag = r.get("client_flags", pd.DataFrame())
+            if len(cflag):
+                _CACHE["client_flags.csv"] = cflag
+                ctx["clients"] = _fmt(cflag.head(25), pct_cols=["ctr"],
+                                      money_cols=["internal_cost", "plausibility_cost"],
+                                      int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
             del r
         except Exception as e:
             ctx["errors"].append(f"Insights workbook: {e}")
@@ -108,16 +116,32 @@ def analyze():
                 ctx["ai"] = {
                     "error": rec.get("error"),
                     "site_count": len(rec_site), "app_count": len(rec_app),
-                    "sites": _fmt(rec_site.head(40), money_cols=["spend"],
-                                  int_cols=["impressions"]).to_dict("records"),
-                    "apps": _fmt(rec_app.head(40), money_cols=["spend"],
-                                 int_cols=["impressions"]).to_dict("records"),
+                    "sites": _fmt(rec_site.head(40), pct_cols=["ctr"], money_cols=["spend"],
+                                  int_cols=["impressions", "clicks"]).to_dict("records"),
+                    "apps": _fmt(rec_app.head(40), pct_cols=["ctr"], money_cols=["spend"],
+                                 int_cols=["impressions", "clicks"]).to_dict("records"),
                     "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
                     "app_filter": to_adlib_filter(rec_app["name"].tolist(), "app") if len(rec_app) else "",
                 }
             del a
         except Exception as e:
             ctx["errors"].append(f"Block audit: {e}")
+
+        # Exchange anomaly analysis
+        try:
+            ex = analyze_exchanges(tmp.name)
+            if ex:
+                _CACHE["exchange_flags.csv"] = ex["flags"]
+                _CACHE["exchange_table.csv"] = ex["table"]
+                ctx["exchanges"] = {
+                    "summary": ex["summary"],
+                    "flags": _fmt(ex["flags"].head(20), pct_cols=["ctr", "pct_of_spend"],
+                                  money_cols=["spend"], int_cols=["impressions", "clicks"]).to_dict("records"),
+                    "top": _fmt(ex["table"].head(12), pct_cols=["ctr", "pct_of_spend"],
+                                money_cols=["spend"], int_cols=["impressions", "clicks"]).to_dict("records"),
+                }
+        except Exception as e:
+            ctx["errors"].append(f"Exchange analysis: {e}")
     finally:
         try:
             os.unlink(tmp.name)

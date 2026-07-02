@@ -105,6 +105,49 @@ def plausibility_flags(strategy_df, ctr_ceiling=0.03, min_impr=20000):
     return flag[keep].sort_values("ctr", ascending=False)
 
 
+def client_flags(product_df, strategy_df, zero_conv_min_spend=250.0, ctr_ceiling=0.03):
+    """Per-client watchlist: surfaces clients that need attention — spend with no
+    conversions, and high-CTR/zero-conversion (plausibility) exposure."""
+    bu = _bu_col(product_df)
+    keys = [c for c in [bu, "Client"] if c in product_df.columns]
+    if "Client" not in product_df.columns:
+        return pd.DataFrame()
+    g = (product_df.groupby(keys)
+         .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
+              conversions=("Click Conversions", "sum"),
+              internal_cost=("Internal Cost", "sum"))
+         .reset_index())
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["zero_conv_spend"] = (g["conversions"] == 0) & (g["internal_cost"] >= zero_conv_min_spend)
+
+    # plausibility exposure per client from strategy grain
+    plaus = pd.DataFrame()
+    if strategy_df is not None and "Client" in strategy_df.columns:
+        s = strategy_df.copy()
+        s["ctr"] = np.where(s["Impressions"] > 0, s["Clicks"] / s["Impressions"], 0)
+        s = s[(s["ctr"] > ctr_ceiling) & (s["Click Conversions"] == 0) & (s["Impressions"] > 20000)]
+        if len(s):
+            plaus = (s.groupby("Client").agg(plausibility_lineitems=("Strategy Name", "nunique"),
+                                             plausibility_cost=("Internal Cost", "sum")).reset_index())
+    if len(plaus):
+        g = g.merge(plaus, on="Client", how="left")
+    g["plausibility_lineitems"] = g.get("plausibility_lineitems", 0)
+    g["plausibility_cost"] = g.get("plausibility_cost", 0.0)
+    g[["plausibility_lineitems", "plausibility_cost"]] = g[["plausibility_lineitems", "plausibility_cost"]].fillna(0)
+
+    reasons = []
+    for _, r in g.iterrows():
+        rs = []
+        if r["zero_conv_spend"]:
+            rs.append("spend, 0 conversions")
+        if r["plausibility_lineitems"]:
+            rs.append(f"{int(r['plausibility_lineitems'])} high-CTR/0-conv line item(s)")
+        reasons.append("; ".join(rs))
+    g["reason"] = reasons
+    flagged = g[g["reason"] != ""].sort_values("internal_cost", ascending=False)
+    return flagged
+
+
 def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
     frames = load_workbook_frames(path_or_buffer)
     prod = frames.get("product")
@@ -136,4 +179,5 @@ def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
         "by_product": pr,
         "by_strategy": st,
         "plausibility_flags": fl,
+        "client_flags": client_flags(prod, strat),
     }

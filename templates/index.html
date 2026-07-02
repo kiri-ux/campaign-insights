@@ -3,20 +3,27 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AdLib Placement &amp; Impact Insights</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{--ink:#12213a;--muted:#5b6b84;--line:#e3e8f0;--brand:#1f5fbf;--bg:#f6f8fc;}
+  :root{--atlas:#0E2A47;--velocity:#1E6FE0;--gold:#C9A227;--parchment:#F5F1E6;
+        --ink:#0E2A47;--muted:#5f6b7a;--line:#e6e0d0;--brand:#1E6FE0;--bg:#F5F1E6;--card:#ffffff;
+        --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
   *{box-sizing:border-box}
-  body{font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:40px 20px;}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:40px 20px;}
   .wrap{max-width:720px;margin:0 auto;}
-  h1{font-size:24px;margin:0 0 6px;}
+  .brandbar{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:2px solid var(--gold);margin-bottom:20px;}
+  .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:22px;color:var(--atlas);}
+  .brandbar .mark span{color:var(--velocity);}
+  h1{font-family:var(--font-head);font-size:24px;margin:0 0 6px;color:var(--atlas);}
   p.sub{color:var(--muted);margin:0 0 28px;}
-  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
-  label{font-weight:bold;display:block;margin-bottom:6px;font-size:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
+  label{font-weight:600;display:block;margin-bottom:6px;font-size:14px;color:var(--atlas);}
   .hint{color:var(--muted);font-size:13px;margin:2px 0 12px;}
-  input[type=file]{width:100%;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#fbfdff;}
-  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:bold;}
+  input[type=file]{width:100%;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#fbfaf5;}
+  button{background:var(--velocity);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:600;font-family:var(--font-head);}
   button:disabled{opacity:.6;cursor:not-allowed;}
-  .tag{display:inline-block;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:99px;background:#e8f0fe;color:var(--brand);margin-left:8px;}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:#e9f1fd;color:var(--velocity);margin-left:8px;}
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:8px;}
   @keyframes sp{to{transform:rotate(360deg)}}
   form.busy{opacity:.55;pointer-events:none;transition:opacity .2s;}
@@ -26,6 +33,7 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span></div>
   <h1>AdLib Placement &amp; Impact Insights</h1>
   <p class="sub">Proactive oversight layer — surface waste before the client does.</p>
   <form action="/analyze" method="post" enctype="multipart/form-data" id="f" onsubmit="return go()">

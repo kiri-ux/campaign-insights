@@ -3,36 +3,48 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Insights — Results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{--ink:#12213a;--muted:#5b6b84;--line:#e3e8f0;--brand:#1f5fbf;--bg:#f6f8fc;--warn:#b42318;--warnbg:#fef3f2;}
+  /* Vici / adtini palette */
+  :root{--atlas:#0E2A47;--velocity:#1E6FE0;--gold:#C9A227;--parchment:#F5F1E6;
+        --ink:#0E2A47;--muted:#5f6b7a;--line:#e6e0d0;--brand:#1E6FE0;--bg:#F5F1E6;
+        --warn:#B42318;--warnbg:#fbeeea;--card:#ffffff;
+        --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
   *{box-sizing:border-box}
-  body{font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:36px 20px;}
-  .wrap{max-width:1040px;margin:0 auto;}
-  a.back{color:var(--brand);text-decoration:none;font-size:14px;}
-  h1{font-size:22px;margin:8px 0 18px;}
-  h2{font-size:16px;margin:26px 0 10px;}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 20px 40px;}
+  .brandbar{max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
+  .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
+  .brandbar .mark span{color:var(--velocity);}
+  .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
+  .wrap{max-width:1040px;margin:0 auto;padding-top:14px;}
+  a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
+  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
+  h2{font-family:var(--font-head);font-size:16px;margin:28px 0 10px;color:var(--atlas);}
+  h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;}
   .cards{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
-  .kpi{flex:1;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
-  .kpi .n{font-size:22px;font-weight:bold;}
+  .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .kpi .n{font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--atlas);}
   .kpi .l{color:var(--muted);font-size:12px;margin-top:2px;}
-  .kpi.warn{background:var(--warnbg);border-color:#fecdca;}
+  .kpi.warn{background:var(--warnbg);border-color:#f3cfc9;}
   .kpi.warn .n{color:var(--warn);}
-  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
   th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
   th:first-child,td:first-child{text-align:left;}
-  th{background:#f0f4fa;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
+  th{background:#faf7ef;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
   tr:last-child td{border-bottom:0;}
-  .dl{font-size:13px;color:var(--brand);text-decoration:none;margin-left:10px;}
-  .err{background:var(--warnbg);border:1px solid #fecdca;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
+  .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
+  .err{background:var(--warnbg);border:1px solid #f3cfc9;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
   .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
   .copybox{margin:12px 0;}
-  .copyhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:13px;font-weight:bold;color:var(--muted);}
-  .copybtn{background:var(--brand);color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:bold;cursor:pointer;}
+  .copyhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:13px;font-weight:600;color:var(--muted);}
+  .copybtn{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;}
   .copybtn.done{background:#177245;}
-  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfdff;color:var(--ink);resize:vertical;}
+  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfaf5;color:var(--ink);resize:vertical;}
 </style>
 </head>
 <body>
+<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">Placement &amp; Impact Insights</span></div>
 <div class="wrap">
   <a class="back" href="/">&larr; New analysis</a>
   <h1>Placement &amp; Impact Insights</h1>
@@ -67,6 +79,29 @@
     </table>
   {% endif %}
 
+  {% if clients %}
+    <h2>Client watchlist <span class="sub">(clients to flag — zero-conversion spend or implausible CTR)</span></h2>
+    <p class="note"><a class="dl" href="/download/client_flags.csv">download full watchlist CSV</a></p>
+    <table><tr><th>Client</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Why flagged</th></tr>
+    {% for r in clients %}<tr><td>{{ r.Client }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if exchanges %}
+    {% set e = exchanges.summary %}
+    <h2>Exchange anomalies <span class="sub">(abnormal CTR / spend concentration)</span></h2>
+    <div class="cards">
+      <div class="kpi"><div class="n">{{ e.exchanges }}</div><div class="l">Exchanges</div></div>
+      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(e.book_ctr*100) }}</div><div class="l">Book-average CTR</div></div>
+      <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchanges</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchanges</div></div>
+    </div>
+    <p class="note">No conversion data exists at exchange grain, so these flag CTR that is far off the book average. High-CTR flags point to possible invalid/bot traffic; low-CTR flags on audio/CTV exchanges (Spotify, FreeWheel, Adswizz) are usually expected, not a problem. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
+    <table><tr><th>Exchange</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th><th>% spend</th><th>Flag</th></tr>
+    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td><td>{{ r.pct_of_spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
   {% if blocks %}
     <h2>Copy block-list syntax <span style="font-weight:normal;color:var(--muted);font-size:13px">(placements already flagged “Block”)</span></h2>
     <p class="note">Paste straight into your AdLib block filter. {{ blocks.site_count }} sites, {{ blocks.app_count }} apps.</p>
@@ -91,8 +126,8 @@
        <a class="dl" href="/download/ai_recommended_apps.csv">apps CSV</a></p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
-    <table><tr><th>Site</th><th>Category</th><th>Why</th><th>Impr</th><th>Spend</th></tr>
-    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <table><tr><th>Site</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
+    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
       <div class="copyhead"><span>Copy recommended site blocks</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
@@ -100,8 +135,8 @@
     </div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
-    <table><tr><th>App</th><th>Category</th><th>Why</th><th>Impr</th><th>Spend</th></tr>
-    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <table><tr><th>App</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
+    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
       <div class="copyhead"><span>Copy recommended app blocks</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
