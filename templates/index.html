@@ -15,21 +15,42 @@
   .hint{color:var(--muted);font-size:13px;margin:2px 0 12px;}
   input[type=file]{width:100%;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#fbfdff;}
   button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:bold;}
+  button:disabled{opacity:.6;cursor:not-allowed;}
   .tag{display:inline-block;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:99px;background:#e8f0fe;color:var(--brand);margin-left:8px;}
+  .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:8px;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  form.busy{opacity:.55;pointer-events:none;transition:opacity .2s;}
+  .busy-note{margin-top:14px;color:var(--muted);font-size:13px;display:none;}
+  form.busy + .busy-note{display:block;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>AdLib Placement &amp; Impact Insights</h1>
   <p class="sub">Proactive oversight layer — surface waste before the client does.</p>
-  <form action="/analyze" method="post" enctype="multipart/form-data">
+  <form action="/analyze" method="post" enctype="multipart/form-data" id="f" onsubmit="return go()">
     <div class="card">
       <label>Insights workbook <span class="tag">performance</span> <span class="tag">block check</span></label>
       <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and a block-status check (placements flagged “Block” that still show delivery, with a last-served recency signal).</div>
-      <input type="file" name="insights_workbook" accept=".xlsx">
+      <input type="file" name="insights_workbook" accept=".xlsx" required>
     </div>
-    <button type="submit">Generate insights</button>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin:0 0 16px;cursor:pointer;">
+      <input type="checkbox" name="ai_blocks" value="1" style="width:auto;">
+      <span>Also generate an AI-recommended block list (uses Claude to flag new junk placements — adds ~30–60s)</span>
+    </label>
+    <button type="submit" id="btn">Generate insights</button>
   </form>
+  <div class="busy-note">Reading the workbook and crunching ~200k rows — this can take up to a minute on the free tier. You can leave this tab open.</div>
+  <script>
+    function go(){
+      var f=document.getElementById('f'), b=document.getElementById('btn');
+      if(!f.insights_workbook.value){return false;}
+      f.classList.add('busy');
+      b.disabled=true;
+      b.innerHTML='<span class="spin"></span>Generating…';
+      return true;
+    }
+  </script>
 </div>
 </body>
 </html>

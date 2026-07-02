@@ -25,6 +25,11 @@
   .dl{font-size:13px;color:var(--brand);text-decoration:none;margin-left:10px;}
   .err{background:var(--warnbg);border:1px solid #fecdca;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
   .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
+  .copybox{margin:12px 0;}
+  .copyhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:13px;font-weight:bold;color:var(--muted);}
+  .copybtn{background:var(--brand);color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:bold;cursor:pointer;}
+  .copybtn.done{background:#177245;}
+  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfdff;color:var(--ink);resize:vertical;}
 </style>
 </head>
 <body>
@@ -62,6 +67,49 @@
     </table>
   {% endif %}
 
+  {% if blocks %}
+    <h2>Copy block-list syntax <span style="font-weight:normal;color:var(--muted);font-size:13px">(placements already flagged “Block”)</span></h2>
+    <p class="note">Paste straight into your AdLib block filter. {{ blocks.site_count }} sites, {{ blocks.app_count }} apps.</p>
+    {% if blocks.site_filter %}
+    <div class="copybox">
+      <div class="copyhead"><span>Sites ({{ blocks.site_count }})</span><button class="copybtn" onclick="cp('bf_site',this)">Copy</button></div>
+      <textarea id="bf_site" readonly rows="3">{{ blocks.site_filter }}</textarea>
+    </div>{% endif %}
+    {% if blocks.app_filter %}
+    <div class="copybox">
+      <div class="copyhead"><span>Apps ({{ blocks.app_count }})</span><button class="copybtn" onclick="cp('bf_app',this)">Copy</button></div>
+      <textarea id="bf_app" readonly rows="3">{{ blocks.app_filter }}</textarea>
+    </div>{% endif %}
+  {% endif %}
+
+  {% if ai %}
+    <h2>AI-recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(new junk not yet flagged)</span></h2>
+    {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
+    {% if ai.site_count or ai.app_count %}
+    <p class="note">Claude reviewed placements that aren’t on your block list yet and flagged {{ ai.site_count }} sites and {{ ai.app_count }} apps as low-quality. Review before applying.
+       <a class="dl" href="/download/ai_recommended_sites.csv">sites CSV</a>
+       <a class="dl" href="/download/ai_recommended_apps.csv">apps CSV</a></p>
+    {% if ai.sites %}
+    <h2 style="font-size:14px">Recommended site blocks</h2>
+    <table><tr><th>Site</th><th>Category</th><th>Why</th><th>Impr</th><th>Spend</th></tr>
+    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    </table>
+    <div class="copybox">
+      <div class="copyhead"><span>Copy recommended site blocks</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
+      <textarea id="ai_site" readonly rows="3">{{ ai.site_filter }}</textarea>
+    </div>{% endif %}
+    {% if ai.apps %}
+    <h2 style="font-size:14px">Recommended app blocks</h2>
+    <table><tr><th>App</th><th>Category</th><th>Why</th><th>Impr</th><th>Spend</th></tr>
+    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    </table>
+    <div class="copybox">
+      <div class="copyhead"><span>Copy recommended app blocks</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
+      <textarea id="ai_app" readonly rows="3">{{ ai.app_filter }}</textarea>
+    </div>{% endif %}
+    {% elif not ai.error %}<p class="note">Claude didn’t flag any additional placements to block — your list looks clean for this window.</p>{% endif %}
+  {% endif %}
+
   {% if insights %}
     {% set s = insights.summary %}
     <div class="cards">
@@ -95,5 +143,14 @@
     {% else %}<p class="note">No line items tripped the high-CTR / zero-conversion threshold.</p>{% endif %}
   {% endif %}
 </div>
+<script>
+  function cp(id, btn){
+    var t=document.getElementById(id);
+    t.select(); t.setSelectionRange(0, t.value.length);
+    var done=function(){ btn.textContent='Copied'; btn.classList.add('done'); setTimeout(function(){btn.textContent='Copy';btn.classList.remove('done');},1500); };
+    if(navigator.clipboard){ navigator.clipboard.writeText(t.value).then(done, function(){document.execCommand('copy');done();}); }
+    else { document.execCommand('copy'); done(); }
+  }
+</script>
 </body>
 </html>
