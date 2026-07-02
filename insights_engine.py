@@ -64,7 +64,10 @@ def by_business_unit(product_df, zero_conv_min_spend=300.0):
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
     g["cost_per_conv"] = np.where(g["conversions"] > 0, g["internal_cost"] / g["conversions"], np.nan)
     g["zero_conversion_waste"] = (g["conversions"] == 0) & (g["internal_cost"] >= zero_conv_min_spend)
-    g["above_1pct"] = g["ctr"] > 0.01
+    # Tiered CTR flag: the more impressions, the lower the CTR bar to flag.
+    g["flagged"] = (((g["impressions"] >= 10000) & (g["ctr"] > 0.05)) |
+                    ((g["impressions"] >= 30000) & (g["ctr"] > 0.03)) |
+                    ((g["impressions"] >= 50000) & (g["ctr"] > 0.01)))
     return g.sort_values("ctr", ascending=False)
 
 

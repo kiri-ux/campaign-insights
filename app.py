@@ -43,7 +43,8 @@ def index():
 def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "exchanges": None, "top": None, "block_impact": None,
-           "pmap": PMAP, "errors": []}
+           "partner": None, "pmap": PMAP, "errors": []}
+    perf_bu = pd.DataFrame()
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -66,15 +67,14 @@ def analyze():
             sf = r["strategy_flags"]
             ctx["insights"] = {
                 "summary": r["summary"],
-                "bu": _fmt(r["by_business_unit"].head(15),
-                          pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
-                          int_cols=["impressions", "clicks", "conversions", "view_throughs"]).to_dict("records"),                "product": _fmt(r["by_product"], pct_cols=["ctr", "click_conv_rate", "pct_of_spend"],
+                "product": _fmt(r["by_product"], pct_cols=["ctr", "click_conv_rate", "pct_of_spend"],
                                 money_cols=["internal_cost"], int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "strategy": _fmt(r["by_strategy"], pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "strategy_flags": _fmt(sf.head(30), pct_cols=["ctr", "type_ctr"], money_cols=["internal_cost"],
                                        int_cols=["impressions", "clicks", "conversions"]).to_dict("records") if len(sf) else [],
             }
+            perf_bu = r["by_business_unit"]  # kept for the combined Partner grid
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
                 _CACHE["client_flags.csv"] = cflag
@@ -97,9 +97,26 @@ def analyze():
             ctx["audit"] = {
                 "summary": a["summary"],
                 "has_conv": a.get("has_conv", False),
-                "by_bu": _fmt(a["leak_by_bu"].head(15), pct_cols=["ctr"], money_cols=["leaked_spend"],
-                              int_cols=["leaked_impressions", "leaked_clicks", "leaked_conversions", "placements"]).to_dict("records"),
             }
+
+            # Combined Partner grid: performance (all delivery) + block-leak exposure,
+            # one row per partner, sortable.
+            leaked = a["leak_by_bu"].rename(columns={"bu": "business_unit",
+                     "leaked_impressions": "blocked_impr", "placements": "blocked_placements"})
+            leaked = leaked[["business_unit", "blocked_impr", "blocked_placements"]]
+            if len(perf_bu):
+                pm = perf_bu.merge(leaked, on="business_unit", how="left")
+                pm[["blocked_impr", "blocked_placements"]] = pm[["blocked_impr", "blocked_placements"]].fillna(0)
+            else:  # insights failed — fall back to leaked-only
+                pm = leaked.assign(impressions=0, clicks=0, ctr=0, conversions=0,
+                                   internal_cost=0, cost_per_conv=float("nan"), flagged=False)
+            _CACHE["partner_summary.csv"] = pm
+            flagged = pm.get("flagged", pd.Series([False] * len(pm))).tolist()
+            prow = _fmt(pm.head(60), pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
+                        int_cols=["impressions", "clicks", "conversions", "blocked_impr", "blocked_placements"]).to_dict("records")
+            for row, fl in zip(prow, flagged):
+                row["flagged"] = bool(fl)
+            ctx["partner"] = prow
 
             # Block impact by product (realism check)
             _CACHE["block_impact_by_product.csv"] = a["block_impact"]

@@ -13,11 +13,11 @@
         --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
   *{box-sizing:border-box}
   body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 20px 40px;}
-  .brandbar{max-width:1360px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
+  .brandbar{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
   .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
   .brandbar .mark span{color:var(--velocity);}
   .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
-  .wrap{max-width:1360px;margin:0 auto;padding-top:14px;}
+  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding-top:14px;}
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
   h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
   h2{font-family:var(--font-head);font-size:16px;margin:28px 0 10px;color:var(--atlas);}
@@ -101,11 +101,24 @@
     </tbody></table>
     <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list below.</p>
 
-    <h2>By partner <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected — sorted by CTR)</span></h2>
-    <table><tr><th>Partner</th><th>Impr</th><th>Clicks</th><th>CTR</th>{% if audit.has_conv %}<th>Conv</th>{% endif %}<th>Spend</th><th>Placements</th></tr>
-    {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_clicks }}</td><td>{{ r.ctr }}</td>{% if audit.has_conv %}<td>{{ r.leaked_conversions }}</td>{% endif %}<td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
-    </table>
-    {% if not audit.has_conv %}<p class="note">Conversions aren't in the Site/App export yet, so this grid shows CTR only. Add a conversions column to those sheets and it will appear here automatically.</p>{% endif %}
+  {% endif %}
+
+  {% if partner %}
+    <h2>Partner <span class="sub">(performance + block-leak exposure — click a column to sort; highlighted = CTR flag)</span> <a class="dl" href="/download/partner_summary.csv">CSV</a></h2>
+    <table class="sortgrid"><thead><tr>
+      <th>Partner</th>
+      <th class="sortable num" data-col="1" data-type="num">Impr</th>
+      <th class="sortable num" data-col="2" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="3" data-type="pct">CTR</th>
+      <th class="sortable num" data-col="4" data-type="num">Conv</th>
+      <th class="sortable num" data-col="5" data-type="money">Cost</th>
+      <th class="sortable num" data-col="6" data-type="money">Cost/conv</th>
+      <th class="sortable num" data-col="7" data-type="num">Blocked impr</th>
+      <th class="sortable num" data-col="8" data-type="num">Blocked plmts</th>
+    </tr></thead><tbody>
+    {% for r in partner %}<tr{% if r.flagged %} class="hot"{% endif %}><td>{{ r.business_unit }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cost_per_conv }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.blocked_placements }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="note">One row per partner: total performance plus how much of their delivery ran on blocked placements. Highlighted rows meet the CTR-vs-volume flag (≥10K impr &amp; CTR &gt;5%, or ≥30K &amp; &gt;3%, or ≥50K &amp; &gt;1%). Showing 60; full list in CSV.</p>
   {% endif %}
 
   {% if block_impact %}
@@ -133,9 +146,9 @@
       <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchange × product</div></div>
       <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchange×product</div></div>
     </div>
-    <p class="note"><strong>Rule:</strong> flags an exchange×product when (a) CTR is ≥ 3× that product's norm at spend ≥ $150 and impressions ≥ 30,000 (abnormally high — invalid-traffic signal), or (b) for click-driven products only (Display, Native, Native Video, Video, Social Mirror), CTR is ≤ ⅓ of the norm at impressions > 30,000 (abnormally low — wasted). CTV/Audio are excluded from the low check since low clicks are expected. The <strong>Conv</strong> column matters: a flagged exchange that's <em>also converting</em> (≥5 conv) is highlighted as "may be worth keeping." {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
+    <p class="note"><strong>Rule:</strong> flags an exchange×product when (a) CTR ≥ 3× the product norm at spend ≥ $150 and impr ≥ 30,000 (abnormally high — invalid-traffic signal), or (b) for click-driven products only (Display, Native Display, Native Video, Video, Social Mirror), CTR ≤ ⅓ of the norm at impr &gt; 30,000 (abnormally low — underdelivering). CTV/Audio are excluded from the low check. <strong>Exchanges converting at ≥ 0.03% conv/impr are never flagged</strong> — they're productive regardless of CTR — so what remains is genuinely worth investigating. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
     <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Conv</th><th>Spend</th><th>Flag</th></tr>
-    {% for r in exchanges.flags %}<tr{% if r.keep_signal %} class="hot"{% endif %}><td>{{ r.exchange }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
+    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
@@ -177,11 +190,6 @@
       {% if s.social_mirror_pct_spend %}<div class="kpi warn"><div class="n">{{ '{:.0%}'.format(s.social_mirror_pct_spend) }}</div><div class="l">Spend on Social Mirror ({{ '{:.1%}'.format(s.social_mirror_conv_rate) }} click&rarr;conv)</div></div>{% endif %}
     </div>
 
-    <h2>Partner impact <a class="dl" href="/download/by_business_unit.csv">download full CSV</a></h2>
-    <table><tr><th>Partner</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
-    {% for r in insights.bu %}<tr{% if r.above_1pct %} class="hot"{% endif %}><td>{{ r.business_unit }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
-    </table><p class="note">Top 15, sorted by CTR; rows over 1% CTR highlighted. Full list in CSV.</p>
-
     <h2>Product impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
     <table><tr><th>Product</th><th>Impr</th><th>CTR</th><th>Click&rarr;conv</th><th>Cost</th><th>% spend</th></tr>
     {% for r in insights.product %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
@@ -208,9 +216,8 @@
     if(navigator.clipboard){ navigator.clipboard.writeText(t.value).then(done, function(){document.execCommand('copy');done();}); }
     else { document.execCommand('copy'); done(); }
   }
-  // Sortable top-placements grid
-  (function(){
-    var t=document.getElementById('topgrid'); if(!t) return;
+  // Sortable grids (top placements + partner)
+  document.querySelectorAll('table#topgrid, table.sortgrid').forEach(function(t){
     var parse=function(txt,type){
       var v=txt.replace(/[$,%\s]/g,'');
       return type==='money'||type==='num'||type==='pct' ? (parseFloat(v)||0) : txt.toLowerCase();
@@ -228,7 +235,7 @@
         asc=!asc; rows.forEach(function(r){tb.appendChild(r);});
       });
     });
-  })();
+  });
 </script>
 </body>
 </html>
