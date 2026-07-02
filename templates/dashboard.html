@@ -13,11 +13,11 @@
         --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
   *{box-sizing:border-box}
   body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 20px 40px;}
-  .brandbar{max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
+  .brandbar{max-width:1360px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
   .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
   .brandbar .mark span{color:var(--velocity);}
   .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
-  .wrap{max-width:1040px;margin:0 auto;padding-top:14px;}
+  .wrap{max-width:1360px;margin:0 auto;padding-top:14px;}
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
   h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
   h2{font-family:var(--font-head);font-size:16px;margin:28px 0 10px;color:var(--atlas);}
@@ -50,6 +50,8 @@
   .tblwrap{overflow-x:auto;}
   tr.hot{background:#fff6e0;}
   tr.hot td{border-bottom-color:#f0e2b8;}
+  tr.coral{background:#ffe9e4;}
+  tr.coral td{border-bottom-color:#f6cfc5;}
   th.sortable{cursor:pointer;user-select:none;}
   th.sortable:hover{color:var(--velocity);}
   th.sortable::after{content:' ⇅';opacity:.4;font-size:10px;}
@@ -85,31 +87,25 @@
        <a class="dl" href="/download/block_leak_by_product.csv">by product</a>
        <a class="dl" href="/download/block_leak_by_strategy.csv">by strategy</a></p>
 
-    <h2>Placements <span style="font-weight:normal;color:var(--muted);font-size:13px">(top 25 by spend)</span></h2>
-    <table><tr><th>Placement</th><th>Type</th><th>Impr</th><th>Clicks</th><th>CTR</th>{% if audit.has_conv %}<th>Conv</th>{% endif %}<th>Spend</th><th>Last served</th><th>Status</th></tr>
-    {% for r in audit.offenders %}<tr><td>{{ r.placement }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>{% if audit.has_conv %}<td>{{ r.conversions }}</td>{% endif %}<td>{{ r.spend }}</td><td>{{ r.last_served }}</td><td>{% if r.still_active == True %}<span style="color:var(--warn);font-weight:bold">still serving</span>{% elif r.still_active == False %}stopped{% else %}—{% endif %}</td></tr>{% endfor %}
-    </table>
+    <h2>Placements <span class="sub">(all delivery — click a column to sort; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = on the recommended-block list)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
+    <table id="topgrid"><thead><tr>
+      <th>Placement</th><th>Type</th><th>Products</th>
+      <th class="sortable num" data-col="3" data-type="num">Impr</th>
+      <th class="sortable num" data-col="4" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="5" data-type="pct">CTR</th>
+      {% if audit.has_conv %}<th class="sortable num" data-col="6" data-type="num">Conv</th>{% endif %}
+      <th class="sortable num" data-col="{% if audit.has_conv %}7{% else %}6{% endif %}" data-type="money">Spend</th>
+      <th>Last served</th>
+    </tr></thead><tbody>
+    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td>{{ r.last_served }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list below.</p>
 
-    <h2>By partner <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected)</span></h2>
+    <h2>By partner <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected — sorted by CTR)</span></h2>
     <table><tr><th>Partner</th><th>Impr</th><th>Clicks</th><th>CTR</th>{% if audit.has_conv %}<th>Conv</th>{% endif %}<th>Spend</th><th>Placements</th></tr>
     {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_clicks }}</td><td>{{ r.ctr }}</td>{% if audit.has_conv %}<td>{{ r.leaked_conversions }}</td>{% endif %}<td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
     </table>
     {% if not audit.has_conv %}<p class="note">Conversions aren't in the Site/App export yet, so this grid shows CTR only. Add a conversions column to those sheets and it will appear here automatically.</p>{% endif %}
-  {% endif %}
-
-  {% if top %}
-    <h2>Top placements <span class="sub">(across sites &amp; apps — click a column to sort)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
-    <table id="topgrid"><thead><tr>
-      <th>Placement</th><th>Type</th><th>Products</th>
-      <th class="sortable" data-col="3" data-type="num">Impr</th>
-      <th class="sortable" data-col="4" data-type="num">Clicks</th>
-      <th class="sortable" data-col="5" data-type="pct">CTR</th>
-      {% if audit and audit.has_conv %}<th class="sortable" data-col="6" data-type="num">Conv</th>{% endif %}
-      <th class="sortable" data-col="{% if audit and audit.has_conv %}7{% else %}6{% endif %}" data-type="money">Spend</th>
-    </tr></thead><tbody>
-    {% for r in top %}<tr><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>{% if audit and audit.has_conv %}<td>{{ r.conversions }}</td>{% endif %}<td>{{ r.spend }}</td></tr>{% endfor %}
-    </tbody></table>
-    <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; colored product pills are abbreviations — hover any pill for the full name.</p>
   {% endif %}
 
   {% if block_impact %}
@@ -137,7 +133,7 @@
       <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchange × product</div></div>
       <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchange×product</div></div>
     </div>
-    <p class="note">Flags compare each exchange's CTR <em>within a product</em> to that product's norm — so an elevated CTR where clicks should be minimal (audio/CTV) is caught. Low CTR / zero conversions is NOT flagged (that's expected on those ad types). The <strong>Conv</strong> column matters: a high-CTR exchange that's <em>also converting</em> may be worth keeping rather than blocking. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
+    <p class="note"><strong>Rule:</strong> flags an exchange×product when (a) CTR is ≥ 3× that product's norm at spend ≥ $150 and impressions ≥ 30,000 (abnormally high — invalid-traffic signal), or (b) for click-driven products only (Display, Native, Native Video, Video, Social Mirror), CTR is ≤ ⅓ of the norm at impressions > 30,000 (abnormally low — wasted). CTV/Audio are excluded from the low check since low clicks are expected. The <strong>Conv</strong> column matters: a flagged exchange that's <em>also converting</em> (≥5 conv) is highlighted as "may be worth keeping." {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
     <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Conv</th><th>Spend</th><th>Flag</th></tr>
     {% for r in exchanges.flags %}<tr{% if r.keep_signal %} class="hot"{% endif %}><td>{{ r.exchange }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
     </table>
@@ -198,8 +194,8 @@
 
     <h2>Strategy flags <span class="sub">(strategy names with abnormally high CTR for their strategy type)</span> <a class="dl" href="/download/strategy_flags.csv">download CSV</a></h2>
     {% if insights.strategy_flags %}
-    <table><tr><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>Why flagged</th></tr>
-    {% for r in insights.strategy_flags %}<tr><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
+    <table><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>Why flagged</th></tr>
+    {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
     </table>
     {% else %}<p class="note">No strategy names tripped the abnormal-CTR threshold.</p>{% endif %}
   {% endif %}

@@ -97,16 +97,9 @@ def analyze():
             ctx["audit"] = {
                 "summary": a["summary"],
                 "has_conv": a.get("has_conv", False),
-                "offenders": _fmt(a["offenders"].head(25), pct_cols=["ctr"], money_cols=["spend"],
-                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "by_bu": _fmt(a["leak_by_bu"].head(15), pct_cols=["ctr"], money_cols=["leaked_spend"],
                               int_cols=["leaked_impressions", "leaked_clicks", "leaked_conversions", "placements"]).to_dict("records"),
             }
-
-            # Top placements — one sortable grid, all metrics (show 100, CSV = full)
-            _CACHE["top_placements.csv"] = a["top_placements"]
-            ctx["top"] = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],
-                              int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
 
             # Block impact by product (realism check)
             _CACHE["block_impact_by_product.csv"] = a["block_impact"]
@@ -119,18 +112,12 @@ def analyze():
                 row["hot"] = hot
             ctx["block_impact"] = bi_rows
 
-            # Copyable AdLib filter syntax for placements ALREADY flagged "Block"
-            bs, bap = a["block_names"]["site"], a["block_names"]["app"]
-            ctx["blocks"] = {
-                "site_count": len(bs), "app_count": len(bap),
-                "site_filter": to_adlib_filter(bs, "site"),
-                "app_filter": to_adlib_filter(bap, "app"),
-            }
-
             # AI runs on every upload now. Merge Claude's picks with the
             # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
             rec = recommend_blocks(a["candidates"])
             rec_site = rec.get("site", pd.DataFrame())
+            if len(rec_site) and "impressions" in rec_site:
+                rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
             rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
             _CACHE["ai_recommended_sites.csv"] = rec_site
             _CACHE["ai_recommended_apps.csv"] = rec_app
@@ -146,6 +133,17 @@ def analyze():
                 "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
                 "app_filter": to_adlib_filter(app_vals, "app") if len(rec_app) else "",
             }
+
+            # Combined Placements grid (all delivery), with a coral flag for any
+            # placement on the recommended-block list.
+            rec_names = set(rec_site.get("name", pd.Series([], dtype=str)).tolist()) \
+                | set(rec_app.get("name", pd.Series([], dtype=str)).tolist())
+            _CACHE["top_placements.csv"] = a["top_placements"]
+            top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],
+                            int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
+            for row in top_rows:
+                row["rec"] = row.get("name") in rec_names
+            ctx["top"] = top_rows
             del a
         except Exception as e:
             ctx["errors"].append(f"Block audit: {e}")

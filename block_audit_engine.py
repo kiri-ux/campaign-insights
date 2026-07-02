@@ -125,7 +125,7 @@ def _rollup(leak, dim):
               placements=("placement", "nunique"))
          .reset_index())
     g["ctr"] = np.where(g["leaked_impressions"] > 0, g["leaked_clicks"] / g["leaked_impressions"], 0)
-    return g.sort_values("leaked_spend", ascending=False)
+    return g.sort_values("ctr", ascending=False)
 
 
 def _stream_sheet(ws):
@@ -260,17 +260,19 @@ def audit_block_leak(path_or_buffer):
     auto_app_blocks = pd.DataFrame(auto_rows, columns=[
         "name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"])
 
-    # Top placements across sites+apps (one grid, all metrics). Apps use the display
-    # name (App ID when the name is NA), so unresolved apps stay distinct.
-    topsrc = cand.copy()
-    topsrc["disp_name"] = topsrc["disp"].where(topsrc["placement_type"] == "app", topsrc["placement"])
-    topsrc = topsrc[~topsrc["disp_name"].str.strip().str.lower().isin({"na", "nan", "none", ""})]
-    topbase = (topsrc.groupby(["disp_name", "placement_type"])
+    # Combined placements grid: ALL delivery (blocked + non-blocked). Apps use the
+    # display name (App ID when the name is NA). Carries last-served + blocked flag.
+    alld = allp[allp["impressions"] > 0].copy()
+    alld["disp_name"] = alld["disp"].where(alld["placement_type"] == "app", alld["placement"])
+    alld = alld[~alld["disp_name"].str.strip().str.lower().isin({"na", "nan", "none", ""})]
+    topbase = (alld.groupby(["disp_name", "placement_type"])
                .agg(products=("product", _products), impressions=("impressions", "sum"),
                     clicks=("clicks", "sum"), conversions=("conversions", "sum"),
-                    spend=("spend", "sum"))
+                    spend=("spend", "sum"), last_served=("served_date", "max"),
+                    blocked=("is_block", "max"))
                .reset_index().rename(columns={"disp_name": "name"}))
     topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
+    topbase["last_served"] = topbase["last_served"].dt.strftime("%Y-%m-%d").fillna("—")
     top_placements = topbase.sort_values("spend", ascending=False).head(300)
 
     # Block-impact by product: if we applied the block list, how much of each

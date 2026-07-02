@@ -99,24 +99,32 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     ep = ep.merge(pnorm, on="product", how="left")
     ep["x_over_norm"] = np.where(ep["product_ctr"] > 0, ep["ctr"] / ep["product_ctr"], 0)
 
-    # Flag ONLY abnormally high CTR for the product (invalid-traffic signal). We do
-    # NOT flag low CTR / zero conversions — low clicks are expected on CTV/audio.
-    # But surface conversions: a high-CTR exchange that's also converting may be
-    # worth KEEPING rather than blocking.
+    # Flag abnormally HIGH CTR for the product (invalid-traffic signal), and — only
+    # for click-driven products — abnormally LOW CTR (wasted/non-engaging). CTV/Audio
+    # are excluded from the low check since low clicks are expected there.
+    LOW_CTR_PRODUCTS = {"Display", "Native Display", "Native Video", "Video", "Social Mirror"}
     material = (ep["spend"] >= min_spend) & (ep["impressions"] >= min_impr)
     hi_ctr = material & (ep["x_over_norm"] >= ctr_multiple)
-    flags = ep[hi_ctr].copy()
+    low_ctr = (ep["impressions"] > 30000) & (ep["product"].isin(LOW_CTR_PRODUCTS)) \
+        & (ep["product_ctr"] > 0) & (ep["x_over_norm"] <= (1.0 / ctr_multiple))
+    ep["_hi"] = hi_ctr
+    ep["_lo"] = low_ctr & ~hi_ctr
+    flags = ep[ep["_hi"] | ep["_lo"]].copy()
 
     def _flag_text(r):
-        base = (f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
-                f"— abnormal for this ad type")
-        if r["conversions"] >= 5:
-            return base + f" — BUT {int(r['conversions'])} conversions, may be worth keeping"
-        return base + " — few/no conversions, likely invalid"
+        conv_note = (f" — BUT {int(r['conversions'])} conversions, may be worth keeping"
+                     if r["conversions"] >= 5 else "")
+        if r["_hi"]:
+            base = (f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
+                    f"— abnormally HIGH for this ad type")
+            return base + (conv_note or " — few/no conversions, likely invalid")
+        base = (f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.2f}× the {r['product']} norm "
+                f"— abnormally LOW / likely wasted")
+        return base + conv_note
     if len(flags):
         flags["flag"] = flags.apply(_flag_text, axis=1)
         flags["keep_signal"] = flags["conversions"] >= 5
-    flags = flags.sort_values("x_over_norm", ascending=False)
+    flags = flags.sort_values("spend", ascending=False)
 
     concentration = g.sort_values("spend", ascending=False).head(1)
     top_share = float(concentration["pct_of_spend"].iloc[0]) if len(concentration) else 0
