@@ -1,24 +1,31 @@
 """
 ai_blocks.py
-Two things:
-1. to_adlib_filter(): turn a list of placement names into AdLib filter syntax:
+1. to_adlib_filter(): turn placement names into AdLib filter syntax:
      OR {Site Domain}="a.com" OR {Site Domain}="b.com" ...
      OR {App Name}="App One" OR {App Name}="App Two" ...
 2. recommend_blocks(): send candidate placements (NOT already flagged Block) to
    Claude and get back the low-quality ones that should be added to the block list.
 
-The Claude call uses the standard /v1/messages endpoint via urllib (no extra
-dependency). It runs only when ANTHROPIC_API_KEY is set, so the rest of the app
-works without it. Model is overridable via ANTHROPIC_MODEL.
+Claude calls go out in PARALLEL (thread pool) and the candidate count is capped,
+so the whole pass finishes well under the gunicorn request timeout even stacked
+on top of the workbook parse. Runs only when ANTHROPIC_API_KEY is set.
+
+Tunable via env vars (no redeploy needed): ANTHROPIC_MODEL, AI_MAX_CANDIDATES,
+AI_BATCH_SIZE, AI_MAX_WORKERS.
 """
 import os
 import json
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+MAX_CANDIDATES = int(os.environ.get("AI_MAX_CANDIDATES", "200"))
+BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "50"))
+MAX_WORKERS = int(os.environ.get("AI_MAX_WORKERS", "6"))
 FIELD = {"site": "Site Domain", "app": "App Name"}
+_COLS = ["name", "impressions", "spend", "category", "reason"]
 
 
 def to_adlib_filter(names, kind):
@@ -44,7 +51,7 @@ def _call_claude(prompt, api_key, model, max_tokens=4000):
         "https://api.anthropic.com/v1/messages", data=body,
         headers={"content-type": "application/json", "x-api-key": api_key,
                  "anthropic-version": "2023-06-01"})
-    with urllib.request.urlopen(req, timeout=90) as r:
+    with urllib.request.urlopen(req, timeout=60) as r:
         data = json.loads(r.read())
     return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
@@ -84,26 +91,47 @@ def _classify_batch(rows, kind, api_key, model):
     return out
 
 
-def recommend_blocks(candidates, api_key=None, model=None, batch_size=60, max_candidates=300):
+def recommend_blocks(candidates, api_key=None, model=None,
+                     batch_size=None, max_candidates=None, max_workers=None):
     """candidates: {'site': df[name,impressions,spend], 'app': df[...]}
-    Returns {'site': df, 'app': df, 'error': str|None} of recommended blocks."""
+    Returns {'site': df, 'app': df, 'error': str|None} of recommended blocks.
+
+    All batches (both kinds) are dispatched to a thread pool so total wall time is
+    roughly one batch's latency, not the sum of every call."""
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     model = model or DEFAULT_MODEL
+    batch_size = batch_size or BATCH_SIZE
+    max_candidates = max_candidates or MAX_CANDIDATES
+    max_workers = max_workers or MAX_WORKERS
     if not api_key:
-        return {"site": pd.DataFrame(), "app": pd.DataFrame(),
-                "error": "ANTHROPIC_API_KEY is not set on the service — add it in Render → Environment."}
-    result = {"error": None}
+        return {"site": pd.DataFrame(columns=_COLS), "app": pd.DataFrame(columns=_COLS),
+                "error": "ANTHROPIC_API_KEY is not set on the service — add it in Render -> Environment."}
+
+    tasks = []  # (kind, rows)
     for kind, df in candidates.items():
         rows = df.head(max_candidates).to_dict("records")
-        flagged = []
-        try:
-            for i in range(0, len(rows), batch_size):
-                flagged += _classify_batch(rows[i:i + batch_size], kind, api_key, model)
-        except urllib.error.HTTPError as e:
-            result["error"] = f"Claude API error ({e.code}) — check the API key and model name."
-        except Exception as e:
-            result["error"] = f"Claude API call failed: {e}"
-        result[kind] = (pd.DataFrame(flagged, columns=["name", "impressions", "spend", "category", "reason"])
+        for i in range(0, len(rows), batch_size):
+            tasks.append((kind, rows[i:i + batch_size]))
+
+    flagged = {"site": [], "app": []}
+    error = None
+    if tasks:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(_classify_batch, batch, kind, api_key, model): kind
+                    for kind, batch in tasks}
+            for fu in as_completed(futs):
+                kind = futs[fu]
+                try:
+                    flagged[kind] += fu.result()
+                except urllib.error.HTTPError as e:
+                    error = f"Claude API error ({e.code}) — check the API key and model name."
+                except Exception as e:
+                    error = f"Claude API call failed: {e}"
+
+    result = {"error": error}
+    for kind in ("site", "app"):
+        rows = flagged.get(kind, [])
+        result[kind] = (pd.DataFrame(rows, columns=_COLS)
                         .sort_values("spend", ascending=False).reset_index(drop=True)
-                        if flagged else pd.DataFrame(columns=["name", "impressions", "spend", "category", "reason"]))
+                        if rows else pd.DataFrame(columns=_COLS))
     return result
