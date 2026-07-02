@@ -68,8 +68,7 @@ def analyze():
                 "summary": r["summary"],
                 "bu": _fmt(r["by_business_unit"].head(15),
                           pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
-                          int_cols=["impressions", "clicks", "conversions", "view_throughs"]).to_dict("records"),
-                "product": _fmt(r["by_product"], pct_cols=["ctr", "click_conv_rate", "pct_of_spend"],
+                          int_cols=["impressions", "clicks", "conversions", "view_throughs"]).to_dict("records"),                "product": _fmt(r["by_product"], pct_cols=["ctr", "click_conv_rate", "pct_of_spend"],
                                 money_cols=["internal_cost"], int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "strategy": _fmt(r["by_strategy"], pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
@@ -79,7 +78,7 @@ def analyze():
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
                 _CACHE["client_flags.csv"] = cflag
-                ctx["clients"] = _fmt(cflag.head(30), pct_cols=["ctr", "product_ctr"],
+                ctx["clients"] = _fmt(cflag.head(50), pct_cols=["ctr", "product_ctr"],
                                       money_cols=["internal_cost"],
                                       int_cols=["impressions", "clicks"]).to_dict("records")
             del r
@@ -104,9 +103,9 @@ def analyze():
                               int_cols=["leaked_impressions", "leaked_clicks", "leaked_conversions", "placements"]).to_dict("records"),
             }
 
-            # Top placements — one sortable grid, all metrics
+            # Top placements — one sortable grid, all metrics (show 100, CSV = full)
             _CACHE["top_placements.csv"] = a["top_placements"]
-            ctx["top"] = _fmt(a["top_placements"], pct_cols=["ctr"], money_cols=["spend"],
+            ctx["top"] = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],
                               int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
 
             # Block impact by product (realism check)
@@ -115,7 +114,7 @@ def analyze():
             hot_flags = (bimp["pct_impr_blocked"] >= 0.5).tolist()
             bi_rows = _fmt(bimp, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
                            money_cols=["total_spend", "blocked_spend"],
-                           int_cols=["total_impr", "blocked_impr", "blocked_placements"]).to_dict("records")
+                           int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
             for row, hot in zip(bi_rows, hot_flags):
                 row["hot"] = hot
             ctx["block_impact"] = bi_rows
@@ -159,8 +158,8 @@ def analyze():
                 _CACHE["exchange_table.csv"] = ex["table"]
                 ctx["exchanges"] = {
                     "summary": ex["summary"],
-                    "flags": _fmt(ex["flags"].head(20), pct_cols=["ctr", "pct_of_spend"],
-                                  money_cols=["spend"], int_cols=["impressions", "clicks"]).to_dict("records"),
+                    "flags": _fmt(ex["flags"].head(20), pct_cols=["ctr", "product_ctr"],
+                                  money_cols=["spend"], int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                     "top": _fmt(ex["table"].head(12), pct_cols=["ctr", "pct_of_spend"],
                                 money_cols=["spend"], int_cols=["impressions", "clicks"]).to_dict("records"),
                 }

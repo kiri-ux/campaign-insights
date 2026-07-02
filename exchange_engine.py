@@ -67,15 +67,16 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     prod = _find(df.columns, ("product",))
     imp = _find(df.columns, ("impression",))
     clk = _find(df.columns, ("click",))
-    conv = _find(df.columns, ("click", "conversion"), ("conversion",), ("conv",))
+    conv_cols = [c for c in df.columns if "conversion" in str(c).lower()]
     spd = _find(df.columns, ("billable", "spend"), ("spend",), ("cost",))
     if not ex:
         return None
-    for c in (imp, clk, conv, spd):
+    for c in ([imp, clk, spd] + conv_cols):
         if c:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    df["_conv"] = sum(df[c] for c in conv_cols) if conv_cols else 0
     df["_prod"] = df[prod].astype(str) if prod else "(all)"
-    has_conv = bool(conv)
+    has_conv = bool(conv_cols)
 
     # Exchange totals (for the overview table + concentration)
     g = (df.groupby(ex)
@@ -87,9 +88,8 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     book_ctr = (g["clicks"].sum() / g["impressions"].sum()) if g["impressions"].sum() else 0
 
     # PRODUCT-AWARE flags: exchange x product vs that product's own CTR norm.
-    agg = {"impressions": (imp, "sum"), "clicks": (clk, "sum"), "spend": (spd, "sum")}
-    if conv:
-        agg["conversions"] = (conv, "sum")
+    agg = {"impressions": (imp, "sum"), "clicks": (clk, "sum"), "spend": (spd, "sum"),
+           "conversions": ("_conv", "sum")}
     ep = (df.groupby([ex, "_prod"]).agg(**agg)
           .reset_index().rename(columns={ex: "exchange", "_prod": "product"}))
     ep["ctr"] = np.where(ep["impressions"] > 0, ep["clicks"] / ep["impressions"], 0)
@@ -99,17 +99,24 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     ep = ep.merge(pnorm, on="product", how="left")
     ep["x_over_norm"] = np.where(ep["product_ctr"] > 0, ep["ctr"] / ep["product_ctr"], 0)
 
+    # Flag ONLY abnormally high CTR for the product (invalid-traffic signal). We do
+    # NOT flag low CTR / zero conversions — low clicks are expected on CTV/audio.
+    # But surface conversions: a high-CTR exchange that's also converting may be
+    # worth KEEPING rather than blocking.
     material = (ep["spend"] >= min_spend) & (ep["impressions"] >= min_impr)
     hi_ctr = material & (ep["x_over_norm"] >= ctr_multiple)
-    ep["flag"] = ""
-    ep.loc[hi_ctr, "flag"] = ep.loc[hi_ctr].apply(
-        lambda r: f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
-                  f"— abnormal for this ad type", axis=1)
-    if conv:  # low-conversion flag when conversion data exists
-        low_conv = material & (ep["conversions"] == 0) & (ep["spend"] >= min_spend * 2)
-        ep.loc[low_conv & (ep["flag"] == ""), "flag"] = ep.loc[low_conv & (ep["flag"] == "")].apply(
-            lambda r: f"${r['spend']:,.0f} spent, 0 conversions on {r['product']}", axis=1)
-    flags = ep[ep["flag"] != ""].sort_values("spend", ascending=False)
+    flags = ep[hi_ctr].copy()
+
+    def _flag_text(r):
+        base = (f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
+                f"— abnormal for this ad type")
+        if r["conversions"] >= 5:
+            return base + f" — BUT {int(r['conversions'])} conversions, may be worth keeping"
+        return base + " — few/no conversions, likely invalid"
+    if len(flags):
+        flags["flag"] = flags.apply(_flag_text, axis=1)
+        flags["keep_signal"] = flags["conversions"] >= 5
+    flags = flags.sort_values("x_over_norm", ascending=False)
 
     concentration = g.sort_values("spend", ascending=False).head(1)
     top_share = float(concentration["pct_of_spend"].iloc[0]) if len(concentration) else 0

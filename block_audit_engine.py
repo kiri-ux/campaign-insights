@@ -95,10 +95,19 @@ def _normalize(df, c):
     out["impressions"] = pd.to_numeric(df[c["impr"]], errors="coerce").fillna(0) if c["impr"] else 0
     out["clicks"] = pd.to_numeric(df[c["clicks"]], errors="coerce").fillna(0) if c["clicks"] else 0
     out["spend"] = pd.to_numeric(df[c["spend"]], errors="coerce").fillna(0) if c["spend"] else 0
-    out["conversions"] = pd.to_numeric(df[c["conv"]], errors="coerce").fillna(0) if c.get("conv") else 0
-    out["_has_conv"] = bool(c.get("conv"))
+    conv_cols = [col for col in df.columns if "conversion" in str(col).lower()]
+    if conv_cols:
+        out["conversions"] = sum(pd.to_numeric(df[col], errors="coerce").fillna(0) for col in conv_cols)
+        out["_has_conv"] = True
+    else:
+        out["conversions"] = 0
+        out["_has_conv"] = False
     out["served_date"] = pd.to_datetime(df[c["date"]], errors="coerce") if c["date"] else pd.NaT
     out["app_id"] = df[c["app_id"]].astype(str) if c.get("app_id") else out["placement"]
+    # Display name: real app name, or fall back to App ID when the name is NA/blank
+    # (so unresolved apps stay distinct by ID instead of collapsing into one "NA").
+    _bad = out["placement"].str.strip().str.lower().isin({"na", "nan", "none", "", "(not set)"})
+    out["disp"] = out["placement"].where(~_bad, out["app_id"])
     for dim in ("bu", "client", "product", "strategy"):
         out[dim] = df[c[dim]].astype(str) if c[dim] else "(not in export)"
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
@@ -251,14 +260,18 @@ def audit_block_leak(path_or_buffer):
     auto_app_blocks = pd.DataFrame(auto_rows, columns=[
         "name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"])
 
-    # Top placements across sites+apps (one grid, all metrics)
-    topbase = (cand.groupby(["placement", "placement_type"])
+    # Top placements across sites+apps (one grid, all metrics). Apps use the display
+    # name (App ID when the name is NA), so unresolved apps stay distinct.
+    topsrc = cand.copy()
+    topsrc["disp_name"] = topsrc["disp"].where(topsrc["placement_type"] == "app", topsrc["placement"])
+    topsrc = topsrc[~topsrc["disp_name"].str.strip().str.lower().isin({"na", "nan", "none", ""})]
+    topbase = (topsrc.groupby(["disp_name", "placement_type"])
                .agg(products=("product", _products), impressions=("impressions", "sum"),
                     clicks=("clicks", "sum"), conversions=("conversions", "sum"),
                     spend=("spend", "sum"))
-               .reset_index().rename(columns={"placement": "name"}))
+               .reset_index().rename(columns={"disp_name": "name"}))
     topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
-    top_placements = topbase.sort_values("spend", ascending=False).head(200)
+    top_placements = topbase.sort_values("spend", ascending=False).head(300)
 
     # Block-impact by product: if we applied the block list, how much of each
     # product's total serve would be excluded? (Realism check — blocking 80% of a
@@ -273,7 +286,8 @@ def audit_block_leak(path_or_buffer):
              "Native Video", "Social Mirror CTV", "Online Audio", "Audio"}
     imp_df = allp[allp["product"].isin(VALID)].copy()
     tot = imp_df.groupby("product").agg(total_impr=("impressions", "sum"),
-                                        total_spend=("spend", "sum")).reset_index()
+                                        total_spend=("spend", "sum"),
+                                        total_placements=("placement", "nunique")).reset_index()
     blk = (imp_df[imp_df["would_block"]].groupby("product")
            .agg(blocked_impr=("impressions", "sum"), blocked_spend=("spend", "sum"),
                 blocked_placements=("placement", "nunique")).reset_index())

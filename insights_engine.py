@@ -64,7 +64,8 @@ def by_business_unit(product_df, zero_conv_min_spend=300.0):
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
     g["cost_per_conv"] = np.where(g["conversions"] > 0, g["internal_cost"] / g["conversions"], np.nan)
     g["zero_conversion_waste"] = (g["conversions"] == 0) & (g["internal_cost"] >= zero_conv_min_spend)
-    return g.sort_values("internal_cost", ascending=False)
+    g["above_1pct"] = g["ctr"] > 0.01
+    return g.sort_values("ctr", ascending=False)
 
 
 def by_product(product_df):
@@ -98,7 +99,7 @@ def by_strategy(strategy_df):
     return g.sort_values("ctr", ascending=False)
 
 
-def strategy_flags(strategy_df, min_impr=20000, ctr_multiple=3.0, ctr_floor=0.008):
+def strategy_flags(strategy_df, min_impr=5000, ctr_multiple=3.0, ctr_floor=0.005):
     """Flag individual STRATEGY NAMES (line items) whose CTR is abnormally high for
     their strategy type — the 'looks great on paper' anomalies, per strategy."""
     if "Strategy Name" not in strategy_df.columns or "Strategy Type" not in strategy_df.columns:
