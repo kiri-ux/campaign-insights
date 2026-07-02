@@ -12,8 +12,14 @@ Business Unit (partner), Client, Product, and Strategy.
 """
 import pandas as pd
 import numpy as np
+from openpyxl import load_workbook
 
 SENTINELS = {"block", "blocked"}
+
+# Column-name token groups we need to pull when streaming the big sheets.
+NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("impression",),
+               ("click",), ("billable", "spend"), ("spend",), ("cost",), ("date",),
+               ("business", "unit"), ("client",), ("product",), ("strategy",)]
 
 SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
@@ -74,21 +80,53 @@ def _rollup(leak, dim):
     return g
 
 
+def _stream_sheet(ws):
+    """Stream a worksheet in read_only mode, pulling only the columns we need.
+    Keeps peak memory low (never materializes the full sheet) and avoids loading
+    the whole 40MB workbook. Returns (slim_df, row_count)."""
+    it = ws.iter_rows(values_only=True)
+    try:
+        header = next(it)
+    except StopIteration:
+        return None, 0
+    wanted = {}
+    for i, h in enumerate(header):
+        if h is None:
+            continue
+        hl = str(h).lower()
+        if any(all(t in hl for t in grp) for grp in NEED_TOKENS):
+            wanted[str(h)] = i
+    if not wanted:
+        return None, 0
+    data = {name: [] for name in wanted}
+    n = 0
+    for r in it:
+        for name, i in wanted.items():
+            data[name].append(r[i] if i < len(r) else None)
+        n += 1
+    return pd.DataFrame(data), n
+
+
 def audit_block_leak(path_or_buffer):
-    xls = pd.ExcelFile(path_or_buffer)
+    wb = load_workbook(path_or_buffer, read_only=True, data_only=True)
     frames = []
     truncation = {}
-    for sheet, cfg in SHEET_CONFIG.items():
-        if sheet not in xls.sheet_names:
-            continue
-        df = pd.read_excel(xls, sheet_name=sheet)
-        c = _detect(df, cfg["kind"])
-        if not c["final"]:
-            continue
-        norm = _normalize(df, c)
-        norm["placement_type"] = cfg["kind"]
-        frames.append(norm)
-        truncation[sheet] = len(df) >= 100000  # Tap export row cap heuristic
+    try:
+        for sheet, cfg in SHEET_CONFIG.items():
+            if sheet not in wb.sheetnames:
+                continue
+            df, nrows = _stream_sheet(wb[sheet])
+            if df is None:
+                continue
+            c = _detect(df, cfg["kind"])
+            if not c["final"]:
+                continue
+            norm = _normalize(df, c)
+            norm["placement_type"] = cfg["kind"]
+            frames.append(norm)
+            truncation[sheet] = nrows >= 100000  # Tap export row cap heuristic
+    finally:
+        wb.close()
 
     if not frames:
         raise ValueError("No Site/App Overview sheets with a 'Final ... Name' column found.")
