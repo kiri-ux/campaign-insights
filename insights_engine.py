@@ -79,7 +79,9 @@ def by_product(product_df):
     g["click_conv_rate"] = np.where(g["clicks"] > 0, g["conversions"] / g["clicks"], 0)
     total = g["internal_cost"].sum() or 1
     g["pct_of_spend"] = g["internal_cost"] / total
-    return g.sort_values("internal_cost", ascending=False)
+    book_ctr = (g["clicks"].sum() / g["impressions"].sum()) if g["impressions"].sum() else 0
+    g["above_norm"] = g["ctr"] > book_ctr
+    return g.sort_values("ctr", ascending=False)
 
 
 def by_strategy(strategy_df):
@@ -91,18 +93,34 @@ def by_strategy(strategy_df):
          .reset_index().rename(columns={"Strategy Type": "strategy_type"}))
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
     g["cost_per_conv"] = np.where(g["conversions"] > 0, g["internal_cost"] / g["conversions"], np.nan)
-    return g.sort_values("internal_cost", ascending=False)
+    book_ctr = (g["clicks"].sum() / g["impressions"].sum()) if g["impressions"].sum() else 0
+    g["above_norm"] = g["ctr"] > book_ctr
+    return g.sort_values("ctr", ascending=False)
 
 
-def plausibility_flags(strategy_df, ctr_ceiling=0.03, min_impr=20000):
-    """High CTR + zero conversions = the 'looks great on paper, no outcome' pattern."""
+def strategy_flags(strategy_df, min_impr=20000, ctr_multiple=3.0, ctr_floor=0.008):
+    """Flag individual STRATEGY NAMES (line items) whose CTR is abnormally high for
+    their strategy type — the 'looks great on paper' anomalies, per strategy."""
+    if "Strategy Name" not in strategy_df.columns or "Strategy Type" not in strategy_df.columns:
+        return pd.DataFrame()
+    bu = _bu_col(strategy_df)
     df = strategy_df.copy()
-    df["ctr"] = np.where(df["Impressions"] > 0, df["Clicks"] / df["Impressions"], 0)
-    flag = df[(df["ctr"] > ctr_ceiling) & (df["Click Conversions"] == 0) & (df["Impressions"] > min_impr)]
-    bu = _bu_col(df)
-    keep = [bu, "Strategy Name", "Impressions", "Clicks", "ctr", "Internal Cost"]
-    keep = [c for c in keep if c in flag.columns]
-    return flag[keep].sort_values("ctr", ascending=False)
+    g = (df.groupby([bu, "Client", "Product", "Strategy Type", "Strategy Name"], dropna=False)
+         .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
+              conversions=("Click Conversions", "sum"), internal_cost=("Internal Cost", "sum"))
+         .reset_index().rename(columns={bu: "business_unit"}))
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    norms = (g.groupby("Strategy Type").apply(
+        lambda x: (x["clicks"].sum() / x["impressions"].sum()) if x["impressions"].sum() else 0)
+        .rename("type_ctr").reset_index())
+    g = g.merge(norms, on="Strategy Type", how="left")
+    g["x_over_norm"] = np.where(g["type_ctr"] > 0, g["ctr"] / g["type_ctr"], 0)
+    flagged = g[(g["impressions"] >= min_impr) & (g["ctr"] >= ctr_floor) &
+                (g["x_over_norm"] >= ctr_multiple)].copy()
+    flagged["reason"] = flagged.apply(
+        lambda r: f"CTR {r['ctr']*100:.2f}% is {r['x_over_norm']:.1f}× the {r['Strategy Type']} norm "
+                  f"({r['type_ctr']*100:.2f}%)", axis=1)
+    return flagged.sort_values("x_over_norm", ascending=False)
 
 
 def client_flags(product_df, strategy_df, min_impr=20000, ctr_multiple=3.0, ctr_floor=0.008):
@@ -149,7 +167,7 @@ def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
     bu = by_business_unit(prod, zero_conv_min_spend)
     pr = by_product(prod)
     st = by_strategy(strat) if strat is not None else pd.DataFrame()
-    fl = plausibility_flags(strat) if strat is not None else pd.DataFrame()
+    fl = strategy_flags(strat) if strat is not None else pd.DataFrame()
 
     zero = bu[bu["zero_conversion_waste"]]
     sm = pr[pr["product"] == "Social Mirror"]
@@ -162,13 +180,13 @@ def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
         "zero_conv_spend": float(zero["internal_cost"].sum()),
         "social_mirror_pct_spend": float(sm["pct_of_spend"].iloc[0]) if len(sm) else None,
         "social_mirror_conv_rate": float(sm["click_conv_rate"].iloc[0]) if len(sm) else None,
-        "plausibility_flag_count": int(len(fl)),
+        "strategy_flag_count": int(len(fl)),
     }
     return {
         "summary": summary,
         "by_business_unit": bu,
         "by_product": pr,
         "by_strategy": st,
-        "plausibility_flags": fl,
+        "strategy_flags": fl,
         "client_flags": client_flags(prod, strat),
     }

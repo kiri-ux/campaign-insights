@@ -14,6 +14,9 @@ from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
 from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks
+from product_map import build_pmap
+
+PMAP = build_pmap()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40 MB
@@ -39,7 +42,8 @@ def index():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
-           "clients": None, "exchanges": None, "top": None, "errors": []}
+           "clients": None, "exchanges": None, "top": None, "block_impact": None,
+           "pmap": PMAP, "errors": []}
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -58,7 +62,8 @@ def analyze():
             _CACHE["by_business_unit.csv"] = r["by_business_unit"]
             _CACHE["by_product.csv"] = r["by_product"]
             _CACHE["by_strategy.csv"] = r["by_strategy"]
-            _CACHE["plausibility_flags.csv"] = r["plausibility_flags"]
+            _CACHE["strategy_flags.csv"] = r["strategy_flags"]
+            sf = r["strategy_flags"]
             ctx["insights"] = {
                 "summary": r["summary"],
                 "bu": _fmt(r["by_business_unit"].head(15),
@@ -68,8 +73,8 @@ def analyze():
                                 money_cols=["internal_cost"], int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "strategy": _fmt(r["by_strategy"], pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
-                "flags": _fmt(r["plausibility_flags"], pct_cols=["ctr"], money_cols=["Internal Cost"],
-                              int_cols=["Impressions", "Clicks"]).to_dict("records"),
+                "strategy_flags": _fmt(sf.head(30), pct_cols=["ctr", "type_ctr"], money_cols=["internal_cost"],
+                                       int_cols=["impressions", "clicks", "conversions"]).to_dict("records") if len(sf) else [],
             }
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
@@ -92,21 +97,28 @@ def analyze():
             _CACHE["block_leak_by_strategy.csv"] = a["leak_by_strategy"]
             ctx["audit"] = {
                 "summary": a["summary"],
-                "offenders": _fmt(a["offenders"].head(25), money_cols=["spend"],
-                                  int_cols=["impressions", "clicks"]).to_dict("records"),
+                "has_conv": a.get("has_conv", False),
+                "offenders": _fmt(a["offenders"].head(25), pct_cols=["ctr"], money_cols=["spend"],
+                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "by_bu": _fmt(a["leak_by_bu"].head(15), pct_cols=["ctr"], money_cols=["leaked_spend"],
-                              int_cols=["leaked_impressions", "leaked_clicks", "placements"]).to_dict("records"),
+                              int_cols=["leaked_impressions", "leaked_clicks", "leaked_conversions", "placements"]).to_dict("records"),
             }
 
-            # Top placements by spend / impressions / clicks
-            tp = a["top_placements"]
-            for k in ("by_spend", "by_impr", "by_clicks"):
-                _CACHE[f"top_placements_{k}.csv"] = tp[k]
-            ctx["top"] = {
-                k: _fmt(tp[k], pct_cols=["ctr"], money_cols=["spend"],
-                        int_cols=["impressions", "clicks"]).to_dict("records")
-                for k in ("by_spend", "by_impr", "by_clicks")
-            }
+            # Top placements — one sortable grid, all metrics
+            _CACHE["top_placements.csv"] = a["top_placements"]
+            ctx["top"] = _fmt(a["top_placements"], pct_cols=["ctr"], money_cols=["spend"],
+                              int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
+
+            # Block impact by product (realism check)
+            _CACHE["block_impact_by_product.csv"] = a["block_impact"]
+            bimp = a["block_impact"].copy()
+            hot_flags = (bimp["pct_impr_blocked"] >= 0.5).tolist()
+            bi_rows = _fmt(bimp, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
+                           money_cols=["total_spend", "blocked_spend"],
+                           int_cols=["total_impr", "blocked_impr", "blocked_placements"]).to_dict("records")
+            for row, hot in zip(bi_rows, hot_flags):
+                row["hot"] = hot
+            ctx["block_impact"] = bi_rows
 
             # Copyable AdLib filter syntax for placements ALREADY flagged "Block"
             bs, bap = a["block_names"]["site"], a["block_names"]["app"]

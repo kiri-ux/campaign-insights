@@ -41,10 +41,20 @@
   .copybtn{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;}
   .copybtn.done{background:#177245;}
   textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfaf5;color:var(--ink);resize:vertical;}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin:1px 2px 1px 0;letter-spacing:.02em;cursor:default;}
+  tr.hot{background:#fff6e0;}
+  tr.hot td{border-bottom-color:#f0e2b8;}
+  th.sortable{cursor:pointer;user-select:none;}
+  th.sortable:hover{color:var(--velocity);}
+  th.sortable::after{content:' ⇅';opacity:.4;font-size:10px;}
+  .btnrow{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;}
+  .fbtn{background:#fff;border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);font-family:var(--font-body);}
+  .fbtn.active{background:var(--velocity);color:#fff;border-color:var(--velocity);}
 </style>
 </head>
 <body>
 <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">Placement &amp; Impact Insights</span></div>
+{% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 <div class="wrap">
   <a class="back" href="/">&larr; New analysis</a>
   <h1>Placement &amp; Impact Insights</h1>
@@ -69,46 +79,45 @@
        <a class="dl" href="/download/block_leak_by_strategy.csv">by strategy</a></p>
 
     <h2>Placements <span style="font-weight:normal;color:var(--muted);font-size:13px">(top 25 by spend)</span></h2>
-    <table><tr><th>Placement</th><th>Type</th><th>Impr</th><th>Clicks</th><th>Spend</th><th>Last served</th><th>Status</th></tr>
-    {% for r in audit.offenders %}<tr><td>{{ r.placement }}</td><td>{{ r.placement_type }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td><td>{{ r.last_served }}</td><td>{% if r.still_active == True %}<span style="color:var(--warn);font-weight:bold">still serving</span>{% elif r.still_active == False %}stopped{% else %}—{% endif %}</td></tr>{% endfor %}
+    <table><tr><th>Placement</th><th>Type</th><th>Impr</th><th>Clicks</th><th>CTR</th>{% if audit.has_conv %}<th>Conv</th>{% endif %}<th>Spend</th><th>Last served</th><th>Status</th></tr>
+    {% for r in audit.offenders %}<tr><td>{{ r.placement }}</td><td>{{ r.placement_type }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>{% if audit.has_conv %}<td>{{ r.conversions }}</td>{% endif %}<td>{{ r.spend }}</td><td>{{ r.last_served }}</td><td>{% if r.still_active == True %}<span style="color:var(--warn);font-weight:bold">still serving</span>{% elif r.still_active == False %}stopped{% else %}—{% endif %}</td></tr>{% endfor %}
     </table>
 
     <h2>By business unit <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected)</span></h2>
-    <table><tr><th>Business unit</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th><th>Placements</th></tr>
-    {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
+    <table><tr><th>Business unit</th><th>Impr</th><th>Clicks</th><th>CTR</th>{% if audit.has_conv %}<th>Conv</th>{% endif %}<th>Spend</th><th>Placements</th></tr>
+    {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_clicks }}</td><td>{{ r.ctr }}</td>{% if audit.has_conv %}<td>{{ r.leaked_conversions }}</td>{% endif %}<td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
     </table>
-    <p class="note">Conversions aren't available at placement grain (the Site/App sheets don't carry them), so this grid shows CTR; per-client conversions live in the performance grids above.</p>
+    {% if not audit.has_conv %}<p class="note">Conversions aren't in the Site/App export yet, so this grid shows CTR only. Add a conversions column to those sheets and it will appear here automatically.</p>{% endif %}
   {% endif %}
 
   {% if top %}
-    <h2>Top placements <span class="sub">(across sites &amp; apps — by spend, impressions, clicks)</span></h2>
-    <div style="display:flex;flex-wrap:wrap;gap:18px;">
-      <div style="flex:1;min-width:320px;">
-        <h2 style="font-size:14px">By spend <a class="dl" href="/download/top_placements_by_spend.csv">CSV</a></h2>
-        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Spend</th></tr>
-        {% for r in top.by_spend %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
-        </table>
-      </div>
-      <div style="flex:1;min-width:320px;">
-        <h2 style="font-size:14px">By impressions <a class="dl" href="/download/top_placements_by_impr.csv">CSV</a></h2>
-        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Impr</th></tr>
-        {% for r in top.by_impr %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.impressions }}</td></tr>{% endfor %}
-        </table>
-      </div>
-      <div style="flex:1;min-width:320px;">
-        <h2 style="font-size:14px">By clicks <a class="dl" href="/download/top_placements_by_clicks.csv">CSV</a></h2>
-        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Clicks</th><th>CTR</th></tr>
-        {% for r in top.by_clicks %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td></tr>{% endfor %}
-        </table>
-      </div>
-    </div>
+    <h2>Top placements <span class="sub">(across sites &amp; apps — click a column to sort)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
+    <table id="topgrid"><thead><tr>
+      <th>Placement</th><th>Type</th><th>Products</th>
+      <th class="sortable" data-col="3" data-type="num">Impr</th>
+      <th class="sortable" data-col="4" data-type="num">Clicks</th>
+      <th class="sortable" data-col="5" data-type="pct">CTR</th>
+      {% if audit and audit.has_conv %}<th class="sortable" data-col="6" data-type="num">Conv</th>{% endif %}
+      <th class="sortable" data-col="{% if audit and audit.has_conv %}7{% else %}6{% endif %}" data-type="money">Spend</th>
+    </tr></thead><tbody>
+    {% for r in top %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td>{{ pills(r.products) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>{% if audit and audit.has_conv %}<td>{{ r.conversions }}</td>{% endif %}<td>{{ r.spend }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="note">Showing top 200 by spend. Sort by any metric column; download the CSV for the full set.</p>
+  {% endif %}
+
+  {% if block_impact %}
+    <h2>Block impact by product <span class="sub">(if the block list were applied, how much of each product's serve it removes)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
+    <p class="note">"Would block" = placements already flagged Block plus every gaming/junk/unresolved app. If a product shows a very high % blocked, applying the full list may not be realistic — review before enforcing.</p>
+    <table><tr><th>Product</th><th>Total impr</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_impr }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
+    </table>
   {% endif %}
 
   {% if clients %}
     <h2>Client watchlist <span class="sub">(abnormally high CTR vs the product's own norm — by client &amp; product)</span></h2>
     <p class="note">CTR is judged <em>per product</em> — a level that's alarming for CTV or audio can be normal for display. Conversions are ignored here since not all clients track them. <a class="dl" href="/download/client_flags.csv">download full watchlist CSV</a></p>
     <table><tr><th>Client</th><th>Product</th><th>Impr</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Why flagged</th></tr>
-    {% for r in clients %}<tr><td>{{ r.Client }}</td><td>{{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
+    {% for r in clients %}<tr><td>{{ r.Client }}</td><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
@@ -123,23 +132,8 @@
     </div>
     <p class="note">Flags compare each exchange's CTR <em>within a product</em> to that product's norm — so an elevated CTR on audio or CTV (where clicks should be minimal) is caught, exactly where it matters. No conversions exist at exchange grain, so these key on CTR. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
     <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Spend</th><th>Flag</th></tr>
-    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
+    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
     </table>
-  {% endif %}
-
-  {% if blocks %}
-    <h2>Copy block-list syntax <span style="font-weight:normal;color:var(--muted);font-size:13px">(placements already flagged “Block”)</span></h2>
-    <p class="note">Paste straight into your AdLib block filter. {{ blocks.site_count }} sites, {{ blocks.app_count }} apps.</p>
-    {% if blocks.site_filter %}
-    <div class="copybox">
-      <div class="copyhead"><span>Sites ({{ blocks.site_count }})</span><button class="copybtn" onclick="cp('bf_site',this)">Copy</button></div>
-      <textarea id="bf_site" readonly rows="3">{{ blocks.site_filter }}</textarea>
-    </div>{% endif %}
-    {% if blocks.app_filter %}
-    <div class="copybox">
-      <div class="copyhead"><span>Apps ({{ blocks.app_count }})</span><button class="copybtn" onclick="cp('bf_app',this)">Copy</button></div>
-      <textarea id="bf_app" readonly rows="3">{{ blocks.app_filter }}</textarea>
-    </div>{% endif %}
   {% endif %}
 
   {% if ai %}
@@ -152,7 +146,7 @@
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
     <table><tr><th>Site</th><th>Products</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
-    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
       <div class="copyhead"><span>Copy recommended site blocks</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
@@ -161,7 +155,7 @@
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
     <table><tr><th>App</th><th>App ID</th><th>Products</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
-    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
       <div class="copyhead"><span>Copy recommended app blocks (uses App ID)</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
@@ -185,22 +179,22 @@
     {% for r in insights.bu %}<tr><td>{{ r.business_unit }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
     </table><p class="note">Top 15 by spend. Full list in CSV.</p>
 
-    <h2>Product impact <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
+    <h2>Product impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
     <table><tr><th>Product</th><th>Impr</th><th>CTR</th><th>Click&rarr;conv</th><th>Cost</th><th>% spend</th></tr>
-    {% for r in insights.product %}<tr><td>{{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
+    {% for r in insights.product %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
     </table>
 
-    <h2>Strategy impact <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
+    <h2>Strategy impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
     <table><tr><th>Strategy type</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
-    {% for r in insights.strategy %}<tr><td>{{ r.strategy_type }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
+    {% for r in insights.strategy %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ r.strategy_type }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
     </table>
 
-    <h2>Plausibility flags — high CTR, zero conversions <a class="dl" href="/download/plausibility_flags.csv">download CSV</a></h2>
-    {% if insights.flags %}
-    <table><tr><th>Business unit</th><th>Strategy name</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Cost</th></tr>
-    {% for r in insights.flags %}<tr><td>{{ r['Business Unit'] }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Impressions'] }}</td><td>{{ r['Clicks'] }}</td><td>{{ r.ctr }}</td><td>{{ r['Internal Cost'] }}</td></tr>{% endfor %}
+    <h2>Strategy flags <span class="sub">(strategy names with abnormally high CTR for their strategy type)</span> <a class="dl" href="/download/strategy_flags.csv">download CSV</a></h2>
+    {% if insights.strategy_flags %}
+    <table><tr><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>Why flagged</th></tr>
+    {% for r in insights.strategy_flags %}<tr><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
     </table>
-    {% else %}<p class="note">No line items tripped the high-CTR / zero-conversion threshold.</p>{% endif %}
+    {% else %}<p class="note">No strategy names tripped the abnormal-CTR threshold.</p>{% endif %}
   {% endif %}
 </div>
 <script>
@@ -211,6 +205,27 @@
     if(navigator.clipboard){ navigator.clipboard.writeText(t.value).then(done, function(){document.execCommand('copy');done();}); }
     else { document.execCommand('copy'); done(); }
   }
+  // Sortable top-placements grid
+  (function(){
+    var t=document.getElementById('topgrid'); if(!t) return;
+    var parse=function(txt,type){
+      var v=txt.replace(/[$,%\s]/g,'');
+      return type==='money'||type==='num'||type==='pct' ? (parseFloat(v)||0) : txt.toLowerCase();
+    };
+    t.querySelectorAll('th.sortable').forEach(function(th){
+      var asc=false;
+      th.addEventListener('click',function(){
+        var col=+th.dataset.col, type=th.dataset.type;
+        var tb=t.querySelector('tbody');
+        var rows=Array.prototype.slice.call(tb.querySelectorAll('tr'));
+        rows.sort(function(a,b){
+          var x=parse(a.children[col].textContent,type), y=parse(b.children[col].textContent,type);
+          return (x>y?1:x<y?-1:0)*(asc?1:-1);
+        });
+        asc=!asc; rows.forEach(function(r){tb.appendChild(r);});
+      });
+    });
+  })();
 </script>
 </body>
 </html>

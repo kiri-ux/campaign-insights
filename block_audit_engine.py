@@ -48,9 +48,9 @@ def classify_app_junk(name):
 
 # Column-name token groups we need to pull when streaming the big sheets.
 NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("app", "id"),
-               ("bundle",), ("impression",), ("click",), ("billable", "spend"),
-               ("spend",), ("cost",), ("date",), ("business", "unit"), ("client",),
-               ("product",), ("strategy",)]
+               ("bundle",), ("impression",), ("click",), ("conversion",), ("conv",),
+               ("billable", "spend"), ("spend",), ("cost",), ("date",),
+               ("business", "unit"), ("client",), ("product",), ("strategy",)]
 
 SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
@@ -78,6 +78,7 @@ def _detect(df, kind):
         "impr": _find(cols, ("impression",)),
         "clicks": _find(cols, ("click",)),
         "spend": _find(cols, ("billable", "spend"), ("spend",), ("cost",)),
+        "conv": _find(cols, ("click", "conversion"), ("conversion",), ("conv",)),
         "date": _find(cols, ("date",)),
         "bu": _find(cols, ("business", "unit")),
         "client": _find(cols, ("client",)),
@@ -94,6 +95,8 @@ def _normalize(df, c):
     out["impressions"] = pd.to_numeric(df[c["impr"]], errors="coerce").fillna(0) if c["impr"] else 0
     out["clicks"] = pd.to_numeric(df[c["clicks"]], errors="coerce").fillna(0) if c["clicks"] else 0
     out["spend"] = pd.to_numeric(df[c["spend"]], errors="coerce").fillna(0) if c["spend"] else 0
+    out["conversions"] = pd.to_numeric(df[c["conv"]], errors="coerce").fillna(0) if c.get("conv") else 0
+    out["_has_conv"] = bool(c.get("conv"))
     out["served_date"] = pd.to_datetime(df[c["date"]], errors="coerce") if c["date"] else pd.NaT
     out["app_id"] = df[c["app_id"]].astype(str) if c.get("app_id") else out["placement"]
     for dim in ("bu", "client", "product", "strategy"):
@@ -104,11 +107,13 @@ def _normalize(df, c):
 
 
 def _rollup(leak, dim):
+    cols = [dim, "leaked_impressions", "leaked_clicks", "ctr", "leaked_conversions", "leaked_spend", "placements"]
     if leak.empty:
-        return pd.DataFrame(columns=[dim, "leaked_impressions", "leaked_clicks", "ctr", "leaked_spend", "placements"])
+        return pd.DataFrame(columns=cols)
     g = (leak.groupby(dim)
          .agg(leaked_impressions=("impressions", "sum"), leaked_clicks=("clicks", "sum"),
-              leaked_spend=("spend", "sum"), placements=("placement", "nunique"))
+              leaked_conversions=("conversions", "sum"), leaked_spend=("spend", "sum"),
+              placements=("placement", "nunique"))
          .reset_index())
     g["ctr"] = np.where(g["leaked_impressions"] > 0, g["leaked_clicks"] / g["leaked_impressions"], 0)
     return g.sort_values("leaked_spend", ascending=False)
@@ -182,8 +187,10 @@ def audit_block_leak(path_or_buffer):
 
     offenders = (leak.groupby(["placement", "placement_type"])
                  .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                      spend=("spend", "sum"), last_served=("served_date", "max"))
+                      conversions=("conversions", "sum"), spend=("spend", "sum"),
+                      last_served=("served_date", "max"))
                  .reset_index().sort_values("spend", ascending=False))
+    offenders["ctr"] = np.where(offenders["impressions"] > 0, offenders["clicks"] / offenders["impressions"], 0)
     if pd.notna(window_end):
         no_date = offenders["last_served"].isna()
         offenders["days_since_last"] = (window_end - offenders["last_served"]).dt.days
@@ -223,7 +230,7 @@ def audit_block_leak(path_or_buffer):
         d = (sub.groupby("placement")
              .agg(app_id=("app_id", "first"), products=("product", _products),
                   impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                  spend=("spend", "sum"))
+                  conversions=("conversions", "sum"), spend=("spend", "sum"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
         return d.sort_values("spend", ascending=False).reset_index(drop=True)
@@ -244,19 +251,41 @@ def audit_block_leak(path_or_buffer):
     auto_app_blocks = pd.DataFrame(auto_rows, columns=[
         "name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"])
 
-    # Top placements across sites+apps, by each metric
-    allcand = cand.copy()
-    allcand["placement_type"] = allcand["placement_type"]
-    topbase = (allcand.groupby(["placement", "placement_type"])
+    # Top placements across sites+apps (one grid, all metrics)
+    topbase = (cand.groupby(["placement", "placement_type"])
                .agg(products=("product", _products), impressions=("impressions", "sum"),
-                    clicks=("clicks", "sum"), spend=("spend", "sum"))
+                    clicks=("clicks", "sum"), conversions=("conversions", "sum"),
+                    spend=("spend", "sum"))
                .reset_index().rename(columns={"placement": "name"}))
     topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
-    top_placements = {
-        "by_spend": topbase.sort_values("spend", ascending=False).head(15),
-        "by_impr": topbase.sort_values("impressions", ascending=False).head(15),
-        "by_clicks": topbase.sort_values("clicks", ascending=False).head(15),
-    }
+    top_placements = topbase.sort_values("spend", ascending=False).head(200)
+
+    # Block-impact by product: if we applied the block list, how much of each
+    # product's total serve would be excluded? (Realism check — blocking 80% of a
+    # product isn't viable.) "Would block" = already-flagged Block OR a gaming/junk/
+    # unresolved app. Computed per row so the product split is exact.
+    allp["would_block"] = allp["is_block"]
+    app_mask = allp["placement_type"] == "app"
+    if app_mask.any():
+        auto_flag = allp.loc[app_mask, "placement"].map(lambda x: classify_app_junk(x)[0] is not None)
+        allp.loc[app_mask, "would_block"] = allp.loc[app_mask, "would_block"] | auto_flag
+    VALID = {"Display", "Social Mirror", "Video", "CTV", "Native Display",
+             "Native Video", "Social Mirror CTV", "Online Audio", "Audio"}
+    imp_df = allp[allp["product"].isin(VALID)].copy()
+    tot = imp_df.groupby("product").agg(total_impr=("impressions", "sum"),
+                                        total_spend=("spend", "sum")).reset_index()
+    blk = (imp_df[imp_df["would_block"]].groupby("product")
+           .agg(blocked_impr=("impressions", "sum"), blocked_spend=("spend", "sum"),
+                blocked_placements=("placement", "nunique")).reset_index())
+    block_impact = tot.merge(blk, on="product", how="left").fillna(
+        {"blocked_impr": 0, "blocked_spend": 0, "blocked_placements": 0})
+    block_impact["pct_impr_blocked"] = np.where(
+        block_impact["total_impr"] > 0, block_impact["blocked_impr"] / block_impact["total_impr"], 0)
+    block_impact["pct_spend_blocked"] = np.where(
+        block_impact["total_spend"] > 0, block_impact["blocked_spend"] / block_impact["total_spend"], 0)
+    block_impact = block_impact.sort_values("pct_impr_blocked", ascending=False)
+
+    has_conv = bool(allp["_has_conv"].any())
 
     summary = {
         "leaked_spend": float(leak["spend"].sum()),
@@ -285,5 +314,7 @@ def audit_block_leak(path_or_buffer):
         "candidates": candidates,
         "auto_app_blocks": auto_app_blocks,
         "top_placements": top_placements,
+        "block_impact": block_impact,
+        "has_conv": has_conv,
         "has_app_id": bool(app_c["app_id"].ne(app_c["name"]).any()) if len(app_c) else False,
     }

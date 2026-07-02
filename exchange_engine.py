@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 
 SHEET = "Exchanges Overview"
 NEED = [("exchange",), ("client business unit",), ("business unit",), ("client",),
-        ("product",), ("strategy", "type"), ("deal",),
+        ("product",), ("strategy", "type"), ("deal",), ("conversion",), ("conv",),
         ("impression",), ("click",), ("billable", "spend"), ("spend",), ("cost",)]
 
 
@@ -67,13 +67,15 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     prod = _find(df.columns, ("product",))
     imp = _find(df.columns, ("impression",))
     clk = _find(df.columns, ("click",))
+    conv = _find(df.columns, ("click", "conversion"), ("conversion",), ("conv",))
     spd = _find(df.columns, ("billable", "spend"), ("spend",), ("cost",))
     if not ex:
         return None
-    for c in (imp, clk, spd):
+    for c in (imp, clk, conv, spd):
         if c:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     df["_prod"] = df[prod].astype(str) if prod else "(all)"
+    has_conv = bool(conv)
 
     # Exchange totals (for the overview table + concentration)
     g = (df.groupby(ex)
@@ -85,8 +87,10 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     book_ctr = (g["clicks"].sum() / g["impressions"].sum()) if g["impressions"].sum() else 0
 
     # PRODUCT-AWARE flags: exchange x product vs that product's own CTR norm.
-    ep = (df.groupby([ex, "_prod"])
-          .agg(impressions=(imp, "sum"), clicks=(clk, "sum"), spend=(spd, "sum"))
+    agg = {"impressions": (imp, "sum"), "clicks": (clk, "sum"), "spend": (spd, "sum")}
+    if conv:
+        agg["conversions"] = (conv, "sum")
+    ep = (df.groupby([ex, "_prod"]).agg(**agg)
           .reset_index().rename(columns={ex: "exchange", "_prod": "product"}))
     ep["ctr"] = np.where(ep["impressions"] > 0, ep["clicks"] / ep["impressions"], 0)
     pnorm = (ep.groupby("product").apply(
@@ -95,12 +99,17 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
     ep = ep.merge(pnorm, on="product", how="left")
     ep["x_over_norm"] = np.where(ep["product_ctr"] > 0, ep["ctr"] / ep["product_ctr"], 0)
 
-    flags = ep[(ep["spend"] >= min_spend) & (ep["impressions"] >= min_impr) &
-               (ep["x_over_norm"] >= ctr_multiple)].copy()
-    flags["flag"] = flags.apply(
+    material = (ep["spend"] >= min_spend) & (ep["impressions"] >= min_impr)
+    hi_ctr = material & (ep["x_over_norm"] >= ctr_multiple)
+    ep["flag"] = ""
+    ep.loc[hi_ctr, "flag"] = ep.loc[hi_ctr].apply(
         lambda r: f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
-                  f"({r['product_ctr']*100:.3f}%) — abnormal for this ad type", axis=1)
-    flags = flags.sort_values("x_over_norm", ascending=False)
+                  f"— abnormal for this ad type", axis=1)
+    if conv:  # low-conversion flag when conversion data exists
+        low_conv = material & (ep["conversions"] == 0) & (ep["spend"] >= min_spend * 2)
+        ep.loc[low_conv & (ep["flag"] == ""), "flag"] = ep.loc[low_conv & (ep["flag"] == "")].apply(
+            lambda r: f"${r['spend']:,.0f} spent, 0 conversions on {r['product']}", axis=1)
+    flags = ep[ep["flag"] != ""].sort_values("spend", ascending=False)
 
     concentration = g.sort_values("spend", ascending=False).head(1)
     top_share = float(concentration["pct_of_spend"].iloc[0]) if len(concentration) else 0
@@ -113,6 +122,7 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multi
         "flag_spend": float(flags["spend"].sum()),
         "top_exchange": concentration["exchange"].iloc[0] if len(concentration) else None,
         "top_share": top_share,
+        "has_conv": has_conv,
     }
     return {
         "summary": summary,

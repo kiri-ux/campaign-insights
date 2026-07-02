@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AdLib Placement &amp; Impact Insights</title>
+<title>Placement &amp; Impact Insights</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -20,7 +20,14 @@
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
   label{font-weight:600;display:block;margin-bottom:6px;font-size:14px;color:var(--atlas);}
   .hint{color:var(--muted);font-size:13px;margin:2px 0 12px;}
-  input[type=file]{width:100%;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#fbfaf5;}
+  .hint a{color:var(--velocity);font-weight:600;text-decoration:none;border-bottom:1px solid rgba(30,111,224,.35);}
+  .hint a:hover{border-bottom-color:var(--velocity);}
+  input[type=file]{width:100%;padding:14px;border:2px dashed #d9d2bf;border-radius:12px;background:#fbfaf5;font-family:var(--font-body);color:var(--muted);font-size:14px;cursor:pointer;transition:border-color .15s,background .15s;}
+  input[type=file]:hover{border-color:var(--velocity);background:#f4f8ff;}
+  input[type=file]::file-selector-button{margin-right:14px;padding:9px 18px;border:0;border-radius:999px;
+    background:linear-gradient(135deg,var(--velocity),#3f8bff);color:#fff;font-weight:700;font-size:13px;
+    font-family:var(--font-head);cursor:pointer;box-shadow:0 2px 6px rgba(30,111,224,.35);transition:transform .1s,box-shadow .15s;}
+  input[type=file]::file-selector-button:hover{background:linear-gradient(135deg,#1a63cc,var(--velocity));box-shadow:0 3px 10px rgba(30,111,224,.45);transform:translateY(-1px);}
   button{background:var(--velocity);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:600;font-family:var(--font-head);}
   button:disabled{opacity:.6;cursor:not-allowed;}
   .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:#e9f1fd;color:var(--velocity);margin-left:8px;}
@@ -34,12 +41,11 @@
 <body>
 <div class="wrap">
   <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span></div>
-  <h1>AdLib Placement &amp; Impact Insights</h1>
-  <p class="sub">Proactive oversight layer — surface waste before the client does.</p>
+  <h1>Placement &amp; Impact Insights</h1>
   <form action="/analyze" method="post" enctype="multipart/form-data" id="f" onsubmit="return go()">
     <div class="card">
       <label>Insights workbook <span class="tag">performance</span> <span class="tag">block check</span></label>
-      <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and a block-status check (placements flagged “Block” that still show delivery, with a last-served recency signal).</div>
+      <div class="hint">Download the excel report from the <a href="https://www.reporting.zone/client/dist/#/dashboards/6272/section/78366" target="_blank" rel="noopener">Insights Dashboard</a> and upload here. Drives Business Unit / Product / Strategy insights, the block-status check and recommended block list, client &amp; strategy flags, exchange anomalies, and block-impact-by-product.</div>
       <input type="file" name="insights_workbook" accept=".xlsx" required>
     </div>
     <button type="submit" id="btn">Generate insights</button>
