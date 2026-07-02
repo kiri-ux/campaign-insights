@@ -15,6 +15,7 @@ from block_audit_engine import audit_block_leak
 from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks
 from product_map import build_pmap
+from buyer_map import load_buyer_map, buyer_for
 
 PMAP = build_pmap()
 
@@ -42,9 +43,11 @@ def index():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
-           "clients": None, "exchanges": None, "top": None, "block_impact": None,
+           "clients": None, "clients_total": 0, "has_buyer": False,
+           "exchanges": None, "top": None, "block_impact": None,
            "partner": None, "pmap": PMAP, "errors": []}
     perf_bu = pd.DataFrame()
+    bmap = load_buyer_map()  # {} unless BUYER_MAP_URL env var is set
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -78,9 +81,14 @@ def analyze():
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
                 _CACHE["client_flags.csv"] = cflag
-                ctx["clients"] = _fmt(cflag.head(50), pct_cols=["ctr", "product_ctr"],
-                                      money_cols=["internal_cost"],
-                                      int_cols=["impressions", "clicks"]).to_dict("records")
+                crows = _fmt(cflag.head(50), pct_cols=["ctr", "product_ctr"],
+                             money_cols=["internal_cost"],
+                             int_cols=["impressions", "clicks"]).to_dict("records")
+                for row in crows:
+                    row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
+                ctx["clients"] = crows
+                ctx["clients_total"] = int(len(cflag))
+                ctx["has_buyer"] = bool(bmap)
             del r
         except Exception as e:
             ctx["errors"].append(f"Insights workbook: {e}")
@@ -116,7 +124,9 @@ def analyze():
                         int_cols=["impressions", "clicks", "conversions", "blocked_impr", "blocked_placements"]).to_dict("records")
             for row, fl in zip(prow, flagged):
                 row["flagged"] = bool(fl)
+                row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
             ctx["partner"] = prow
+            ctx["has_buyer"] = bool(bmap)
 
             # Block impact by product (realism check)
             _CACHE["block_impact_by_product.csv"] = a["block_impact"]
@@ -149,6 +159,8 @@ def analyze():
                              int_cols=["impressions", "clicks"]).to_dict("records"),
                 "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
                 "app_filter": to_adlib_filter(app_vals, "app") if len(rec_app) else "",
+                "site_csv": ", ".join(rec_site["name"].tolist()) if len(rec_site) else "",
+                "app_csv": ", ".join(app_vals) if len(rec_app) else "",
             }
 
             # Combined Placements grid (all delivery), with a coral flag for any

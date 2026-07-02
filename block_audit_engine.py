@@ -268,11 +268,20 @@ def audit_block_leak(path_or_buffer):
     topbase = (alld.groupby(["disp_name", "placement_type"])
                .agg(products=("product", _products), impressions=("impressions", "sum"),
                     clicks=("clicks", "sum"), conversions=("conversions", "sum"),
-                    spend=("spend", "sum"), last_served=("served_date", "max"),
+                    spend=("spend", "sum"), last_dt=("served_date", "max"),
                     blocked=("is_block", "max"))
                .reset_index().rename(columns={"disp_name": "name"}))
     topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
-    topbase["last_served"] = topbase["last_served"].dt.strftime("%Y-%m-%d").fillna("—")
+    # Serving status: still serving at the window edge (within ACTIVE_DAYS of the
+    # last date in the file), stopped, or unknown (no date).
+    if pd.notna(window_end):
+        days = (window_end - topbase["last_dt"]).dt.days
+        topbase["serving"] = np.where(topbase["last_dt"].isna(), "—",
+                                      np.where(days <= ACTIVE_DAYS, "serving", "stopped"))
+    else:
+        topbase["serving"] = "—"
+    topbase["last_served"] = topbase["last_dt"].dt.strftime("%Y-%m-%d").fillna("—")
+    topbase = topbase.drop(columns=["last_dt"])
     top_placements = topbase.sort_values("spend", ascending=False).head(300)
 
     # Block-impact by product: if we applied the block list, how much of each
