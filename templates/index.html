@@ -42,13 +42,9 @@
       <div class="hint">The AdLib Insights .xlsx (Client / Product / Strategy / Site Overview / App Overview sheets). Drives Business Unit / Product / Strategy insights, waste &amp; plausibility flags, and a block-status check (placements flagged “Block” that still show delivery, with a last-served recency signal).</div>
       <input type="file" name="insights_workbook" accept=".xlsx" required>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin:0 0 16px;cursor:pointer;">
-      <input type="checkbox" name="ai_blocks" value="1" style="width:auto;">
-      <span>Also generate an AI-recommended block list (uses Claude to flag new junk placements — adds ~30–60s)</span>
-    </label>
     <button type="submit" id="btn">Generate insights</button>
   </form>
-  <div class="busy-note">Reading the workbook and crunching ~200k rows — this can take up to a minute on the free tier. You can leave this tab open.</div>
+  <div class="busy-note">Reading the workbook and crunching ~200k rows plus the AI block review — this can take up to a minute. You can leave this tab open.</div>
   <script>
     function go(){
       var f=document.getElementById('f'), b=document.getElementById('btn');

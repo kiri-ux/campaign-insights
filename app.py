@@ -13,7 +13,7 @@ import pandas as pd
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
 from exchange_engine import analyze_exchanges
-from ai_blocks import recommend_blocks, to_adlib_filter
+from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40 MB
@@ -39,7 +39,7 @@ def index():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
-           "clients": None, "exchanges": None, "errors": []}
+           "clients": None, "exchanges": None, "top": None, "errors": []}
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -74,9 +74,9 @@ def analyze():
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
                 _CACHE["client_flags.csv"] = cflag
-                ctx["clients"] = _fmt(cflag.head(25), pct_cols=["ctr"],
-                                      money_cols=["internal_cost", "plausibility_cost"],
-                                      int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
+                ctx["clients"] = _fmt(cflag.head(30), pct_cols=["ctr", "product_ctr"],
+                                      money_cols=["internal_cost"],
+                                      int_cols=["impressions", "clicks"]).to_dict("records")
             del r
         except Exception as e:
             ctx["errors"].append(f"Insights workbook: {e}")
@@ -94,8 +94,18 @@ def analyze():
                 "summary": a["summary"],
                 "offenders": _fmt(a["offenders"].head(25), money_cols=["spend"],
                                   int_cols=["impressions", "clicks"]).to_dict("records"),
-                "by_bu": _fmt(a["leak_by_bu"].head(15), money_cols=["leaked_spend"],
-                              int_cols=["leaked_impressions", "placements"]).to_dict("records"),
+                "by_bu": _fmt(a["leak_by_bu"].head(15), pct_cols=["ctr"], money_cols=["leaked_spend"],
+                              int_cols=["leaked_impressions", "leaked_clicks", "placements"]).to_dict("records"),
+            }
+
+            # Top placements by spend / impressions / clicks
+            tp = a["top_placements"]
+            for k in ("by_spend", "by_impr", "by_clicks"):
+                _CACHE[f"top_placements_{k}.csv"] = tp[k]
+            ctx["top"] = {
+                k: _fmt(tp[k], pct_cols=["ctr"], money_cols=["spend"],
+                        int_cols=["impressions", "clicks"]).to_dict("records")
+                for k in ("by_spend", "by_impr", "by_clicks")
             }
 
             # Copyable AdLib filter syntax for placements ALREADY flagged "Block"
@@ -106,23 +116,25 @@ def analyze():
                 "app_filter": to_adlib_filter(bap, "app"),
             }
 
-            # Optional AI pass: recommend NEW blocks from non-flagged candidates
-            if request.form.get("ai_blocks"):
-                rec = recommend_blocks(a["candidates"])
-                rec_site = rec.get("site", pd.DataFrame())
-                rec_app = rec.get("app", pd.DataFrame())
-                _CACHE["ai_recommended_sites.csv"] = rec_site
-                _CACHE["ai_recommended_apps.csv"] = rec_app
-                ctx["ai"] = {
-                    "error": rec.get("error"),
-                    "site_count": len(rec_site), "app_count": len(rec_app),
-                    "sites": _fmt(rec_site.head(40), pct_cols=["ctr"], money_cols=["spend"],
-                                  int_cols=["impressions", "clicks"]).to_dict("records"),
-                    "apps": _fmt(rec_app.head(40), pct_cols=["ctr"], money_cols=["spend"],
-                                 int_cols=["impressions", "clicks"]).to_dict("records"),
-                    "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
-                    "app_filter": to_adlib_filter(rec_app["name"].tolist(), "app") if len(rec_app) else "",
-                }
+            # AI runs on every upload now. Merge Claude's picks with the
+            # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
+            rec = recommend_blocks(a["candidates"])
+            rec_site = rec.get("site", pd.DataFrame())
+            rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
+            _CACHE["ai_recommended_sites.csv"] = rec_site
+            _CACHE["ai_recommended_apps.csv"] = rec_app
+            app_vals = rec_app["app_id"].tolist() if "app_id" in rec_app else rec_app.get("name", pd.Series([])).tolist()
+            ctx["ai"] = {
+                "error": rec.get("error"),
+                "has_app_id": a.get("has_app_id", False),
+                "site_count": len(rec_site), "app_count": len(rec_app),
+                "sites": _fmt(rec_site.head(50), pct_cols=["ctr"], money_cols=["spend"],
+                              int_cols=["impressions", "clicks"]).to_dict("records"),
+                "apps": _fmt(rec_app.head(50), pct_cols=["ctr"], money_cols=["spend"],
+                             int_cols=["impressions", "clicks"]).to_dict("records"),
+                "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
+                "app_filter": to_adlib_filter(app_vals, "app") if len(rec_app) else "",
+            }
             del a
         except Exception as e:
             ctx["errors"].append(f"Block audit: {e}")

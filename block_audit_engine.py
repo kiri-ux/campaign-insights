@@ -12,14 +12,45 @@ Business Unit (partner), Client, Product, and Strategy.
 """
 import pandas as pd
 import numpy as np
+import re
 from openpyxl import load_workbook
 
 SENTINELS = {"block", "blocked"}
 
+# --- Heuristic auto-block: gaming + junk + unresolved bundle apps -----------
+_GAMING = re.compile(
+    r"\b(puzzle|casino|slots?|bingo|solitaire|mahjong|bubble\s?(shoot|pop)|"
+    r"block\s?(puzzle|blast|hexa|mania|party|craft|jam)|match\s?3|arcade|tycoon|clash|"
+    r"sudoku|jackpot|poker|hexa|jewel\s?(blast|quest)|candy\s?crush|saga|idle\s|"
+    r"trivia\s?crack|racing\s?game|ludo|tetris|2048|gacha|tower\s?defen|zombie|"
+    r"battle\s?(royale|craft|land)|shooter|word\s?(trip|connect|search|cross|calm|link)|"
+    r"gems?\s?(blast|crush)|gold\s?miner|dragon\s?(city|mania|blast)|merge\s?(dragons|"
+    r"mansion|magic)|\.io\b|coin\s?master|spin\s?to\s?win)\b", re.I)
+_JUNK = re.compile(
+    r"\b(photo\s?edit|beauty\s?cam|selfie|flashlight|battery\s?(saver|doctor)|cleaner|"
+    r"booster|antivirus|qr\s?(scanner|code)|wallpaper|ringtone|keyboard|file\s?manager|"
+    r"compass|magnifier|clean\s?master|du\s?battery)\b", re.I)
+_BUNDLE = re.compile(r"^((com|net|org|io|app)\.[a-z0-9_.]+|\d{6,})$", re.I)
+
+
+def classify_app_junk(name):
+    """Return (category, reason) if an app should be auto-blocked, else (None, None)."""
+    if not isinstance(name, str) or not name.strip():
+        return (None, None)
+    n = name.strip()
+    if _BUNDLE.match(n):
+        return ("Unresolved bundle", "unidentifiable app (raw bundle/ID)")
+    if _GAMING.search(n):
+        return ("Gaming app", "gaming inventory (block-by-default)")
+    if _JUNK.search(n):
+        return ("Junk app", "low-value utility/photo/junk app")
+    return (None, None)
+
 # Column-name token groups we need to pull when streaming the big sheets.
-NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("impression",),
-               ("click",), ("billable", "spend"), ("spend",), ("cost",), ("date",),
-               ("business", "unit"), ("client",), ("product",), ("strategy",)]
+NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("app", "id"),
+               ("bundle",), ("impression",), ("click",), ("billable", "spend"),
+               ("spend",), ("cost",), ("date",), ("business", "unit"), ("client",),
+               ("product",), ("strategy",)]
 
 SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
@@ -52,6 +83,7 @@ def _detect(df, kind):
         "client": _find(cols, ("client",)),
         "product": _find(cols, ("product",)),
         "strategy": _find(cols, ("strategy", "type"), ("strategy",)),
+        "app_id": _find(cols, ("app", "id"), ("app", "bundle"), ("bundle",)),
     }
 
 
@@ -63,6 +95,7 @@ def _normalize(df, c):
     out["clicks"] = pd.to_numeric(df[c["clicks"]], errors="coerce").fillna(0) if c["clicks"] else 0
     out["spend"] = pd.to_numeric(df[c["spend"]], errors="coerce").fillna(0) if c["spend"] else 0
     out["served_date"] = pd.to_datetime(df[c["date"]], errors="coerce") if c["date"] else pd.NaT
+    out["app_id"] = df[c["app_id"]].astype(str) if c.get("app_id") else out["placement"]
     for dim in ("bu", "client", "product", "strategy"):
         out[dim] = df[c[dim]].astype(str) if c[dim] else "(not in export)"
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
@@ -72,12 +105,13 @@ def _normalize(df, c):
 
 def _rollup(leak, dim):
     if leak.empty:
-        return pd.DataFrame(columns=[dim, "leaked_impressions", "leaked_spend", "placements"])
+        return pd.DataFrame(columns=[dim, "leaked_impressions", "leaked_clicks", "ctr", "leaked_spend", "placements"])
     g = (leak.groupby(dim)
-         .agg(leaked_impressions=("impressions", "sum"), leaked_spend=("spend", "sum"),
-              placements=("placement", "nunique"))
-         .reset_index().sort_values("leaked_spend", ascending=False))
-    return g
+         .agg(leaked_impressions=("impressions", "sum"), leaked_clicks=("clicks", "sum"),
+              leaked_spend=("spend", "sum"), placements=("placement", "nunique"))
+         .reset_index())
+    g["ctr"] = np.where(g["leaked_impressions"] > 0, g["leaked_clicks"] / g["leaked_impressions"], 0)
+    return g.sort_values("leaked_spend", ascending=False)
 
 
 def _stream_sheet(ws):
@@ -170,20 +204,59 @@ def audit_block_leak(path_or_buffer):
     }
 
     # Candidates for the AI pass: placements NOT already flagged Block, with real
-    # delivery, aggregated distinct by spend (so we send Claude a ranked shortlist).
+    # delivery. Aggregate distinct by spend, list all products each ran on, and
+    # (apps) carry the App ID used for the AdLib block.
     already = {k: set(v) for k, v in block_names.items()}
     cand = allp[(~allp["is_block"]) & (allp["impressions"] > 0)]
 
+    VALID_PRODUCTS = {"Display", "Social Mirror", "Video", "CTV", "Native Display",
+                      "Native Video", "Social Mirror CTV", "Online Audio", "Audio"}
+
+    def _products(series):
+        vals = [p for p in series.dropna().unique().tolist() if p in VALID_PRODUCTS]
+        return ", ".join(sorted(set(vals))) if vals else ""
+
     def _candidates(kind):
-        d = (cand[cand["placement_type"] == kind]
-             .groupby("placement")
-             .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sub = cand[cand["placement_type"] == kind]
+        if sub.empty:
+            return pd.DataFrame(columns=["name", "app_id", "products", "impressions", "clicks", "spend"])
+        d = (sub.groupby("placement")
+             .agg(app_id=("app_id", "first"), products=("product", _products),
+                  impressions=("impressions", "sum"), clicks=("clicks", "sum"),
                   spend=("spend", "sum"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
         return d.sort_values("spend", ascending=False).reset_index(drop=True)
 
     candidates = {"site": _candidates("site"), "app": _candidates("app")}
+
+    # Deterministic auto-block: gaming + junk + unresolved bundle apps (every run).
+    app_c = candidates["app"]
+    auto_rows = []
+    for _, r in app_c.iterrows():
+        cat, reason = classify_app_junk(r["name"])
+        if cat:
+            row = r.to_dict()
+            row["category"] = cat
+            row["reason"] = reason
+            row["ctr"] = (row["clicks"] / row["impressions"]) if row["impressions"] else 0
+            auto_rows.append(row)
+    auto_app_blocks = pd.DataFrame(auto_rows, columns=[
+        "name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"])
+
+    # Top placements across sites+apps, by each metric
+    allcand = cand.copy()
+    allcand["placement_type"] = allcand["placement_type"]
+    topbase = (allcand.groupby(["placement", "placement_type"])
+               .agg(products=("product", _products), impressions=("impressions", "sum"),
+                    clicks=("clicks", "sum"), spend=("spend", "sum"))
+               .reset_index().rename(columns={"placement": "name"}))
+    topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
+    top_placements = {
+        "by_spend": topbase.sort_values("spend", ascending=False).head(15),
+        "by_impr": topbase.sort_values("impressions", ascending=False).head(15),
+        "by_clicks": topbase.sort_values("clicks", ascending=False).head(15),
+    }
 
     summary = {
         "leaked_spend": float(leak["spend"].sum()),
@@ -210,4 +283,7 @@ def audit_block_leak(path_or_buffer):
         "leak_by_strategy": _rollup(leak, "strategy"),
         "block_names": block_names,
         "candidates": candidates,
+        "auto_app_blocks": auto_app_blocks,
+        "top_placements": top_placements,
+        "has_app_id": bool(app_c["app_id"].ne(app_c["name"]).any()) if len(app_c) else False,
     }

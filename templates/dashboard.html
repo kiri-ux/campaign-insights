@@ -54,12 +54,12 @@
   {% if audit %}
     {% set a = audit.summary %}
     <h2>Block-status check — placements flagged “Block” with delivery{% if a.window_start %} ({{ a.window_start }}–{{ a.window_end }}){% endif %}</h2>
-    <p class="note">This is a trailing report, so impressions may predate when the block was applied — this is a list to <em>verify</em>, not proof a block failed. For apps, the last-served date tells you which stopped mid-window (block likely took hold) versus which were still serving at the window edge (worth checking in the DSP).</p>
+    <p class="note"><strong>What this is:</strong> placements your report marks "Block" that still logged delivery in this window. Because it's a trailing report, some of this spend ran <em>before</em> the block took effect — so the two gray numbers are context, not proof of a problem. <strong>The red number is the one to act on:</strong> apps still serving in the last day or two of the window, which means the block may not be live yet — verify those in the DSP.</p>
     <div class="cards">
-      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(a.leaked_spend) }}</div><div class="l">Billable spend on blocked placements (this window)</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(a.leaked_impressions) }}</div><div class="l">Impressions</div></div>
-      <div class="kpi"><div class="n">{{ a.leaked_placements }}</div><div class="l">Distinct placements</div></div>
-      {% if a.has_dates %}<div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(a.active_spend) }}</div><div class="l">On {{ a.active_placements }} apps still serving at window edge — verify these</div></div>{% endif %}
+      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(a.leaked_spend) }}</div><div class="l">Spend on blocked placements this window (context — may predate the block)</div></div>
+      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(a.leaked_impressions) }}</div><div class="l">Impressions (context)</div></div>
+      <div class="kpi"><div class="n">{{ a.leaked_placements }}</div><div class="l">Distinct blocked placements seen</div></div>
+      {% if a.has_dates %}<div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(a.active_spend) }}</div><div class="l">⚠ ACT: {{ a.active_placements }} apps still serving at window edge — verify block is live</div></div>{% endif %}
     </div>
     {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
     <p><a class="dl" href="/download/block_leak_offenders.csv">download full list</a>
@@ -74,31 +74,56 @@
     </table>
 
     <h2>By business unit <span style="font-weight:normal;color:var(--muted);font-size:13px">(who's affected)</span></h2>
-    <table><tr><th>Business unit</th><th>Impr</th><th>Spend</th><th>Placements</th></tr>
-    {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
+    <table><tr><th>Business unit</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th><th>Placements</th></tr>
+    {% for r in audit.by_bu %}<tr><td>{{ r.bu }}</td><td>{{ r.leaked_impressions }}</td><td>{{ r.leaked_clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.leaked_spend }}</td><td>{{ r.placements }}</td></tr>{% endfor %}
     </table>
+    <p class="note">Conversions aren't available at placement grain (the Site/App sheets don't carry them), so this grid shows CTR; per-client conversions live in the performance grids above.</p>
+  {% endif %}
+
+  {% if top %}
+    <h2>Top placements <span class="sub">(across sites &amp; apps — by spend, impressions, clicks)</span></h2>
+    <div style="display:flex;flex-wrap:wrap;gap:18px;">
+      <div style="flex:1;min-width:320px;">
+        <h2 style="font-size:14px">By spend <a class="dl" href="/download/top_placements_by_spend.csv">CSV</a></h2>
+        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Spend</th></tr>
+        {% for r in top.by_spend %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+        </table>
+      </div>
+      <div style="flex:1;min-width:320px;">
+        <h2 style="font-size:14px">By impressions <a class="dl" href="/download/top_placements_by_impr.csv">CSV</a></h2>
+        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Impr</th></tr>
+        {% for r in top.by_impr %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.impressions }}</td></tr>{% endfor %}
+        </table>
+      </div>
+      <div style="flex:1;min-width:320px;">
+        <h2 style="font-size:14px">By clicks <a class="dl" href="/download/top_placements_by_clicks.csv">CSV</a></h2>
+        <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Clicks</th><th>CTR</th></tr>
+        {% for r in top.by_clicks %}<tr><td>{{ r.name }}</td><td>{{ r.placement_type }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td></tr>{% endfor %}
+        </table>
+      </div>
+    </div>
   {% endif %}
 
   {% if clients %}
-    <h2>Client watchlist <span class="sub">(clients to flag — zero-conversion spend or implausible CTR)</span></h2>
-    <p class="note"><a class="dl" href="/download/client_flags.csv">download full watchlist CSV</a></p>
-    <table><tr><th>Client</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Why flagged</th></tr>
-    {% for r in clients %}<tr><td>{{ r.Client }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
+    <h2>Client watchlist <span class="sub">(abnormally high CTR vs the product's own norm — by client &amp; product)</span></h2>
+    <p class="note">CTR is judged <em>per product</em> — a level that's alarming for CTV or audio can be normal for display. Conversions are ignored here since not all clients track them. <a class="dl" href="/download/client_flags.csv">download full watchlist CSV</a></p>
+    <table><tr><th>Client</th><th>Product</th><th>Impr</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Why flagged</th></tr>
+    {% for r in clients %}<tr><td>{{ r.Client }}</td><td>{{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td style="white-space:normal">{{ r.reason }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
   {% if exchanges %}
     {% set e = exchanges.summary %}
-    <h2>Exchange anomalies <span class="sub">(abnormal CTR / spend concentration)</span></h2>
+    <h2>Exchange anomalies <span class="sub">(abnormal CTR judged per product / ad type)</span></h2>
     <div class="cards">
       <div class="kpi"><div class="n">{{ e.exchanges }}</div><div class="l">Exchanges</div></div>
       <div class="kpi"><div class="n">{{ '{:.3f}%'.format(e.book_ctr*100) }}</div><div class="l">Book-average CTR</div></div>
-      <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchanges</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchanges</div></div>
+      <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchange × product</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchange×product</div></div>
     </div>
-    <p class="note">No conversion data exists at exchange grain, so these flag CTR that is far off the book average. High-CTR flags point to possible invalid/bot traffic; low-CTR flags on audio/CTV exchanges (Spotify, FreeWheel, Adswizz) are usually expected, not a problem. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
-    <table><tr><th>Exchange</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th><th>% spend</th><th>Flag</th></tr>
-    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td><td>{{ r.pct_of_spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
+    <p class="note">Flags compare each exchange's CTR <em>within a product</em> to that product's norm — so an elevated CTR on audio or CTV (where clicks should be minimal) is caught, exactly where it matters. No conversions exist at exchange grain, so these key on CTR. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
+    <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Spend</th><th>Flag</th></tr>
+    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
@@ -118,16 +143,16 @@
   {% endif %}
 
   {% if ai %}
-    <h2>AI-recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(new junk not yet flagged)</span></h2>
+    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(AI review + auto-block: gaming, junk &amp; unresolved apps)</span></h2>
     {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
     {% if ai.site_count or ai.app_count %}
-    <p class="note">Claude reviewed placements that aren’t on your block list yet and flagged {{ ai.site_count }} sites and {{ ai.app_count }} apps as low-quality. Review before applying.
+    <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking — Claude's review of placements not yet on your list, plus every gaming / junk / unresolved-bundle app caught automatically. Review before applying. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now — add "App ID" to the Tap App Overview report to switch the copy list to bundle IDs.{% endif %}
        <a class="dl" href="/download/ai_recommended_sites.csv">sites CSV</a>
        <a class="dl" href="/download/ai_recommended_apps.csv">apps CSV</a></p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
-    <table><tr><th>Site</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
-    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <table><tr><th>Site</th><th>Products</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
+    {% for r in ai.sites %}<tr><td>{{ r.name }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
       <div class="copyhead"><span>Copy recommended site blocks</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
@@ -135,14 +160,14 @@
     </div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
-    <table><tr><th>App</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
-    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <table><tr><th>App</th><th>App ID</th><th>Products</th><th>Category</th><th>Why</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr>
+    {% for r in ai.apps %}<tr><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td style="white-space:normal">{{ r.products }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
     <div class="copybox">
-      <div class="copyhead"><span>Copy recommended app blocks</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
+      <div class="copyhead"><span>Copy recommended app blocks (uses App ID)</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
       <textarea id="ai_app" readonly rows="3">{{ ai.app_filter }}</textarea>
     </div>{% endif %}
-    {% elif not ai.error %}<p class="note">Claude didn’t flag any additional placements to block — your list looks clean for this window.</p>{% endif %}
+    {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
   {% endif %}
 
   {% if insights %}

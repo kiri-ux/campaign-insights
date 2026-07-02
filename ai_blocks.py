@@ -24,8 +24,8 @@ DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MAX_CANDIDATES = int(os.environ.get("AI_MAX_CANDIDATES", "200"))
 BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "50"))
 MAX_WORKERS = int(os.environ.get("AI_MAX_WORKERS", "6"))
-FIELD = {"site": "Site Domain", "app": "App Name"}
-_COLS = ["name", "impressions", "clicks", "ctr", "spend", "category", "reason"]
+FIELD = {"site": "Site Domain", "app": "App ID"}
+_COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"]
 
 
 def to_adlib_filter(names, kind):
@@ -86,12 +86,24 @@ def _classify_batch(rows, kind, api_key, model):
             r = rows[int(v["n"]) - 1]
             impr = r.get("impressions", 0) or 0
             clk = r.get("clicks", 0) or 0
-            out.append({"name": r["name"], "impressions": impr, "clicks": clk,
+            out.append({"name": r["name"], "app_id": r.get("app_id", r["name"]),
+                        "products": r.get("products", ""), "impressions": impr, "clicks": clk,
                         "ctr": (clk / impr) if impr else 0, "spend": r["spend"],
                         "category": v.get("category", ""), "reason": v.get("reason", "")})
         except Exception:
             continue
     return out
+
+
+def merge_app_blocks(ai_apps, auto_apps):
+    """Combine AI-flagged apps with the deterministic auto-block apps, de-duped by
+    name. Auto-block reasons are kept unless the AI already flagged the same app."""
+    frames = [df for df in (ai_apps, auto_apps) if df is not None and len(df)]
+    if not frames:
+        return pd.DataFrame(columns=_COLS)
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset=["name"], keep="first")
+    return merged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
 def recommend_blocks(candidates, api_key=None, model=None,

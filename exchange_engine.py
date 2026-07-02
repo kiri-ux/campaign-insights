@@ -52,7 +52,7 @@ def _stream(ws):
     return pd.DataFrame(data)
 
 
-def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=50000):
+def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=30000, ctr_multiple=3.0):
     wb = load_workbook(path_or_buffer, read_only=True, data_only=True)
     try:
         if SHEET not in wb.sheetnames:
@@ -64,6 +64,7 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=50000):
         return None
 
     ex = _find(df.columns, ("exchange",))
+    prod = _find(df.columns, ("product",))
     imp = _find(df.columns, ("impression",))
     clk = _find(df.columns, ("click",))
     spd = _find(df.columns, ("billable", "spend"), ("spend",), ("cost",))
@@ -72,23 +73,34 @@ def analyze_exchanges(path_or_buffer, min_spend=150.0, min_impr=50000):
     for c in (imp, clk, spd):
         if c:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    df["_prod"] = df[prod].astype(str) if prod else "(all)"
 
+    # Exchange totals (for the overview table + concentration)
     g = (df.groupby(ex)
          .agg(impressions=(imp, "sum"), clicks=(clk, "sum"), spend=(spd, "sum"))
          .reset_index().rename(columns={ex: "exchange"}))
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
-
     total_spend = g["spend"].sum() or 1
     g["pct_of_spend"] = g["spend"] / total_spend
     book_ctr = (g["clicks"].sum() / g["impressions"].sum()) if g["impressions"].sum() else 0
 
-    material = g[(g["spend"] >= min_spend) & (g["impressions"] >= min_impr)].copy()
-    hi = book_ctr * 2.5   # abnormally high
-    lo = book_ctr * 0.25  # abnormally low
-    material["flag"] = np.where(
-        material["ctr"] >= hi, "CTR abnormally high (possible invalid traffic)",
-        np.where(material["ctr"] <= lo, "CTR abnormally low (likely wasted / non-engaging)", ""))
-    flags = material[material["flag"] != ""].sort_values("spend", ascending=False)
+    # PRODUCT-AWARE flags: exchange x product vs that product's own CTR norm.
+    ep = (df.groupby([ex, "_prod"])
+          .agg(impressions=(imp, "sum"), clicks=(clk, "sum"), spend=(spd, "sum"))
+          .reset_index().rename(columns={ex: "exchange", "_prod": "product"}))
+    ep["ctr"] = np.where(ep["impressions"] > 0, ep["clicks"] / ep["impressions"], 0)
+    pnorm = (ep.groupby("product").apply(
+        lambda x: (x["clicks"].sum() / x["impressions"].sum()) if x["impressions"].sum() else 0)
+        .rename("product_ctr").reset_index())
+    ep = ep.merge(pnorm, on="product", how="left")
+    ep["x_over_norm"] = np.where(ep["product_ctr"] > 0, ep["ctr"] / ep["product_ctr"], 0)
+
+    flags = ep[(ep["spend"] >= min_spend) & (ep["impressions"] >= min_impr) &
+               (ep["x_over_norm"] >= ctr_multiple)].copy()
+    flags["flag"] = flags.apply(
+        lambda r: f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
+                  f"({r['product_ctr']*100:.3f}%) — abnormal for this ad type", axis=1)
+    flags = flags.sort_values("x_over_norm", ascending=False)
 
     concentration = g.sort_values("spend", ascending=False).head(1)
     top_share = float(concentration["pct_of_spend"].iloc[0]) if len(concentration) else 0

@@ -105,47 +105,38 @@ def plausibility_flags(strategy_df, ctr_ceiling=0.03, min_impr=20000):
     return flag[keep].sort_values("ctr", ascending=False)
 
 
-def client_flags(product_df, strategy_df, zero_conv_min_spend=250.0, ctr_ceiling=0.03):
-    """Per-client watchlist: surfaces clients that need attention — spend with no
-    conversions, and high-CTR/zero-conversion (plausibility) exposure."""
+def client_flags(product_df, strategy_df, min_impr=20000, ctr_multiple=3.0, ctr_floor=0.008):
+    """Per-client, per-product watchlist keyed on ABNORMALLY HIGH CTR relative to
+    each product's own norm (a 1.5% CTR is alarming for CTV, normal for display
+    retargeting). Conversions are ignored — not all clients track them, so 0 isn't
+    a reliable signal. Returns one row per flagged client+product."""
     bu = _bu_col(product_df)
-    keys = [c for c in [bu, "Client"] if c in product_df.columns]
-    if "Client" not in product_df.columns:
+    if "Client" not in product_df.columns or "Product" not in product_df.columns:
         return pd.DataFrame()
-    g = (product_df.groupby(keys)
+    valid = {"Display", "Social Mirror", "Video", "CTV", "Native Display",
+             "Native Video", "Social Mirror CTV", "Online Audio"}
+    df = product_df.copy()
+    df["product"] = df["Product"].where(df["Product"].isin(valid), "Other")
+    g = (df.groupby([bu, "Client", "product"])
          .agg(impressions=("Impressions", "sum"), clicks=("Clicks", "sum"),
-              conversions=("Click Conversions", "sum"),
               internal_cost=("Internal Cost", "sum"))
-         .reset_index())
+         .reset_index().rename(columns={bu: "business_unit"}))
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
-    g["zero_conv_spend"] = (g["conversions"] == 0) & (g["internal_cost"] >= zero_conv_min_spend)
 
-    # plausibility exposure per client from strategy grain
-    plaus = pd.DataFrame()
-    if strategy_df is not None and "Client" in strategy_df.columns:
-        s = strategy_df.copy()
-        s["ctr"] = np.where(s["Impressions"] > 0, s["Clicks"] / s["Impressions"], 0)
-        s = s[(s["ctr"] > ctr_ceiling) & (s["Click Conversions"] == 0) & (s["Impressions"] > 20000)]
-        if len(s):
-            plaus = (s.groupby("Client").agg(plausibility_lineitems=("Strategy Name", "nunique"),
-                                             plausibility_cost=("Internal Cost", "sum")).reset_index())
-    if len(plaus):
-        g = g.merge(plaus, on="Client", how="left")
-    g["plausibility_lineitems"] = g.get("plausibility_lineitems", 0)
-    g["plausibility_cost"] = g.get("plausibility_cost", 0.0)
-    g[["plausibility_lineitems", "plausibility_cost"]] = g[["plausibility_lineitems", "plausibility_cost"]].fillna(0)
+    # Per-product norm = pooled CTR across all clients on that product
+    norms = (g.groupby("product").apply(
+        lambda x: (x["clicks"].sum() / x["impressions"].sum()) if x["impressions"].sum() else 0)
+        .rename("product_ctr").reset_index())
+    g = g.merge(norms, on="product", how="left")
+    g["x_over_norm"] = np.where(g["product_ctr"] > 0, g["ctr"] / g["product_ctr"], 0)
 
-    reasons = []
-    for _, r in g.iterrows():
-        rs = []
-        if r["zero_conv_spend"]:
-            rs.append("spend, 0 conversions")
-        if r["plausibility_lineitems"]:
-            rs.append(f"{int(r['plausibility_lineitems'])} high-CTR/0-conv line item(s)")
-        reasons.append("; ".join(rs))
-    g["reason"] = reasons
-    flagged = g[g["reason"] != ""].sort_values("internal_cost", ascending=False)
-    return flagged
+    flagged = g[(g["impressions"] >= min_impr) &
+                (g["ctr"] >= ctr_floor) &
+                (g["x_over_norm"] >= ctr_multiple)].copy()
+    flagged["reason"] = flagged.apply(
+        lambda r: f"CTR {r['ctr']*100:.2f}% is {r['x_over_norm']:.1f}× the {r['product']} norm "
+                  f"({r['product_ctr']*100:.2f}%)", axis=1)
+    return flagged.sort_values("x_over_norm", ascending=False)
 
 
 def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
