@@ -86,6 +86,17 @@ def _blocked_since(product, entry):
     return min(cands) if cands else None
 
 
+def _pick_client(cols):
+    """The 'Client' column, not 'Client Business Unit'."""
+    low = {str(c).lower().strip(): c for c in cols}
+    if "client" in low:
+        return low["client"]
+    for lc, orig in low.items():
+        if "client" in lc and "business" not in lc and "unit" not in lc:
+            return orig
+    return None
+
+
 def _find(cols, *tokens_any):
     """Return first column whose lowercased name contains ALL tokens in any group."""
     low = {c.lower(): c for c in cols}
@@ -109,9 +120,10 @@ def _detect(df, kind):
         "conv": _find(cols, ("click", "conversion"), ("conversion",), ("conv",)),
         "date": _find(cols, ("date",)),
         "bu": _find(cols, ("business", "unit")),
-        "client": _find(cols, ("client",)),
+        "client": _pick_client(cols),
         "product": _find(cols, ("product",)),
         "strategy": _find(cols, ("strategy", "type"), ("strategy",)),
+        "strategy_name": _find(cols, ("strategy", "name")),
         "app_id": _find(cols, ("app", "id"), ("app", "bundle"), ("bundle",)),
     }
 
@@ -138,6 +150,7 @@ def _normalize(df, c):
     out["disp"] = out["placement"].where(~_bad, out["app_id"])
     for dim in ("bu", "client", "product", "strategy"):
         out[dim] = df[c[dim]].astype(str) if c[dim] else "(not in export)"
+    out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
     out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
     return out
@@ -312,43 +325,27 @@ def audit_block_leak(path_or_buffer, blocklist=None):
     topbase = topbase.drop(columns=["last_dt"])
     top_placements = topbase.sort_values("spend", ascending=False).head(300)
 
-    # Block-impact by product: if we applied the block list, how much of each
-    # product's total serve would be excluded? (Realism check — blocking 80% of a
-    # product isn't viable.) "Would block" = already-flagged Block OR a gaming/junk/
-    # unresolved app. Computed per row so the product split is exact.
-    # Block-impact by product: what share of each product's serve is on placements
-    # that are on the master blocklist (product-aware). If no blocklist is wired,
-    # fall back to the in-report signal (already-flagged Block + gaming/junk apps).
-    if blocklist:
-        bl_keys = set(blocklist.keys())
-        allp["_mkey"] = np.where(allp["placement_type"] == "app",
-                                 allp["app_id"].astype(str).str.strip().str.lower(),
-                                 allp["placement"].astype(str).str.strip().str.lower())
-        allp["would_block"] = allp.apply(
-            lambda r: (r["_mkey"] in bl_keys)
-            and _is_blocked_for_product(r["product"], blocklist[r["_mkey"]]), axis=1)
-    else:
-        allp["would_block"] = allp["is_block"]
-        app_mask = allp["placement_type"] == "app"
-        if app_mask.any():
-            auto_flag = allp.loc[app_mask, "placement"].map(lambda x: classify_app_junk(x)[0] is not None)
-            allp.loc[app_mask, "would_block"] = allp.loc[app_mask, "would_block"] | auto_flag
+    # Per-placement-per-product delivery, so the app can compute Block-impact against
+    # the RECOMMENDED block set (which is only known after the AI step).
     VALID = {"Display", "Social Mirror", "Video", "CTV", "Native Display",
              "Native Video", "Social Mirror CTV", "Online Audio", "Audio"}
-    imp_df = allp[allp["product"].isin(VALID)].copy()
-    tot = imp_df.groupby("product").agg(total_impr=("impressions", "sum"),
-                                        total_spend=("spend", "sum"),
-                                        total_placements=("placement", "nunique")).reset_index()
-    blk = (imp_df[imp_df["would_block"]].groupby("product")
-           .agg(blocked_impr=("impressions", "sum"), blocked_spend=("spend", "sum"),
-                blocked_placements=("placement", "nunique")).reset_index())
-    block_impact = tot.merge(blk, on="product", how="left").fillna(
-        {"blocked_impr": 0, "blocked_spend": 0, "blocked_placements": 0})
-    block_impact["pct_impr_blocked"] = np.where(
-        block_impact["total_impr"] > 0, block_impact["blocked_impr"] / block_impact["total_impr"], 0)
-    block_impact["pct_spend_blocked"] = np.where(
-        block_impact["total_spend"] > 0, block_impact["blocked_spend"] / block_impact["total_spend"], 0)
-    block_impact = block_impact.sort_values("pct_impr_blocked", ascending=False)
+    imp_df = allp[allp["product"].isin(VALID) & (allp["impressions"] > 0)].copy()
+    imp_df["match_key"] = np.where(imp_df["placement_type"] == "app",
+                                   imp_df["app_id"].astype(str).str.strip().str.lower(),
+                                   imp_df["placement"].astype(str).str.strip().str.lower())
+    delivery_pp = (imp_df.groupby(["match_key", "placement_type", "product"])
+                   .agg(impressions=("impressions", "sum"), spend=("spend", "sum"))
+                   .reset_index())
+
+    # Placement-level rows by grain, so the app can recompute Partner/Client/Strategy
+    # CTR after removing recommended-block placements ("impact of recommendations").
+    _wl = allp[allp["impressions"] > 0].copy()
+    _wl["match_key"] = np.where(_wl["placement_type"] == "app",
+                                _wl["app_id"].astype(str).str.strip().str.lower(),
+                                _wl["placement"].astype(str).str.strip().str.lower())
+    wl_src = (_wl.groupby(["match_key", "bu", "client", "product", "strategy_name"], dropna=False)
+              .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"))
+              .reset_index())
 
     has_conv = bool(allp["_has_conv"].any())
 
@@ -429,7 +426,8 @@ def audit_block_leak(path_or_buffer, blocklist=None):
         "candidates": candidates,
         "auto_app_blocks": auto_app_blocks,
         "top_placements": top_placements,
-        "block_impact": block_impact,
+        "delivery_pp": delivery_pp,
+        "wl_src": wl_src,
         "blocklist_check": blocklist_check,
         "blocklist_by_bu": blocklist_by_bu,
         "has_conv": has_conv,

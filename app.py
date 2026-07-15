@@ -52,6 +52,8 @@ def analyze():
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
+    cflag = pd.DataFrame()
+    sf = pd.DataFrame()
     bmap = load_buyer_map()  # {} unless BUYER_MAP_URL env var is set
     blocklist = load_blocklist()  # {} unless BLOCKLIST_READ_URL env var is set
     _CACHE.clear()
@@ -138,17 +140,6 @@ def analyze():
             ctx["partner"] = prow
             ctx["has_buyer"] = bool(bmap)
 
-            # Block impact by product (realism check)
-            _CACHE["block_impact_by_product.csv"] = a["block_impact"]
-            bimp = a["block_impact"].copy()
-            hot_flags = (bimp["pct_impr_blocked"] >= 0.5).tolist()
-            bi_rows = _fmt(bimp, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
-                           money_cols=["total_spend", "blocked_spend"],
-                           int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
-            for row, hot in zip(bi_rows, hot_flags):
-                row["hot"] = hot
-            ctx["block_impact"] = bi_rows
-
             # Master-blocklist leak check
             bc = a.get("blocklist_check")
             if bc:
@@ -188,6 +179,77 @@ def analyze():
             # placement on the recommended-block list.
             rec_names = set(rec_site.get("name", pd.Series([], dtype=str)).tolist()) \
                 | set(rec_app.get("name", pd.Series([], dtype=str)).tolist())
+
+            # Block impact by product — impact of applying the RECOMMENDED block set.
+            rec_keys = set(str(x).strip().lower() for x in rec_site.get("name", pd.Series([], dtype=str)).tolist())
+            if "app_id" in rec_app:
+                rec_keys |= set(str(x).strip().lower() for x in rec_app["app_id"].tolist())
+            dpp = a["delivery_pp"]
+            tot = dpp.groupby("product").agg(total_impr=("impressions", "sum"),
+                                             total_spend=("spend", "sum"),
+                                             total_placements=("match_key", "nunique")).reset_index()
+            blk = (dpp[dpp["match_key"].isin(rec_keys)].groupby("product")
+                   .agg(blocked_impr=("impressions", "sum"), blocked_spend=("spend", "sum"),
+                        blocked_placements=("match_key", "nunique")).reset_index())
+            bimp = tot.merge(blk, on="product", how="left").fillna(
+                {"blocked_impr": 0, "blocked_spend": 0, "blocked_placements": 0})
+            bimp["pct_impr_blocked"] = (bimp["blocked_impr"] / bimp["total_impr"]).where(bimp["total_impr"] > 0, 0).fillna(0)
+            bimp["pct_spend_blocked"] = (bimp["blocked_spend"] / bimp["total_spend"]).where(bimp["total_spend"] > 0, 0).fillna(0)
+            bimp = bimp.sort_values("pct_impr_blocked", ascending=False)
+            _CACHE["block_impact_by_product.csv"] = bimp
+            hot_flags = (bimp["pct_impr_blocked"] >= 0.5).tolist()
+            bi_rows = _fmt(bimp, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
+                           money_cols=["total_spend", "blocked_spend"],
+                           int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
+            for row, hot in zip(bi_rows, hot_flags):
+                row["hot"] = hot
+            ctx["block_impact"] = bi_rows
+
+            # Impact of recommendations on the watchlists: recompute CTR after removing
+            # delivery on recommended-block placements, per grain.
+            wl = a["wl_src"].copy()
+            wl["is_rec"] = wl["match_key"].isin(rec_keys)
+
+            def _adj(keys):
+                tot = wl.groupby(keys).agg(ti=("impressions", "sum"), tc=("clicks", "sum"))
+                rec = wl[wl["is_rec"]].groupby(keys).agg(ri=("impressions", "sum"), rc=("clicks", "sum"))
+                m = tot.join(rec).fillna(0.0)
+                ai = m["ti"] - m["ri"]
+                m["adj_ctr"] = ((m["tc"] - m["rc"]) / ai).where(ai > 0, 0.0).fillna(0.0)
+                m["rec_pct"] = (m["ri"] / m["ti"]).where(m["ti"] > 0, 0.0).fillna(0.0)
+                return m
+
+            partner_adj, client_adj, strat_adj = _adj(["bu"]), _adj(["client", "product"]), _adj(["strategy_name"])
+
+            def _pct(v):
+                return f"{v * 100:.2f}%"
+
+            def _attach(rows, adj, keyfn):
+                for row in rows:
+                    k = keyfn(row)
+                    if k in adj.index:
+                        row["adj_ctr"] = _pct(adj.loc[k, "adj_ctr"])
+                        row["rec_pct"] = _pct(adj.loc[k, "rec_pct"])
+                    else:
+                        row["adj_ctr"] = row["rec_pct"] = "—"
+
+            _attach(ctx.get("partner") or [], partner_adj, lambda r: r.get("business_unit"))
+            _attach(ctx.get("clients") or [], client_adj, lambda r: (r.get("Client"), r.get("product")))
+            _attach((ctx.get("insights") or {}).get("strategy_flags", []), strat_adj,
+                    lambda r: r.get("Strategy Name"))
+
+            # Cache the three watchlists (with adj CTR) for the single Excel export.
+            def _merge_adj(df, adj, on):
+                if not len(df):
+                    return df
+                a2 = adj[["adj_ctr", "rec_pct"]].rename(
+                    columns={"adj_ctr": "ctr_after_recs", "rec_pct": "pct_impr_on_recs"})
+                return df.merge(a2, left_on=on, right_index=True, how="left")
+
+            _CACHE["wl_partner"] = _merge_adj(pm, partner_adj, "business_unit") if len(pm) else pm
+            _CACHE["wl_client"] = _merge_adj(cflag, client_adj, ["Client", "product"]) if len(cflag) else cflag
+            _CACHE["wl_strategy"] = _merge_adj(sf, strat_adj, "Strategy Name") if len(sf) else sf
+
             _CACHE["top_placements.csv"] = a["top_placements"]
             top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],
                             int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
@@ -232,6 +294,23 @@ def download(name):
     df.to_csv(buf, index=False)
     return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv",
                      as_attachment=True, download_name=name)
+
+
+@app.route("/download_watchlists.xlsx")
+def download_watchlists():
+    sheets = [("Partner watchlist", _CACHE.get("wl_partner")),
+              ("Client watchlist", _CACHE.get("wl_client")),
+              ("Strategy watchlist", _CACHE.get("wl_strategy"))]
+    if all(df is None or not len(df) for _, df in sheets):
+        abort(404)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
+        for name, df in sheets:
+            (df if df is not None and len(df) else pd.DataFrame({"(none)": []})).to_excel(
+                xl, sheet_name=name[:31], index=False)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name="watchlists.xlsx")
 
 
 @app.route("/push_blocklist", methods=["POST"])
