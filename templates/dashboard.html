@@ -73,20 +73,7 @@
 
   {% if audit %}
     {% set a = audit.summary %}
-    <h2>Block-status check — placements flagged “Block” with delivery{% if a.window_start %} ({{ a.window_start }}–{{ a.window_end }}){% endif %}</h2>
-    <p class="note"><strong>What this is:</strong> placements your report marks "Block" that still logged delivery in this window. Because it's a trailing report, some of this spend ran <em>before</em> the block took effect — so the two gray numbers are context, not proof of a problem. <strong>The red number is the one to act on:</strong> apps still serving in the last day or two of the window, which means the block may not be live yet — verify those in the DSP.</p>
-    <div class="cards">
-      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(a.leaked_spend) }}</div><div class="l">Spend on blocked placements this window (context — may predate the block)</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(a.leaked_impressions) }}</div><div class="l">Impressions (context)</div></div>
-      <div class="kpi"><div class="n">{{ a.leaked_placements }}</div><div class="l">Distinct blocked placements seen</div></div>
-      {% if a.has_dates %}<div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(a.active_spend) }}</div><div class="l">⚠ ACT: {{ a.active_placements }} apps still serving at window edge — verify block is live</div></div>{% endif %}
-    </div>
     {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
-    <p><a class="dl" href="/download/block_leak_offenders.csv">download full list</a>
-       <a class="dl" href="/download/block_leak_by_bu.csv">by business unit</a>
-       <a class="dl" href="/download/block_leak_by_client.csv">by client</a>
-       <a class="dl" href="/download/block_leak_by_product.csv">by product</a>
-       <a class="dl" href="/download/block_leak_by_strategy.csv">by strategy</a></p>
 
     {% if blocklist_check %}
     <h2>Master blocklist check <span class="sub">(placements on your block sheet still appearing in this report)</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
@@ -95,9 +82,9 @@
       <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count }}</div><div class="l">&#9888; Serving AFTER their block date</div></div>
       <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
     </div>
-    <p class="note">Cross-checked against your master blocklist sheet. A <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> the date it was added to the blocklist &mdash; the block isn't taking effect, worth verifying in the DSP. Non-coral rows served only before the block date (expected trailing delivery).</p>
-    <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
+    <p class="note">Cross-checked against your master blocklist sheet, <strong>per product</strong>: a <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> its block date <em>on a product it's actually blocked on</em> &mdash; a real leak worth verifying in the DSP. A placement on the CTV list that only served on Display is not flagged. The <strong>Block list(s)</strong> column shows which tabs it's on.</p>
+    <table><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
     </table>
     {% endif %}
 
@@ -118,7 +105,7 @@
   {% endif %}
 
   {% if partner %}
-    <h2>Partner <span class="sub">(performance + block-leak exposure — click a column to sort; highlighted = CTR flag)</span> <a class="dl" href="/download/partner_summary.csv">CSV</a></h2>
+    <h2>Partner <span class="sub">(performance + blocklist exposure — click a column to sort; highlighted = CTR flag)</span> <a class="dl" href="/download/partner_summary.csv">CSV</a></h2>
     <table class="sortgrid"><thead><tr>
       <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
       <th class="sortable num" data-col="{% if has_buyer %}2{% else %}1{% endif %}" data-type="num">Impr</th>
@@ -136,8 +123,8 @@
   {% endif %}
 
   {% if block_impact %}
-    <h2>Block impact by product <span class="sub">(if the block list were applied, how much of each product's serve it removes)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
-    <p class="note">This models applying the block list — placements already flagged "Block" plus every gaming / junk / unresolved app. "% impr blocked" is how much of each product's total serve those placements represent. A very high % means blocking the full list may not be realistic for that product — review before enforcing.</p>
+    <h2>Block impact by product <span class="sub">(how much of each product's serve is on master-blocklist inventory)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
+    <p class="note">Uses your master blocklist sheet, product-aware: "% impr blocked" is the share of each product's serve running on placements that are on the blocklist for that product. High % means a lot of that product's delivery is on inventory you've already flagged — worth verifying the blocks are live. (Falls back to the in-report Block flag if no blocklist sheet is configured.)</p>
     <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
     {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
     </table>
@@ -164,6 +151,34 @@
     <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Conv</th><th>Spend</th><th>Flag</th></tr>
     {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
     </table>
+  {% endif %}
+
+  {% if insights %}
+    {% set s = insights.summary %}
+    <div class="cards">
+      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(s.total_cost) }}</div><div class="l">Internal cost (book)</div></div>
+      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.total_impressions) }}</div><div class="l">Impressions</div></div>
+      <div class="kpi"><div class="n">{{ s.business_units }}</div><div class="l">Partners</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(s.zero_conv_spend) }}</div><div class="l">Spend in {{ s.zero_conv_bu_count }} zero-conversion BUs</div></div>
+      {% if s.social_mirror_pct_spend %}<div class="kpi warn"><div class="n">{{ '{:.0%}'.format(s.social_mirror_pct_spend) }}</div><div class="l">Spend on Social Mirror ({{ '{:.1%}'.format(s.social_mirror_conv_rate) }} click&rarr;conv)</div></div>{% endif %}
+    </div>
+
+    <h2>Product impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
+    <table><tr><th>Product</th><th>Impr</th><th>CTR</th><th>Click&rarr;conv</th><th>Cost</th><th>% spend</th></tr>
+    {% for r in insights.product %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
+    </table>
+
+    <h2>Strategy impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
+    <table><tr><th>Strategy type</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
+    {% for r in insights.strategy %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ r.strategy_type }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
+    </table>
+
+    <h2>Strategy flags <span class="sub">(strategy names with abnormally high CTR for their strategy type)</span> <a class="dl" href="/download/strategy_flags.csv">download CSV</a></h2>
+    {% if insights.strategy_flags %}
+    <table><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th></tr>
+    {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td></tr>{% endfor %}
+    </table>
+    {% else %}<p class="note">No strategy names tripped the abnormal-CTR threshold.</p>{% endif %}
   {% endif %}
 
   {% if ai %}
@@ -201,33 +216,6 @@
     {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
   {% endif %}
 
-  {% if insights %}
-    {% set s = insights.summary %}
-    <div class="cards">
-      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(s.total_cost) }}</div><div class="l">Internal cost (book)</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.total_impressions) }}</div><div class="l">Impressions</div></div>
-      <div class="kpi"><div class="n">{{ s.business_units }}</div><div class="l">Partners</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(s.zero_conv_spend) }}</div><div class="l">Spend in {{ s.zero_conv_bu_count }} zero-conversion BUs</div></div>
-      {% if s.social_mirror_pct_spend %}<div class="kpi warn"><div class="n">{{ '{:.0%}'.format(s.social_mirror_pct_spend) }}</div><div class="l">Spend on Social Mirror ({{ '{:.1%}'.format(s.social_mirror_conv_rate) }} click&rarr;conv)</div></div>{% endif %}
-    </div>
-
-    <h2>Product impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
-    <table><tr><th>Product</th><th>Impr</th><th>CTR</th><th>Click&rarr;conv</th><th>Cost</th><th>% spend</th></tr>
-    {% for r in insights.product %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
-    </table>
-
-    <h2>Strategy impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
-    <table><tr><th>Strategy type</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
-    {% for r in insights.strategy %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ r.strategy_type }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
-    </table>
-
-    <h2>Strategy flags <span class="sub">(strategy names with abnormally high CTR for their strategy type)</span> <a class="dl" href="/download/strategy_flags.csv">download CSV</a></h2>
-    {% if insights.strategy_flags %}
-    <table><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th></tr>
-    {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td></tr>{% endfor %}
-    </table>
-    {% else %}<p class="note">No strategy names tripped the abnormal-CTR threshold.</p>{% endif %}
-  {% endif %}
 </div>
 <script>
   function cp(id, btn){

@@ -13,6 +13,7 @@ Business Unit (partner), Client, Product, and Strategy.
 import pandas as pd
 import numpy as np
 import re
+import datetime
 from openpyxl import load_workbook
 
 SENTINELS = {"block", "blocked"}
@@ -56,6 +57,33 @@ SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
     "App Overview": {"kind": "app"},
 }
+
+# Which master-blocklist tab covers which product. "All Products" covers everything.
+_PRODUCT_TAB = {"CTV": "CTV", "Online Audio": "Audio", "Social Mirror": "Social Mirror"}
+_BLANK_DATE = datetime.date(1970, 1, 1)  # blank date_added = blocked before any dated row
+
+
+def _is_blocked_for_product(product, entry):
+    """True if this placement's blocklist membership covers this product."""
+    tabs = entry.get("tabs", set())
+    if "All Products" in tabs:
+        return True
+    tab = _PRODUCT_TAB.get(product)
+    return bool(tab and tab in tabs)
+
+
+def _blocked_since(product, entry):
+    """Earliest date this product is blocked for this placement, or None. A blank
+    date on an applicable list counts as 'blocked long ago'."""
+    td = entry.get("tab_dates", {})
+    tabs = entry.get("tabs", set())
+    cands = []
+    if "All Products" in tabs:
+        cands.append(td.get("All Products") or _BLANK_DATE)
+    tab = _PRODUCT_TAB.get(product)
+    if tab and tab in tabs:
+        cands.append(td.get(tab) or _BLANK_DATE)
+    return min(cands) if cands else None
 
 
 def _find(cols, *tokens_any):
@@ -288,11 +316,23 @@ def audit_block_leak(path_or_buffer, blocklist=None):
     # product's total serve would be excluded? (Realism check — blocking 80% of a
     # product isn't viable.) "Would block" = already-flagged Block OR a gaming/junk/
     # unresolved app. Computed per row so the product split is exact.
-    allp["would_block"] = allp["is_block"]
-    app_mask = allp["placement_type"] == "app"
-    if app_mask.any():
-        auto_flag = allp.loc[app_mask, "placement"].map(lambda x: classify_app_junk(x)[0] is not None)
-        allp.loc[app_mask, "would_block"] = allp.loc[app_mask, "would_block"] | auto_flag
+    # Block-impact by product: what share of each product's serve is on placements
+    # that are on the master blocklist (product-aware). If no blocklist is wired,
+    # fall back to the in-report signal (already-flagged Block + gaming/junk apps).
+    if blocklist:
+        bl_keys = set(blocklist.keys())
+        allp["_mkey"] = np.where(allp["placement_type"] == "app",
+                                 allp["app_id"].astype(str).str.strip().str.lower(),
+                                 allp["placement"].astype(str).str.strip().str.lower())
+        allp["would_block"] = allp.apply(
+            lambda r: (r["_mkey"] in bl_keys)
+            and _is_blocked_for_product(r["product"], blocklist[r["_mkey"]]), axis=1)
+    else:
+        allp["would_block"] = allp["is_block"]
+        app_mask = allp["placement_type"] == "app"
+        if app_mask.any():
+            auto_flag = allp.loc[app_mask, "placement"].map(lambda x: classify_app_junk(x)[0] is not None)
+            allp.loc[app_mask, "would_block"] = allp.loc[app_mask, "would_block"] | auto_flag
     VALID = {"Display", "Social Mirror", "Video", "CTV", "Native Display",
              "Native Video", "Social Mirror CTV", "Online Audio", "Audio"}
     imp_df = allp[allp["product"].isin(VALID)].copy()
@@ -314,8 +354,10 @@ def audit_block_leak(path_or_buffer, blocklist=None):
 
     # Master-blocklist check: match delivery against the external blocklist sheet
     # (by domain for sites, App ID for apps) and flag anything still serving AFTER
-    # its "date added" — i.e., a block that isn't actually working.
+    # its "date added" — but only on a product it's actually blocked on. A CTV-list
+    # placement that served on Display is NOT a leak (it was never blocked there).
     blocklist_check = None
+    blocklist_by_bu = None
     if blocklist:
         a2 = allp[allp["impressions"] > 0].copy()
         a2["match_key"] = np.where(a2["placement_type"] == "app",
@@ -323,21 +365,23 @@ def audit_block_leak(path_or_buffer, blocklist=None):
                                    a2["placement"].astype(str).str.strip().str.lower())
         a2 = a2[a2["match_key"].isin(blocklist.keys())].copy()
         if len(a2):
-            a2["date_added"] = a2["match_key"].map(lambda k: blocklist[k].get("date_added"))
-            da = pd.to_datetime(a2["date_added"], errors="coerce")
+            a2["blocked_date"] = a2.apply(
+                lambda r: _blocked_since(r["product"], blocklist[r["match_key"]]), axis=1)
+            bd = pd.to_datetime(a2["blocked_date"], errors="coerce")
             sd = pd.to_datetime(a2["served_date"], errors="coerce")
-            a2["after_block"] = sd.notna() & da.notna() & (sd > da)
+            a2["after_block"] = bd.notna() & sd.notna() & (sd > bd)
             a2["post_impr"] = np.where(a2["after_block"], a2["impressions"], 0)
             a2["post_spend"] = np.where(a2["after_block"], a2["spend"], 0)
-            disp = np.where(a2["placement_type"] == "app",
-                            a2["disp"].astype(str), a2["placement"].astype(str))
-            a2["display_name"] = disp
+            a2["display_name"] = np.where(a2["placement_type"] == "app",
+                                          a2["disp"].astype(str), a2["placement"].astype(str))
             g = (a2.groupby("match_key")
                  .agg(name=("display_name", "first"), placement_type=("placement_type", "first"),
                       products=("product", _products), impressions=("impressions", "sum"),
                       spend=("spend", "sum"), post_impr=("post_impr", "sum"),
                       post_spend=("post_spend", "sum"), last_dt=("served_date", "max"))
                  .reset_index())
+            g["lists"] = g["match_key"].map(
+                lambda k: ", ".join(sorted(blocklist[k].get("tabs", set()))))
             g["date_added"] = g["match_key"].map(lambda k: blocklist[k].get("date_added"))
             g["leaking"] = g["post_impr"] > 0
             g["last_served"] = pd.to_datetime(g["last_dt"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
@@ -349,6 +393,14 @@ def audit_block_leak(path_or_buffer, blocklist=None):
                 "leaking_spend": float(g.loc[g["leaking"], "post_spend"].sum()),
                 "rows": g.sort_values(["leaking", "post_spend"], ascending=[False, False]),
             }
+            # Per-partner exposure to blocklisted inventory (product-aware): serving
+            # on placements that are on the blocklist for that product.
+            exp = a2[a2["blocked_date"].notna()].copy()
+            if len(exp) and "bu" in exp.columns:
+                blocklist_by_bu = (exp.groupby("bu")
+                                   .agg(blocked_impr=("impressions", "sum"),
+                                        blocked_placements=("match_key", "nunique"))
+                                   .reset_index())
 
     summary = {
         "leaked_spend": float(leak["spend"].sum()),
@@ -379,6 +431,7 @@ def audit_block_leak(path_or_buffer, blocklist=None):
         "top_placements": top_placements,
         "block_impact": block_impact,
         "blocklist_check": blocklist_check,
+        "blocklist_by_bu": blocklist_by_bu,
         "has_conv": has_conv,
         "has_app_id": bool(app_c["app_id"].ne(app_c["name"]).any()) if len(app_c) else False,
     }

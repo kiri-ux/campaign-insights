@@ -86,10 +86,16 @@ def load_blocklist(url=None, tabs=None, value_col=1, date_col=4):
             d = _parse_date(r[date_col]) if len(r) > date_col else None
             key = val.lower()
             if key not in out:
-                out[key] = {"value": val, "date_added": d, "tabs": {tab}}
-            else:
-                out[key]["tabs"].add(tab)
-                # keep the earliest date_added
-                if d and (out[key]["date_added"] is None or d < out[key]["date_added"]):
-                    out[key]["date_added"] = d
+                out[key] = {"value": val, "date_added": d, "tabs": set(), "tab_dates": {}}
+            entry = out[key]
+            entry["tabs"].add(tab)
+            # earliest date per tab
+            if d and (tab not in entry["tab_dates"] or entry["tab_dates"][tab] is None
+                      or d < entry["tab_dates"][tab]):
+                entry["tab_dates"][tab] = d
+            elif tab not in entry["tab_dates"]:
+                entry["tab_dates"][tab] = d
+            # overall earliest date_added
+            if d and (entry["date_added"] is None or d < entry["date_added"]):
+                entry["date_added"] = d
     return out

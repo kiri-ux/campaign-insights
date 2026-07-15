@@ -115,8 +115,12 @@ def analyze():
 
             # Combined Partner grid: performance (all delivery) + block-leak exposure,
             # one row per partner, sortable.
-            leaked = a["leak_by_bu"].rename(columns={"bu": "business_unit",
-                     "leaked_impressions": "blocked_impr", "placements": "blocked_placements"})
+            bbu = a.get("blocklist_by_bu")
+            if bbu is not None and len(bbu):
+                leaked = bbu.rename(columns={"bu": "business_unit"})
+            else:
+                leaked = a["leak_by_bu"].rename(columns={"bu": "business_unit",
+                         "leaked_impressions": "blocked_impr", "placements": "blocked_placements"})
             leaked = leaked[["business_unit", "blocked_impr", "blocked_placements"]]
             if len(perf_bu):
                 pm = perf_bu.merge(leaked, on="business_unit", how="left")
