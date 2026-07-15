@@ -88,6 +88,19 @@
        <a class="dl" href="/download/block_leak_by_product.csv">by product</a>
        <a class="dl" href="/download/block_leak_by_strategy.csv">by strategy</a></p>
 
+    {% if blocklist_check %}
+    <h2>Master blocklist check <span class="sub">(placements on your block sheet still appearing in this report)</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
+    <div class="cards">
+      <div class="kpi"><div class="n">{{ blocklist_check.matched }}</div><div class="l">Blocked placements seen in report</div></div>
+      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count }}</div><div class="l">&#9888; Serving AFTER their block date</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
+    </div>
+    <p class="note">Cross-checked against your master blocklist sheet. A <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> the date it was added to the blocklist &mdash; the block isn't taking effect, worth verifying in the DSP. Non-coral rows served only before the block date (expected trailing delivery).</p>
+    <table><tr><th>Placement</th><th>Type</th><th>Products</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+
     <h2>Placements <span class="sub">(all delivery — click a column to sort; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = on the recommended-block list)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
     <table id="topgrid"><thead><tr>
       <th>Placement</th><th>Type</th><th>Products</th>
@@ -158,11 +171,11 @@
     {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
     {% if ai.site_count or ai.app_count %}
     <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking — an AI review of placements not yet on your list, plus every gaming / junk / unresolved-bundle app caught automatically. Every row is <strong>checked by default</strong>; uncheck any placement to drop it from both copy blocks and the export below. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
-       <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button></p>
+       <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
     <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>Site</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.sites %}<tr><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" checked></td><td>{{ r.name }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    {% for r in ai.sites %}<tr><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
@@ -175,7 +188,7 @@
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
     <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>App</th><th>App ID</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App ID)</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
@@ -251,6 +264,27 @@
     a.download='recommended_blocks_selected.csv'; document.body.appendChild(a); a.click(); a.remove();
   }
   window.downloadSelected=downloadSelected;
+  function pushBlocklist(){
+    var placements=[];
+    document.querySelectorAll('.blkchk').forEach(function(cb){
+      if(cb.checked) placements.push({type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||''});
+    });
+    var msg=document.getElementById('pushmsg'), btn=document.getElementById('pushbtn');
+    if(!placements.length){ if(msg) msg.textContent='Nothing selected.'; return; }
+    if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
+    if(msg) msg.textContent='';
+    fetch('/push_blocklist',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({placements:placements})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(msg) msg.textContent = d.ok ? ('Added '+(d.added!=null?d.added:placements.length)+', skipped '+(d.skipped||0)+' already listed.')
+                                       : ('Error: '+(d.error||'push failed'));
+        if(msg) msg.style.color = d.ok ? '#177245' : 'var(--warn)';
+      })
+      .catch(function(e){ if(msg){msg.textContent='Error: '+e; msg.style.color='var(--warn)';} })
+      .finally(function(){ if(btn){ btn.disabled=false; btn.textContent='Push selected to blocklist sheet'; } });
+  }
+  window.pushBlocklist=pushBlocklist;
   // Sortable grids (top placements + partner)
   document.querySelectorAll('table#topgrid, table.sortgrid').forEach(function(t){
     var parse=function(txt,type){

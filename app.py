@@ -6,8 +6,10 @@ Upload a site/app-grain export -> block list + waste attributed to BU/Product/St
 import io
 import os
 import gc
+import json
 import tempfile
-from flask import Flask, request, render_template, send_file, abort
+import urllib.request
+from flask import Flask, request, render_template, send_file, abort, jsonify
 import pandas as pd
 
 from insights_engine import build_insights
@@ -16,6 +18,7 @@ from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks
 from product_map import build_pmap
 from buyer_map import load_buyer_map, buyer_for
+from blocklist_read import load_blocklist
 
 PMAP = build_pmap()
 
@@ -45,9 +48,12 @@ def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
-           "partner": None, "pmap": PMAP, "errors": []}
+           "partner": None, "pmap": PMAP, "blocklist_check": None,
+           "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
+           "errors": []}
     perf_bu = pd.DataFrame()
     bmap = load_buyer_map()  # {} unless BUYER_MAP_URL env var is set
+    blocklist = load_blocklist()  # {} unless BLOCKLIST_READ_URL env var is set
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -96,7 +102,7 @@ def analyze():
         gc.collect()  # release the performance frames before the big Site/App parse
 
         try:
-            a = audit_block_leak(tmp.name)
+            a = audit_block_leak(tmp.name, blocklist=blocklist)
             _CACHE["block_leak_offenders.csv"] = a["offenders"]
             _CACHE["block_leak_by_bu.csv"] = a["leak_by_bu"]
             _CACHE["block_leak_by_client.csv"] = a["leak_by_client"]
@@ -138,6 +144,17 @@ def analyze():
             for row, hot in zip(bi_rows, hot_flags):
                 row["hot"] = hot
             ctx["block_impact"] = bi_rows
+
+            # Master-blocklist leak check
+            bc = a.get("blocklist_check")
+            if bc:
+                _CACHE["blocklist_check.csv"] = bc["rows"]
+                brows = _fmt(bc["rows"].head(100), money_cols=["spend", "post_spend"],
+                             int_cols=["impressions", "post_impr"]).to_dict("records")
+                ctx["blocklist_check"] = {
+                    "matched": bc["matched"], "leaking_count": bc["leaking_count"],
+                    "leaking_spend": bc["leaking_spend"], "rows": brows,
+                }
 
             # AI runs on every upload now. Merge Claude's picks with the
             # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
@@ -211,6 +228,35 @@ def download(name):
     df.to_csv(buf, index=False)
     return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv",
                      as_attachment=True, download_name=name)
+
+
+@app.route("/push_blocklist", methods=["POST"])
+def push_blocklist():
+    """Forward the user's checked placements to the blocklist Google Sheet via an
+    Apps Script web-app webhook (URL in the BLOCKLIST_WEBHOOK_URL env var). Keeping
+    the webhook server-side means it isn't exposed in the page."""
+    webhook = os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()
+    if not webhook:
+        return jsonify({"ok": False, "error": "Blocklist sheet isn't configured (set BLOCKLIST_WEBHOOK_URL)."}), 400
+    try:
+        placements = (request.get_json(force=True) or {}).get("placements", [])
+    except Exception:
+        placements = []
+    if not placements:
+        return jsonify({"ok": False, "error": "No placements selected."}), 400
+    try:
+        payload = json.dumps({"placements": placements}).encode()
+        req = urllib.request.Request(webhook, data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        try:
+            result = json.loads(body)
+        except Exception:
+            result = {"ok": True, "raw": body[:200]}
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Push failed: {e}"}), 502
 
 
 if __name__ == "__main__":

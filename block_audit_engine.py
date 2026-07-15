@@ -155,7 +155,7 @@ def _stream_sheet(ws):
     return pd.DataFrame(data), n
 
 
-def audit_block_leak(path_or_buffer):
+def audit_block_leak(path_or_buffer, blocklist=None):
     wb = load_workbook(path_or_buffer, read_only=True, data_only=True)
     frames = []
     truncation = {}
@@ -312,6 +312,44 @@ def audit_block_leak(path_or_buffer):
 
     has_conv = bool(allp["_has_conv"].any())
 
+    # Master-blocklist check: match delivery against the external blocklist sheet
+    # (by domain for sites, App ID for apps) and flag anything still serving AFTER
+    # its "date added" — i.e., a block that isn't actually working.
+    blocklist_check = None
+    if blocklist:
+        a2 = allp[allp["impressions"] > 0].copy()
+        a2["match_key"] = np.where(a2["placement_type"] == "app",
+                                   a2["app_id"].astype(str).str.strip().str.lower(),
+                                   a2["placement"].astype(str).str.strip().str.lower())
+        a2 = a2[a2["match_key"].isin(blocklist.keys())].copy()
+        if len(a2):
+            a2["date_added"] = a2["match_key"].map(lambda k: blocklist[k].get("date_added"))
+            da = pd.to_datetime(a2["date_added"], errors="coerce")
+            sd = pd.to_datetime(a2["served_date"], errors="coerce")
+            a2["after_block"] = sd.notna() & da.notna() & (sd > da)
+            a2["post_impr"] = np.where(a2["after_block"], a2["impressions"], 0)
+            a2["post_spend"] = np.where(a2["after_block"], a2["spend"], 0)
+            disp = np.where(a2["placement_type"] == "app",
+                            a2["disp"].astype(str), a2["placement"].astype(str))
+            a2["display_name"] = disp
+            g = (a2.groupby("match_key")
+                 .agg(name=("display_name", "first"), placement_type=("placement_type", "first"),
+                      products=("product", _products), impressions=("impressions", "sum"),
+                      spend=("spend", "sum"), post_impr=("post_impr", "sum"),
+                      post_spend=("post_spend", "sum"), last_dt=("served_date", "max"))
+                 .reset_index())
+            g["date_added"] = g["match_key"].map(lambda k: blocklist[k].get("date_added"))
+            g["leaking"] = g["post_impr"] > 0
+            g["last_served"] = pd.to_datetime(g["last_dt"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+            g["date_added_str"] = g["date_added"].map(lambda d: d.strftime("%Y-%m-%d") if d else "—")
+            g = g.drop(columns=["last_dt"])
+            blocklist_check = {
+                "matched": int(len(g)),
+                "leaking_count": int(g["leaking"].sum()),
+                "leaking_spend": float(g.loc[g["leaking"], "post_spend"].sum()),
+                "rows": g.sort_values(["leaking", "post_spend"], ascending=[False, False]),
+            }
+
     summary = {
         "leaked_spend": float(leak["spend"].sum()),
         "leaked_impressions": float(leak["impressions"].sum()),
@@ -340,6 +378,7 @@ def audit_block_leak(path_or_buffer):
         "auto_app_blocks": auto_app_blocks,
         "top_placements": top_placements,
         "block_impact": block_impact,
+        "blocklist_check": blocklist_check,
         "has_conv": has_conv,
         "has_app_id": bool(app_c["app_id"].ne(app_c["name"]).any()) if len(app_c) else False,
     }
