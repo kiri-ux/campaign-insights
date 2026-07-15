@@ -49,6 +49,7 @@ def analyze():
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
            "partner": None, "pmap": PMAP, "blocklist_check": None, "topcards": None,
+           "block_impact_strategy": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
@@ -204,6 +205,28 @@ def analyze():
             for row, hot in zip(bi_rows, hot_flags):
                 row["hot"] = hot
             ctx["block_impact"] = bi_rows
+
+            # Block impact by strategy type — same idea, grouped by strategy.
+            dps = a["delivery_strat"]
+            tots = dps.groupby("strategy").agg(total_impr=("impressions", "sum"),
+                                               total_spend=("spend", "sum"),
+                                               total_placements=("match_key", "nunique")).reset_index()
+            blks = (dps[dps["match_key"].isin(rec_keys)].groupby("strategy")
+                    .agg(blocked_impr=("impressions", "sum"), blocked_spend=("spend", "sum"),
+                         blocked_placements=("match_key", "nunique")).reset_index())
+            bis = tots.merge(blks, on="strategy", how="left").fillna(
+                {"blocked_impr": 0, "blocked_spend": 0, "blocked_placements": 0})
+            bis["pct_impr_blocked"] = (bis["blocked_impr"] / bis["total_impr"]).where(bis["total_impr"] > 0, 0).fillna(0)
+            bis["pct_spend_blocked"] = (bis["blocked_spend"] / bis["total_spend"]).where(bis["total_spend"] > 0, 0).fillna(0)
+            bis = bis.sort_values("pct_impr_blocked", ascending=False)
+            _CACHE["block_impact_by_strategy.csv"] = bis
+            hs = (bis["pct_impr_blocked"] >= 0.5).tolist()
+            bis_rows = _fmt(bis, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
+                            money_cols=["total_spend", "blocked_spend"],
+                            int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
+            for row, hot in zip(bis_rows, hs):
+                row["hot"] = hot
+            ctx["block_impact_strategy"] = bis_rows
 
             # Impact of recommendations on the watchlists: recompute CTR after removing
             # delivery on recommended-block placements, per grain.

@@ -168,10 +168,12 @@
   {% if insights %}
 
 
-    <h2>Strategy impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
-    <table><tr><th>Strategy type</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
-    {% for r in insights.strategy %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ r.strategy_type }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.internal_cost }}</td><td>{{ r.cost_per_conv }}</td></tr>{% endfor %}
+    {% if block_impact_strategy %}
+    <h2>Block impact by strategy <span class="sub">(if you applied the recommended blocks, how much of each strategy type's serve is removed)</span> <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h2>
+    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
     </table>
+    {% endif %}
 
 
   {% endif %}

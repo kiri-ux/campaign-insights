@@ -347,6 +347,11 @@ def audit_block_leak(path_or_buffer, blocklist=None):
               .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"))
               .reset_index())
 
+    # Per-placement-per-strategy-type delivery, for "Block impact by strategy".
+    delivery_strat = (_wl.groupby(["match_key", "strategy"], dropna=False)
+                      .agg(impressions=("impressions", "sum"), spend=("spend", "sum"))
+                      .reset_index())
+
     has_conv = bool(allp["_has_conv"].any())
 
     # Master-blocklist check: match delivery against the external blocklist sheet
@@ -427,6 +432,7 @@ def audit_block_leak(path_or_buffer, blocklist=None):
         "auto_app_blocks": auto_app_blocks,
         "top_placements": top_placements,
         "delivery_pp": delivery_pp,
+        "delivery_strat": delivery_strat,
         "wl_src": wl_src,
         "blocklist_check": blocklist_check,
         "blocklist_by_bu": blocklist_by_bu,
