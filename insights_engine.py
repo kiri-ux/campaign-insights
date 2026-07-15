@@ -178,6 +178,7 @@ def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
 
     summary = {
         "total_impressions": float(prod["Impressions"].sum()),
+        "total_clicks": float(pd.to_numeric(prod["Clicks"], errors="coerce").fillna(0).sum()) if "Clicks" in prod else 0.0,
         "total_cost": float(prod["Internal Cost"].sum()),
         "business_units": int(bu["business_unit"].nunique()),
         "zero_conv_bu_count": int(len(zero)),
@@ -186,6 +187,7 @@ def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
         "social_mirror_conv_rate": float(sm["click_conv_rate"].iloc[0]) if len(sm) else None,
         "strategy_flag_count": int(len(fl)),
     }
+    summary["book_ctr"] = (summary["total_clicks"] / summary["total_impressions"]) if summary["total_impressions"] else 0.0
     return {
         "summary": summary,
         "by_business_unit": bu,

@@ -48,7 +48,7 @@ def analyze():
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
-           "partner": None, "pmap": PMAP, "blocklist_check": None,
+           "partner": None, "pmap": PMAP, "blocklist_check": None, "topcards": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
@@ -249,6 +249,27 @@ def analyze():
             _CACHE["wl_partner"] = _merge_adj(pm, partner_adj, "business_unit") if len(pm) else pm
             _CACHE["wl_client"] = _merge_adj(cflag, client_adj, ["Client", "product"]) if len(cflag) else cflag
             _CACHE["wl_strategy"] = _merge_adj(sf, strat_adj, "Strategy Name") if len(sf) else sf
+
+            # Top summary cards: date range, impr, CTR, internal cost, # placements,
+            # # recommended-block placements, spend on recommended-block placements.
+            ins = (ctx.get("insights") or {}).get("summary", {})
+            asum = a["summary"]
+            if asum.get("window_start") and asum.get("window_end"):
+                date_range = f"{asum['window_start']} – {asum['window_end']}"
+            elif asum.get("window_end"):
+                date_range = asum["window_end"]
+            else:
+                date_range = "—"
+            rec_spend = float(dpp[dpp["match_key"].isin(rec_keys)]["spend"].sum())
+            ctx["topcards"] = {
+                "date_range": date_range,
+                "impressions": ins.get("total_impressions", 0),
+                "ctr": ins.get("book_ctr", 0),
+                "internal_cost": ins.get("total_cost", 0),
+                "placements": int(dpp["match_key"].nunique()),
+                "rec_placements": int(len(rec_site) + len(rec_app)),
+                "rec_spend": rec_spend,
+            }
 
             _CACHE["top_placements.csv"] = a["top_placements"]
             top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],

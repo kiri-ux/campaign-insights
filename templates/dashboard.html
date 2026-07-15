@@ -66,14 +66,16 @@
 {% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
 <div class="wrap">
-  {% if insights %}
-    {% set s = insights.summary %}
+  {% if topcards %}
+    {% set t = topcards %}
     <div class="cards">
-      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(s.total_cost) }}</div><div class="l">Internal cost (book)</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.total_impressions) }}</div><div class="l">Impressions</div></div>
-      <div class="kpi"><div class="n">{{ s.business_units }}</div><div class="l">Partners</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(s.zero_conv_spend) }}</div><div class="l">Spend in {{ s.zero_conv_bu_count }} zero-conversion BUs</div></div>
-      {% if s.social_mirror_pct_spend %}<div class="kpi warn"><div class="n">{{ '{:.0%}'.format(s.social_mirror_pct_spend) }}</div><div class="l">Spend on Social Mirror ({{ '{:.1%}'.format(s.social_mirror_conv_rate) }} click&rarr;conv)</div></div>{% endif %}
+      <div class="kpi"><div class="n">{{ t.date_range }}</div><div class="l">Insights date range</div></div>
+      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(t.impressions) }}</div><div class="l">Impressions</div></div>
+      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(t.ctr*100) }}</div><div class="l">CTR</div></div>
+      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(t.internal_cost) }}</div><div class="l">Internal cost (book)</div></div>
+      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(t.placements) }}</div><div class="l">Placements</div></div>
+      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(t.rec_placements) }}</div><div class="l">Recommended-block placements</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(t.rec_spend) }}</div><div class="l">Spend on recommended-block placements</div></div>
     </div>
   {% endif %}
 
