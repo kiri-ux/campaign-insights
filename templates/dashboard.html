@@ -165,28 +165,8 @@
 
 
 
-  {% if exchanges %}
-    {% set e = exchanges.summary %}
-    <h2>Exchange anomalies <span class="sub">(abnormal CTR judged per product / ad type)</span></h2>
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ e.exchanges }}</div><div class="l">Exchanges</div></div>
-      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(e.book_ctr*100) }}</div><div class="l">Book-average CTR</div></div>
-      <div class="kpi warn"><div class="n">{{ e.flag_count }}</div><div class="l">Flagged exchange × product</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(e.flag_spend) }}</div><div class="l">Spend on flagged exchange×product</div></div>
-    </div>
-    <p class="note"><strong>Rule:</strong> flags an exchange×product when (a) CTR ≥ 3× the product norm at spend ≥ $150 and impr ≥ 30,000 (abnormally high — invalid-traffic signal), or (b) for click-driven products only (Display, Native Display, Native Video, Video, Social Mirror), CTR ≤ ⅓ of the norm at impr &gt; 30,000 (abnormally low — underdelivering). CTV/Audio are excluded from the low check. <strong>Exchanges converting at ≥ 0.03% conv/impr are never flagged</strong> — they're productive regardless of CTR — so what remains is genuinely worth investigating. {{ e.top_exchange }} carries {{ '{:.0f}%'.format(e.top_share*100) }} of spend. <a class="dl" href="/download/exchange_flags.csv">flags CSV</a> <a class="dl" href="/download/exchange_table.csv">all exchanges CSV</a></p>
-    <table><tr><th>Exchange</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Conv</th><th>Spend</th><th>Flag</th></tr>
-    {% for r in exchanges.flags %}<tr><td>{{ r.exchange }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td style="white-space:normal">{{ r.flag }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
   {% if insights %}
 
-
-    <h2>Product impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_product.csv">download CSV</a></h2>
-    <table><tr><th>Product</th><th>Impr</th><th>CTR</th><th>Click&rarr;conv</th><th>Cost</th><th>% spend</th></tr>
-    {% for r in insights.product %}<tr{% if r.above_norm %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.click_conv_rate }}</td><td>{{ r.internal_cost }}</td><td>{{ r.pct_of_spend }}</td></tr>{% endfor %}
-    </table>
 
     <h2>Strategy impact <span class="sub">(sorted by CTR; highlighted = above book norm)</span> <a class="dl" href="/download/by_strategy.csv">download CSV</a></h2>
     <table><tr><th>Strategy type</th><th>Impr</th><th>CTR</th><th>Conv</th><th>Cost</th><th>Cost/conv</th></tr>
