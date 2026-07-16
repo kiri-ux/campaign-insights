@@ -45,6 +45,25 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
+    wb = request.files.get("insights_workbook")
+    if not (wb and wb.filename):
+        return render_template("dashboard.html", pmap=PMAP, errors=["Upload the Insights workbook (.xlsx)."])
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+    tmp.close()
+    try:
+        ctx = _analyze_path(tmp.name)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        gc.collect()
+    return render_template("dashboard.html", **ctx)
+
+
+def _analyze_path(path):
+    """Run the full analysis on an .xlsx at `path` and return the template ctx."""
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
@@ -59,20 +78,9 @@ def analyze():
     blocklist = load_blocklist()  # {} unless BLOCKLIST_READ_URL env var is set
     excluded = set(load_blocklist(tabs=["Excluded"]).keys()) if os.environ.get("BLOCKLIST_READ_URL", "").strip() else set()
     _CACHE.clear()
-
-    wb = request.files.get("insights_workbook")
-    if not (wb and wb.filename):
-        ctx["errors"].append("Upload the Insights workbook (.xlsx).")
-        return render_template("dashboard.html", **ctx)
-
-    # Stream the upload straight to disk so we never hold the whole file (and
-    # duplicate BytesIO copies) in RAM. Both engines read from the same path.
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(tmp.name)
-    tmp.close()
     try:
         try:
-            r = build_insights(tmp.name)
+            r = build_insights(path)
             _CACHE["by_business_unit.csv"] = r["by_business_unit"]
             _CACHE["by_product.csv"] = r["by_product"]
             _CACHE["by_strategy.csv"] = r["by_strategy"]
@@ -106,7 +114,7 @@ def analyze():
         gc.collect()  # release the performance frames before the big Site/App parse
 
         try:
-            a = audit_block_leak(tmp.name, blocklist=blocklist)
+            a = audit_block_leak(path, blocklist=blocklist)
             _CACHE["block_leak_offenders.csv"] = a["offenders"]
             _CACHE["block_leak_by_bu.csv"] = a["leak_by_bu"]
             _CACHE["block_leak_by_client.csv"] = a["leak_by_client"]
@@ -314,7 +322,7 @@ def analyze():
 
         # Exchange anomaly analysis
         try:
-            ex = analyze_exchanges(tmp.name)
+            ex = analyze_exchanges(path)
             if ex:
                 _CACHE["exchange_flags.csv"] = ex["flags"]
                 _CACHE["exchange_table.csv"] = ex["table"]
@@ -328,13 +336,102 @@ def analyze():
         except Exception as e:
             ctx["errors"].append(f"Exchange analysis: {e}")
     finally:
+        gc.collect()
+
+    return ctx
+
+
+REPORTS_DIR = os.environ.get("REPORTS_DIR", os.path.join(tempfile.gettempdir(), "insights_reports"))
+
+
+def _save_report(html, date_str=None):
+    """Persist a rendered dashboard as reports/insights-YYYY-MM-DD.html. Returns date."""
+    import datetime
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    date_str = date_str or datetime.date.today().strftime("%Y-%m-%d")
+    with open(os.path.join(REPORTS_DIR, f"insights-{date_str}.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+    return date_str
+
+
+def _list_reports():
+    import glob
+    if not os.path.isdir(REPORTS_DIR):
+        return []
+    files = glob.glob(os.path.join(REPORTS_DIR, "insights-*.html"))
+    dates = sorted((os.path.basename(f)[len("insights-"):-len(".html")] for f in files), reverse=True)
+    return dates
+
+
+@app.route("/ingest", methods=["POST"])
+def ingest():
+    """Headless entry point for automation. Auth via ?key= matching INGEST_KEY.
+    Accepts the .xlsx as multipart ('insights_workbook') or base64 JSON
+    {'filename','content_b64','date'}. Runs the analysis, saves a dated report,
+    and returns {ok, date, view_url, html} (html lets the caller archive to Drive)."""
+    key = os.environ.get("INGEST_KEY", "").strip()
+    if key and request.args.get("key", "") != key:
+        return jsonify({"ok": False, "error": "Unauthorized (bad or missing key)."}), 401
+    date_str = None
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    try:
+        wb = request.files.get("insights_workbook")
+        if wb and wb.filename:
+            wb.save(tmp.name)
+        else:
+            body = request.get_json(silent=True) or {}
+            b64 = body.get("content_b64")
+            date_str = body.get("date")
+            if not b64:
+                return jsonify({"ok": False, "error": "No file (send multipart 'insights_workbook' or JSON content_b64)."}), 400
+            import base64
+            with open(tmp.name, "wb") as f:
+                f.write(base64.b64decode(b64))
+        tmp.close()
+        ctx = _analyze_path(tmp.name)
+        html = render_template("dashboard.html", **ctx)
+        saved = _save_report(html, date_str)
+        base = request.host_url.rstrip("/")
+        return jsonify({"ok": True, "date": saved,
+                        "view_url": f"{base}/reports/{saved}",
+                        "latest_url": f"{base}/reports/latest", "html": html})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Ingest failed: {e}"}), 500
+    finally:
         try:
             os.unlink(tmp.name)
         except OSError:
             pass
         gc.collect()
 
-    return render_template("dashboard.html", **ctx)
+
+@app.route("/reports")
+def reports_index():
+    dates = _list_reports()
+    links = "".join(f'<li><a href="/reports/{d}">{d}</a></li>' for d in dates)
+    body = f"<h2>Saved insights dashboards</h2><p>{len(dates)} report(s).</p><ul>{links}</ul>" \
+        if dates else "<h2>Saved insights dashboards</h2><p>None yet.</p>"
+    return f"<!doctype html><meta charset='utf-8'><title>Reports</title><body style='font-family:sans-serif;max-width:700px;margin:40px auto'>{body}</body>"
+
+
+@app.route("/reports/latest")
+def reports_latest():
+    dates = _list_reports()
+    if not dates:
+        abort(404)
+    return _serve_report(dates[0])
+
+
+@app.route("/reports/<date>")
+def reports_date(date):
+    return _serve_report(date)
+
+
+def _serve_report(date):
+    path = os.path.join(REPORTS_DIR, f"insights-{os.path.basename(date)}.html")
+    if not os.path.isfile(path):
+        abort(404)
+    return send_file(path, mimetype="text/html")
 
 
 @app.route("/download/<name>")
