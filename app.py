@@ -152,6 +152,8 @@ def _analyze_path(path=None, frames=None):
             _CACHE["partner_summary.csv"] = pm
             if "impressions" in pm:
                 pm["cpm"] = (pm["internal_cost"] / pm["impressions"] * 1000).where(pm["impressions"] > 0, 0).fillna(0)
+            if bmap:
+                pm["buyer"] = pm["business_unit"].map(lambda b: buyer_for(b, bmap))
             flagged = pm.get("flagged", pd.Series([False] * len(pm))).tolist()
             prow = _fmt(pm.head(60), pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv", "cpm"],
                         int_cols=["impressions", "clicks", "conversions", "blocked_impr", "blocked_placements"]).to_dict("records")
@@ -297,6 +299,11 @@ def _analyze_path(path=None, frames=None):
                 a2 = adj[["adj_ctr", "rec_pct"]].rename(
                     columns={"adj_ctr": "ctr_after_recs", "rec_pct": "pct_impr_on_recs"})
                 return df.merge(a2, left_on=on, right_index=True, how="left")
+
+            # CPM on the client & strategy watchlists (partner already has it above)
+            for _wl in (cflag, sf):
+                if len(_wl) and "impressions" in _wl.columns and "internal_cost" in _wl.columns:
+                    _wl["cpm"] = (_wl["internal_cost"] / _wl["impressions"] * 1000).where(_wl["impressions"] > 0, 0).fillna(0)
 
             _CACHE["wl_partner"] = _merge_adj(pm, partner_adj, "business_unit") if len(pm) else pm
             _CACHE["wl_client"] = _merge_adj(cflag, client_adj, ["Client", "product"]) if len(cflag) else cflag
