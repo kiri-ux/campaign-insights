@@ -20,13 +20,49 @@ import pandas as pd
 _MEASURES = ["Impressions", "Clicks", "Post Click Conversions",
              "Post View Conversions", "Billable Spend"]
 
+# TapClicks data-view exports use snake_case DB column names; the engines expect
+# the Title Case labels from the old report. Map them (only ones present are used).
+_COLMAP = {
+    "date": "Date",
+    "client_business_unit": "Client Business Unit",
+    "client": "Client",
+    "product_2": "Product 2",
+    "strategy_type": "Strategy Type",
+    "strategy_name": "Strategy Name",
+    "site_domain": "Site Domain",
+    "final_site_domain_name": "Final Site Domain Name",
+    "app_name": "App Name",
+    "final_app_name_use_me": "Final App Name",
+    "final_app_name": "Final App Name",
+    "app_id": "App ID",
+    "device_type": "Device Type",
+    "impressions": "Impressions",
+    "clicks": "Clicks",
+    "ctr": "CTR",
+    "post_click_conversions": "Post Click Conversions",
+    "post_view_conversions": "Post View Conversions",
+    "cpm": "CPM",
+    "billable_spend": "Billable Spend",
+    "total_spend": "Total Spend",
+}
+
+
+def _normalize_headers(df):
+    """Rename snake_case export headers to the Title Case names the engines use.
+    Leaves already-correct headers untouched, so both formats work."""
+    ren = {c: _COLMAP[str(c).strip().lower()] for c in df.columns
+           if str(c).strip().lower() in _COLMAP}
+    return df.rename(columns=ren) if ren else df
+
 
 def read_flat(data, filename=""):
-    """Read one flat export (xlsx or csv bytes) into a DataFrame."""
+    """Read one flat export (xlsx or csv bytes) into a DataFrame with normalized headers."""
     bio = io.BytesIO(data)
     if (filename or "").lower().endswith(".csv"):
-        return pd.read_csv(bio)
-    return pd.read_excel(bio)
+        df = pd.read_csv(bio)
+    else:
+        df = pd.read_excel(bio)
+    return _normalize_headers(df)
 
 
 def _bu_col(df):

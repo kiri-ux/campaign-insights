@@ -460,9 +460,11 @@ def pull():
         html = render_template("dashboard.html", **ctx)
         saved = _save_report(html, date_str)
         base = request.host_url.rstrip("/")
-        return jsonify({"ok": True, "date": saved, "file": source_file,
-                        "view_url": f"{base}/reports/{saved}",
-                        "latest_url": f"{base}/reports/latest"})
+        view_url = f"{base}/reports/{saved}"
+        result = {"ok": True, "date": saved, "file": source_file,
+                  "view_url": view_url, "latest_url": f"{base}/reports/latest"}
+        result["email"] = _send_weekly_email(saved, view_url)
+        return jsonify(result)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Analysis failed: {e}"}), 500
     finally:
@@ -472,6 +474,46 @@ def pull():
             except OSError:
                 pass
         gc.collect()
+
+
+def _send_weekly_email(date_str, view_url):
+    """After a successful pull: email the dashboard link + the 3 watchlists (as a
+    native Google Sheet if configured, else as an .xlsx attachment). No-op unless
+    EMAIL_FROM/EMAIL_TO are set. Never breaks the pull — returns a status string."""
+    try:
+        import emailer
+        if not emailer.configured():
+            return "skipped (EMAIL_FROM/EMAIL_TO not set)"
+        xlsx = _watchlists_xlsx_bytes()
+        sheet_url = None
+        try:
+            import google_sheet
+            if xlsx and google_sheet.configured():
+                sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
+        except Exception as e:
+            sheet_url = None
+            app.logger.warning("Google Sheet upload failed: %s", e)
+
+        if sheet_url:
+            wl_line = f'<p><strong>Watchlists (Google Sheet):</strong> <a href="{sheet_url}">{sheet_url}</a></p>'
+            attach, attach_name = None, None
+        elif xlsx:
+            wl_line = "<p><strong>Watchlists:</strong> attached (Partner / Client / Strategy tabs).</p>"
+            attach, attach_name = xlsx, f"watchlists-{date_str}.xlsx"
+        else:
+            wl_line = ""
+            attach, attach_name = None, None
+
+        body = (f"<p>The weekly Insights dashboard for <strong>{date_str}</strong> is ready.</p>"
+                f'<p><strong>Dashboard:</strong> <a href="{view_url}">{view_url}</a></p>'
+                f"{wl_line}")
+        prefix = os.environ.get("EMAIL_SUBJECT_PREFIX", "Weekly Insights")
+        mid = emailer.send_email(f"{prefix} — {date_str}", body,
+                                 attachment=attach, attachment_name=attach_name or "watchlists.xlsx")
+        return f"sent ({'sheet link' if sheet_url else 'xlsx attached'}), id={mid}"
+    except Exception as e:
+        app.logger.warning("Weekly email failed: %s", e)
+        return f"email failed: {e}"
 
 
 @app.route("/reports")
@@ -514,20 +556,29 @@ def download(name):
                      as_attachment=True, download_name=name)
 
 
-@app.route("/download_watchlists.xlsx")
-def download_watchlists():
+def _watchlists_xlsx_bytes():
+    """Build the 3-tab watchlists workbook from cache; return bytes or None."""
     sheets = [("Partner watchlist", _CACHE.get("wl_partner")),
               ("Client watchlist", _CACHE.get("wl_client")),
               ("Strategy watchlist", _CACHE.get("wl_strategy"))]
     if all(df is None or not len(df) for _, df in sheets):
-        abort(404)
+        return None
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         for name, df in sheets:
             (df if df is not None and len(df) else pd.DataFrame({"(none)": []})).to_excel(
                 xl, sheet_name=name[:31], index=False)
     buf.seek(0)
-    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    return buf.getvalue()
+
+
+@app.route("/download_watchlists.xlsx")
+def download_watchlists():
+    data = _watchlists_xlsx_bytes()
+    if data is None:
+        abort(404)
+    return send_file(io.BytesIO(data),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name="watchlists.xlsx")
 
 
