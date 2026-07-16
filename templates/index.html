@@ -39,6 +39,8 @@
   form.busy + .busy-note{display:block;}
   .dllink{color:var(--velocity);font-weight:600;text-decoration:none;border-bottom:1px solid rgba(30,111,224,.35);}
   .dllink:hover{border-bottom-color:var(--velocity);}
+  .delbtn{background:none;border:0;color:#b00;font-size:13px;font-weight:700;cursor:pointer;padding:2px 6px;border-radius:6px;opacity:.55;font-family:var(--font-body);}
+  .delbtn:hover{opacity:1;background:#fdecea;}
 </style>
 </head>
 <body>
@@ -60,8 +62,8 @@
   <div class="card">
     <label>Recent dashboards</label>
     <div class="hint">Previously generated weekly dashboards.</div>
-    <ul style="margin:6px 0 0;padding-left:18px;line-height:1.9">
-      {% for d in reports %}<li><a class="dllink" href="/reports/{{ d }}">{{ d }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %}</li>{% endfor %}
+    <ul id="dashlist" style="margin:6px 0 0;padding-left:18px;line-height:2">
+      {% for d in reports %}<li data-date="{{ d }}"><a class="dllink" href="/reports/{{ d }}">{{ d }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %} <button type="button" class="delbtn" title="Delete this dashboard" onclick="delDash('{{ d }}', this)">✕</button></li>{% endfor %}
     </ul>
   </div>
   {% endif %}
@@ -91,6 +93,17 @@
         try { return JSON.parse(t); }
         catch(e){ throw new Error('Server error (HTTP '+r.status+'). The run may have used too much memory — give it a moment and try again.'); }
       });
+    }
+    function delDash(date, btn){
+      if(!confirm('Delete the '+date+' dashboard? This cannot be undone.')) return;
+      btn.disabled=true;
+      fetch('/reports/'+date+'/delete',{method:'POST'}).then(_asJson).then(function(d){
+        if(d.ok){
+          var li=btn.closest('li'); if(li) li.remove();
+          var ul=document.getElementById('dashlist');
+          if(ul && !ul.children.length){ var card=ul.closest('.card'); if(card) card.remove(); }
+        } else { alert('Could not delete: '+(d.error||'error')); btn.disabled=false; }
+      }).catch(function(e){ alert('Could not delete: '+e); btn.disabled=false; });
     }
     function pullNow(){
       var b=document.getElementById('pullbtn'), m=document.getElementById('pullmsg');

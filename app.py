@@ -623,6 +623,24 @@ def _serve_report(date):
     return send_file(path, mimetype="text/html")
 
 
+@app.route("/reports/<date>/delete", methods=["POST"])
+def reports_delete(date):
+    """Delete a saved dashboard (and its saved watchlists) by date."""
+    import re
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date or ""):
+        return jsonify({"ok": False, "error": "Bad date."}), 400
+    removed = []
+    for p in (os.path.join(REPORTS_DIR, f"insights-{date}.html"), _watchlists_path(date)):
+        try:
+            os.unlink(p)
+            removed.append(os.path.basename(p))
+        except OSError:
+            pass
+    if not removed:
+        return jsonify({"ok": False, "error": "Not found."}), 404
+    return jsonify({"ok": True, "date": date, "removed": removed})
+
+
 @app.route("/favicon.ico")
 def favicon():
     return send_file(os.path.join(app.static_folder, "favicon.svg"),

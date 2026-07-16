@@ -261,11 +261,11 @@
         html+='<div style="font-weight:600;margin-bottom:4px">'+tab+'</div>';
         if(d.sites.length){
           html+='<div class="copyhead"><span>Sites ('+d.sites.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_s\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(d.sites.join(', '))+'</textarea>';
+          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(', '+d.sites.join(', '))+'</textarea>';
         }
         if(d.apps.length){
           html+='<div class="copyhead"><span>Apps ('+d.apps.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_a\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(d.apps.join(', '))+'</textarea>';
+          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(', '+d.apps.join(', '))+'</textarea>';
         }
         html+='</div>';
       });
