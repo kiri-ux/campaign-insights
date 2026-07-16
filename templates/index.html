@@ -86,26 +86,31 @@
     }
     function _busy(btn, label){ btn.disabled=true; btn.dataset.old=btn.innerHTML; btn.innerHTML='<span class="spin"></span>'+label; }
     function _done(btn){ btn.disabled=false; if(btn.dataset.old) btn.innerHTML=btn.dataset.old; }
+    function _asJson(r){
+      return r.text().then(function(t){
+        try { return JSON.parse(t); }
+        catch(e){ throw new Error('Server error (HTTP '+r.status+'). The run may have used too much memory — give it a moment and try again.'); }
+      });
+    }
     function pullNow(){
       var b=document.getElementById('pullbtn'), m=document.getElementById('pullmsg');
       var eb=document.getElementById('emailbtn'); if(eb) eb.disabled=true;
       _busy(b,'Pulling…'); m.style.color='var(--muted)'; m.textContent='Pulling latest data and building the dashboard — up to a minute…';
-      fetch('/ui/pull',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      fetch('/ui/pull',{method:'POST'}).then(_asJson).then(function(d){
         if(d.ok && d.view_url){ m.textContent='Done — opening dashboard…'; window.location=d.view_url; }
         else if(d.skipped){ m.textContent=d.message||'No new data found.'; }
         else { m.style.color='#b00'; m.textContent='Error: '+(d.error||'pull failed'); }
-      }).catch(function(e){ m.style.color='#b00'; m.textContent='Error: '+e; })
+      }).catch(function(e){ m.style.color='#b00'; m.textContent=''+e; })
         .finally(function(){ _done(b); if(eb) eb.disabled=false; });
     }
     function emailNow(){
       var b=document.getElementById('emailbtn'), m=document.getElementById('pullmsg');
       var pb=document.getElementById('pullbtn'); if(pb) pb.disabled=true;
-      _busy(b,'Emailing…'); m.style.color='var(--muted)'; m.textContent='Refreshing data and sending the email…';
-      fetch('/ui/email',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      _busy(b,'Emailing…'); m.style.color='var(--muted)'; m.textContent='Sending the latest report…';
+      fetch('/ui/email',{method:'POST'}).then(_asJson).then(function(d){
         if(d.ok){ m.style.color='#177245'; m.textContent='Email: '+(d.email||'sent')+(d.view_url?(' · '+d.view_url):''); }
-        else if(d.skipped){ m.textContent=d.message||'No new data found.'; }
         else { m.style.color='#b00'; m.textContent='Error: '+(d.error||'failed'); }
-      }).catch(function(e){ m.style.color='#b00'; m.textContent='Error: '+e; })
+      }).catch(function(e){ m.style.color='#b00'; m.textContent=''+e; })
         .finally(function(){ _done(b); if(pb) pb.disabled=false; });
     }
   </script>

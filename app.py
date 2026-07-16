@@ -373,6 +373,29 @@ def _list_reports():
     return dates
 
 
+def _watchlists_path(date_str):
+    return os.path.join(REPORTS_DIR, f"watchlists-{date_str}.xlsx")
+
+
+def _save_watchlists(date_str, xlsx_bytes):
+    if not xlsx_bytes:
+        return
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(_watchlists_path(date_str), "wb") as f:
+            f.write(xlsx_bytes)
+    except OSError:
+        pass
+
+
+def _load_watchlists(date_str):
+    try:
+        with open(_watchlists_path(date_str), "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 @app.route("/ingest", methods=["POST"])
 def ingest():
     """Headless entry point for automation. Auth via ?key= matching INGEST_KEY.
@@ -441,9 +464,17 @@ def ui_pull():
 
 @app.route("/ui/email", methods=["POST"])
 def ui_email():
-    """UI 'Email latest' button — re-pulls current data and emails it."""
-    result, status = _run_pull(send_email=True)
-    return jsonify(result), status
+    """UI 'Email latest' button — emails the most recent saved report using its
+    saved watchlists. No re-pull, no re-analysis (so no memory spike)."""
+    dates = _list_reports()
+    if not dates:
+        return jsonify({"ok": False, "error": "No report yet — pull first."}), 400
+    date = dates[0]
+    base = request.host_url.rstrip("/")
+    view_url = f"{base}/reports/{date}"
+    xlsx = _load_watchlists(date)  # from disk; None if not saved (older report)
+    status = _send_weekly_email(date, view_url, xlsx if xlsx is not None else b"")
+    return jsonify({"ok": True, "date": date, "view_url": view_url, "email": status}), 200
 
 
 def _run_pull(send_email=False):
@@ -491,12 +522,14 @@ def _run_pull(send_email=False):
         ctx = _analyze_path(workbook_path)
         html = render_template("dashboard.html", **ctx)
         saved = _save_report(html, date_str)
+        xlsx = _watchlists_xlsx_bytes()
+        _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
         base = request.host_url.rstrip("/")
         view_url = f"{base}/reports/{saved}"
         result = {"ok": True, "date": saved, "file": source_file,
                   "view_url": view_url, "latest_url": f"{base}/reports/latest"}
         if send_email:
-            result["email"] = _send_weekly_email(saved, view_url)
+            result["email"] = _send_weekly_email(saved, view_url, xlsx)
         return result, 200
     except Exception as e:
         return {"ok": False, "error": f"Analysis failed: {e}"}, 500
@@ -509,15 +542,16 @@ def _run_pull(send_email=False):
         gc.collect()
 
 
-def _send_weekly_email(date_str, view_url):
-    """After a successful pull: email the dashboard link + the 3 watchlists (as a
-    native Google Sheet if configured, else as an .xlsx attachment). No-op unless
-    EMAIL_FROM/EMAIL_TO are set. Never breaks the pull — returns a status string."""
+def _send_weekly_email(date_str, view_url, xlsx=None):
+    """Email the dashboard link + the 3 watchlists (native Google Sheet if
+    configured, else .xlsx attachment). Pass xlsx bytes to avoid re-computing.
+    No-op unless EMAIL_FROM/EMAIL_TO are set. Returns a status string."""
     try:
         import emailer
         if not emailer.configured():
             return "skipped (EMAIL_FROM/EMAIL_TO not set)"
-        xlsx = _watchlists_xlsx_bytes()
+        if xlsx is None:
+            xlsx = _watchlists_xlsx_bytes()
         sheet_url = None
         try:
             import google_sheet
