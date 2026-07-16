@@ -381,12 +381,18 @@ def ingest():
         else:
             body = request.get_json(silent=True) or {}
             b64 = body.get("content_b64")
+            file_url = body.get("file_url")
             date_str = body.get("date")
-            if not b64:
-                return jsonify({"ok": False, "error": "No file (send multipart 'insights_workbook' or JSON content_b64)."}), 400
-            import base64
-            with open(tmp.name, "wb") as f:
-                f.write(base64.b64decode(b64))
+            if b64:
+                import base64
+                with open(tmp.name, "wb") as f:
+                    f.write(base64.b64decode(b64))
+            elif file_url:
+                req = urllib.request.Request(file_url, headers={"User-Agent": "adtini-insights"})
+                with urllib.request.urlopen(req, timeout=60) as resp, open(tmp.name, "wb") as f:
+                    f.write(resp.read())
+            else:
+                return jsonify({"ok": False, "error": "No file (send multipart 'insights_workbook', or JSON content_b64, or JSON file_url)."}), 400
         tmp.close()
         ctx = _analyze_path(tmp.name)
         html = render_template("dashboard.html", **ctx)
