@@ -119,7 +119,7 @@
 
   {% endif %}
 
-  {% if partner or clients or (insights and insights.strategy_flags) %}
+  {% if partner or clients or low_ctr_sites or (insights and insights.strategy_flags) %}
     <h2>Watchlists <span class="sub">(partners, clients &amp; strategies with abnormal CTR — and what the recommendations would do to each)</span> <a class="dl" href="/download_watchlists.xlsx">Download all (Excel)</a></h2>
   {% endif %}
 
@@ -148,6 +148,14 @@
     <p class="note">CTR is judged <em>per product</em>. Showing {% if clients_total > 50 %}the top 50 of {{ clients_total }}{% else %}all {{ clients_total }}{% endif %}. <strong>CTR after recs</strong> = CTR once delivery on recommended-block placements is removed; <strong>% on recs</strong> = share of impressions from those placements.</p>
     <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th>Impr</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
     {% for r in clients %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if low_ctr_sites %}
+    <h3 style="margin:18px 0 4px">Low-CTR site watchlist <span class="sub" style="font-weight:normal">(sites both far below their product's CTR norm <em>and</em> under the 0.05% floor — by client &amp; site)</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h3>
+    <p class="note">A site is flagged only when it's <strong>both</strong> ≤⅓ of its product's pooled CTR <strong>and</strong> below an absolute 0.05% floor, at ≥5K impressions. <strong>CTV, Social Mirror CTV &amp; Online Audio are excluded</strong> — a low CTR is expected there. Sites converting efficiently are never flagged. Showing {% if low_ctr_sites_total > 100 %}the top 100 of {{ low_ctr_sites_total }}{% else %}all {{ low_ctr_sites_total }}{% endif %}, by wasted spend.</p>
+    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
+    {% for r in low_ctr_sites %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 

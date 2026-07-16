@@ -96,6 +96,7 @@ def _analyze_path(path=None, frames=None):
            "exchanges": None, "top": None, "block_impact": None,
            "partner": None, "pmap": PMAP, "blocklist_check": None, "topcards": None,
            "block_impact_strategy": None,
+           "low_ctr_sites": None, "low_ctr_sites_total": 0,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
@@ -151,6 +152,21 @@ def _analyze_path(path=None, frames=None):
                 "summary": a["summary"],
                 "has_conv": a.get("has_conv", False),
             }
+
+            # Low-CTR site watchlist (by client): sites both far below their
+            # product's CTR norm AND under an absolute floor. CTV/SM CTV/Online
+            # Audio are excluded (low CTR is expected there).
+            lcs = a.get("low_ctr_sites", pd.DataFrame())
+            _CACHE["low_ctr_sites_by_client.csv"] = lcs
+            if len(lcs):
+                lrows = _fmt(lcs.head(100), pct_cols=["ctr", "product_ctr", "conv_rate"],
+                             money_cols=["spend"],
+                             int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
+                for row in lrows:
+                    row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
+                ctx["low_ctr_sites"] = lrows
+                ctx["low_ctr_sites_total"] = int(len(lcs))
+                ctx["has_buyer"] = ctx["has_buyer"] or bool(bmap)
 
             # Combined Partner grid: performance (all delivery) + block-leak exposure,
             # one row per partner, sortable.
@@ -339,6 +355,7 @@ def _analyze_path(path=None, frames=None):
             _CACHE["wl_partner"] = _buyer_first(_merge_adj(pm, partner_adj, "business_unit")) if len(pm) else pm
             _CACHE["wl_client"] = _buyer_first(_merge_adj(cflag, client_adj, ["Client", "product"])) if len(cflag) else cflag
             _CACHE["wl_strategy"] = _buyer_first(_merge_adj(sf, strat_adj, "Strategy Name")) if len(sf) else sf
+            _CACHE["wl_low_ctr_sites"] = _buyer_first(lcs) if len(lcs) else lcs
 
             # Top summary cards: date range, impr, CTR, internal cost, # placements,
             # # recommended-block placements, spend on recommended-block placements.
@@ -700,7 +717,8 @@ def _watchlists_xlsx_bytes():
     """Build the 3-tab watchlists workbook from cache; return bytes or None."""
     sheets = [("Partner watchlist", _CACHE.get("wl_partner")),
               ("Client watchlist", _CACHE.get("wl_client")),
-              ("Strategy watchlist", _CACHE.get("wl_strategy"))]
+              ("Strategy watchlist", _CACHE.get("wl_strategy")),
+              ("Low-CTR sites", _CACHE.get("wl_low_ctr_sites"))]
     if all(df is None or not len(df) for _, df in sheets):
         return None
     buf = io.BytesIO()

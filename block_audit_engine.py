@@ -169,6 +169,61 @@ def _rollup(leak, dim):
     return g.sort_values("ctr", ascending=False)
 
 
+# Products where a LOW CTR is expected (they don't drive clicks), so they're
+# excluded from the low-CTR site check. Includes the "Audio" alias.
+LOW_CTR_EXCLUDED_PRODUCTS = {"CTV", "Social Mirror CTV", "Online Audio", "Audio"}
+
+
+def low_ctr_sites_by_client(allp, min_impr=5000, ctr_multiple=3.0,
+                            ctr_floor=0.0005, conv_rate_keep=0.0003):
+    """Per-client, per-site watchlist of SITES with abnormally LOW CTR.
+
+    A site is flagged only when it is BOTH far below its product's own CTR norm
+    (<= 1/ctr_multiple of the pooled product CTR) AND under an absolute ctr_floor
+    (0.05% by default). CTV / Social Mirror CTV / Online Audio are excluded — a low
+    CTR is expected on those non-click products. Sites converting efficiently
+    (conv/impr >= conv_rate_keep) are never flagged, even at low CTR — they're
+    working. Returns one row per client + site (+ product, since CTR norms are
+    product-specific), sorted by wasted spend.
+    """
+    if allp is None or not len(allp):
+        return pd.DataFrame()
+    site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
+    site["product"] = site["product"].astype(str).str.strip()
+    site = site[~site["product"].isin(LOW_CTR_EXCLUDED_PRODUCTS)]
+    site = site[~site["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
+    if site.empty:
+        return pd.DataFrame()
+
+    g = (site.groupby(["bu", "client", "product", "placement"], dropna=False)
+         .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+              conversions=("conversions", "sum"), spend=("spend", "sum"))
+         .reset_index()
+         .rename(columns={"bu": "business_unit", "client": "Client", "placement": "site"}))
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+
+    # Per-product norm = pooled CTR across all sites/clients on that product.
+    norms = (g.groupby("product").apply(
+        lambda x: (x["clicks"].sum() / x["impressions"].sum()) if x["impressions"].sum() else 0)
+        .rename("product_ctr").reset_index())
+    g = g.merge(norms, on="product", how="left")
+    g["x_over_norm"] = np.where(g["product_ctr"] > 0, g["ctr"] / g["product_ctr"], 0)
+    g["conv_rate"] = np.where(g["impressions"] > 0, g["conversions"] / g["impressions"], 0)
+
+    material = g["impressions"] >= min_impr
+    below_norm = (g["product_ctr"] > 0) & (g["x_over_norm"] <= (1.0 / ctr_multiple))
+    below_floor = g["ctr"] <= ctr_floor
+    converting = g["conv_rate"] >= conv_rate_keep
+    flagged = g[material & below_norm & below_floor & ~converting].copy()
+    if flagged.empty:
+        return flagged
+    flagged["reason"] = flagged.apply(
+        lambda r: f"CTR {r['ctr']*100:.3f}% is {r['x_over_norm']:.2f}× the {r['product']} "
+                  f"norm ({r['product_ctr']*100:.3f}%) and below the {ctr_floor*100:.2f}% floor",
+        axis=1)
+    return flagged.sort_values("spend", ascending=False).reset_index(drop=True)
+
+
 def _stream_sheet(ws):
     """Stream a worksheet in read_only mode, pulling only the columns we need.
     Keeps peak memory low (never materializes the full sheet) and avoids loading
@@ -389,6 +444,10 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
 
     has_conv = bool(allp["_has_conv"].any())
 
+    # Low-CTR site watchlist: sites (by client) that are BOTH far below their
+    # product's CTR norm AND under an absolute floor. Excludes CTV/SM CTV/Audio.
+    low_ctr_sites = low_ctr_sites_by_client(allp)
+
     # Master-blocklist check: match delivery against the external blocklist sheet
     # (by domain for sites, App ID for apps) and flag anything still serving AFTER
     # its "date added" — but only on a product it's actually blocked on. A CTV-list
@@ -469,6 +528,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "delivery_pp": delivery_pp,
         "delivery_strat": delivery_strat,
         "wl_src": wl_src,
+        "low_ctr_sites": low_ctr_sites,
         "blocklist_check": blocklist_check,
         "blocklist_by_bu": blocklist_by_bu,
         "has_conv": has_conv,
