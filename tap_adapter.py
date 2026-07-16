@@ -118,6 +118,11 @@ def _overview(df, keys):
     if "Billable Spend" in d.columns:
         agg["Internal Cost"] = ("Billable Spend", "sum")
     g = d.groupby(keys, dropna=False).agg(**agg).reset_index()
+    # groupby on category keys yields category columns; the small overview frames
+    # are tiny, so cast keys back to str to avoid category edge cases downstream.
+    for k in keys:
+        if k in g.columns and str(g[k].dtype) == "category":
+            g[k] = g[k].astype(str)
     # guarantee the columns downstream aggregations reference
     for col in ("Click Conversions", "View-throughs", "Internal Cost"):
         if col not in g.columns:
@@ -125,29 +130,31 @@ def _overview(df, keys):
     return g
 
 
-def synthesize_workbook(sites_df, apps_df):
-    """Write a temp .xlsx with Site/App/Product/Strategy Overview sheets and
-    return its path (the engines read it exactly like the old export)."""
+def build_frames(sites_df, apps_df):
+    """Build the four analysis frames (site/app/product/strategy) directly, with
+    NO xlsx round-trip — keeps the memory downcasting and avoids a duplicate copy."""
     combined = pd.concat([sites_df, apps_df], ignore_index=True, sort=False)
     bu = _bu_col(combined)
-
     prod_keys = [k for k in (bu, "Client", "Product 2") if k in combined.columns]
     prod = _overview(combined, prod_keys).rename(columns={"Product 2": "Product"})
-
     strat_keys = [k for k in (bu, "Client", "Product 2", "Strategy Type", "Strategy Name")
                   if k in combined.columns]
     strat = _overview(combined, strat_keys).rename(columns={"Product 2": "Product"})
     del combined
     import gc
     gc.collect()
+    return {"site": sites_df, "app": apps_df, "product": prod, "strategy": strat}
 
+
+def synthesize_workbook(sites_df, apps_df):
+    """Write the four frames to a temp .xlsx and return its path (manual-upload
+    path; the automated pull uses build_frames to skip the xlsx round-trip)."""
+    f = build_frames(sites_df, apps_df)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     tmp.close()
     with pd.ExcelWriter(tmp.name, engine="openpyxl") as xl:
-        sites_df.to_excel(xl, sheet_name="Site Overview", index=False)
-        apps_df.to_excel(xl, sheet_name="App Overview", index=False)
-        prod.to_excel(xl, sheet_name="Product Overview", index=False)
-        strat.to_excel(xl, sheet_name="Strategy Overview", index=False)
-    del prod, strat
-    gc.collect()
+        f["site"].to_excel(xl, sheet_name="Site Overview", index=False)
+        f["app"].to_excel(xl, sheet_name="App Overview", index=False)
+        f["product"].to_excel(xl, sheet_name="Product Overview", index=False)
+        f["strategy"].to_excel(xl, sheet_name="Strategy Overview", index=False)
     return tmp.name

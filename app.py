@@ -68,8 +68,9 @@ def analyze():
     return render_template("dashboard.html", **ctx)
 
 
-def _analyze_path(path):
-    """Run the full analysis on an .xlsx at `path` and return the template ctx."""
+def _analyze_path(path=None, frames=None):
+    """Run the full analysis and return the template ctx. Pass either an .xlsx
+    `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read)."""
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
@@ -86,7 +87,7 @@ def _analyze_path(path):
     _CACHE.clear()
     try:
         try:
-            r = build_insights(path)
+            r = build_insights(path, frames=frames)
             _CACHE["by_business_unit.csv"] = r["by_business_unit"]
             _CACHE["by_product.csv"] = r["by_product"]
             _CACHE["by_strategy.csv"] = r["by_strategy"]
@@ -120,7 +121,7 @@ def _analyze_path(path):
         gc.collect()  # release the performance frames before the big Site/App parse
 
         try:
-            a = audit_block_leak(path, blocklist=blocklist)
+            a = audit_block_leak(path, blocklist=blocklist, frames=frames)
             _CACHE["block_leak_offenders.csv"] = a["offenders"]
             _CACHE["block_leak_by_bu.csv"] = a["leak_by_bu"]
             _CACHE["block_leak_by_client.csv"] = a["leak_by_client"]
@@ -330,9 +331,10 @@ def _analyze_path(path):
         except Exception as e:
             ctx["errors"].append(f"Block audit: {e}")
 
-        # Exchange anomaly analysis
+        # Exchange anomaly analysis (only for the manual-upload xlsx path; the
+        # section isn't displayed, and the flat pull has no Exchanges data)
         try:
-            ex = analyze_exchanges(path)
+            ex = analyze_exchanges(path) if path else None
             if ex:
                 _CACHE["exchange_flags.csv"] = ex["flags"]
                 _CACHE["exchange_table.csv"] = ex["table"]
@@ -480,21 +482,21 @@ def ui_email():
 def _run_pull(send_email=False):
     """Pull latest data (S3 two files -> Graph -> IMAP), analyze, save a dated
     report, optionally email. Returns (result_dict, http_status)."""
+    frames = None
     workbook_path = None
     cleanup = []
     try:
         if os.environ.get("S3_BUCKET", "").strip():
             from s3_pull import fetch_two
-            from tap_adapter import read_flat, synthesize_workbook
+            from tap_adapter import read_flat, build_frames
             sname, sbytes, aname, abytes, date_str = fetch_two()
             if not (sbytes and abytes):
                 have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
                 return {"ok": True, "skipped": True,
                         "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
-            workbook_path = synthesize_workbook(read_flat(sbytes, sname), read_flat(abytes, aname))
+            frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
             sbytes = abytes = None
             gc.collect()
-            cleanup.append(workbook_path)
             source_file = f"{sname} + {aname}"
         else:
             if os.environ.get("GRAPH_CLIENT_ID", "").strip():
@@ -519,7 +521,7 @@ def _run_pull(send_email=False):
         return {"ok": False, "error": f"Source error: {e}"}, 502
 
     try:
-        ctx = _analyze_path(workbook_path)
+        ctx = _analyze_path(workbook_path, frames=frames)
         html = render_template("dashboard.html", **ctx)
         saved = _save_report(html, date_str)
         xlsx = _watchlists_xlsx_bytes()

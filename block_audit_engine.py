@@ -149,10 +149,14 @@ def _normalize(df, c):
     _bad = out["placement"].str.strip().str.lower().isin({"na", "nan", "none", "", "(not set)"})
     out["disp"] = out["placement"].where(~_bad, out["app_id"])
     for dim in ("bu", "client", "product", "strategy"):
-        out[dim] = df[c[dim]].astype(str) if c[dim] else "(not in export)"
+        out[dim] = (df[c[dim]].astype(str) if c[dim] else "(not in export)")
     out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
     out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
+    # Low-cardinality repeats -> category (big memory win on ~385k rows)
+    for col in ("bu", "client", "product", "strategy", "strategy_name", "placement_type"):
+        if col in out.columns:
+            out[col] = out[col].astype("category")
     return out
 
 
@@ -196,31 +200,49 @@ def _stream_sheet(ws):
     return pd.DataFrame(data), n
 
 
-def audit_block_leak(path_or_buffer, blocklist=None):
-    wb = load_workbook(path_or_buffer, read_only=True, data_only=True)
-    frames = []
+def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     truncation = {}
-    try:
-        for sheet, cfg in SHEET_CONFIG.items():
-            if sheet not in wb.sheetnames:
+    norm_frames = []
+    if frames is not None:
+        # Frames handed in directly (automated pull) — no xlsx read, dtypes kept.
+        for kind, df in (("site", frames.get("site")), ("app", frames.get("app"))):
+            if df is None or not len(df):
                 continue
-            df, nrows = _stream_sheet(wb[sheet])
-            if df is None:
-                continue
-            c = _detect(df, cfg["kind"])
+            c = _detect(df, kind)
             if not c["final"]:
                 continue
             norm = _normalize(df, c)
-            norm["placement_type"] = cfg["kind"]
-            frames.append(norm)
-            truncation[sheet] = nrows >= 100000  # Tap export row cap heuristic
-    finally:
-        wb.close()
+            norm["placement_type"] = kind
+            norm_frames.append(norm)
+            truncation[f"{kind.title()} Overview"] = False
+    else:
+        wb = load_workbook(path_or_buffer, read_only=True, data_only=True)
+        try:
+            for sheet, cfg in SHEET_CONFIG.items():
+                if sheet not in wb.sheetnames:
+                    continue
+                df, nrows = _stream_sheet(wb[sheet])
+                if df is None:
+                    continue
+                c = _detect(df, cfg["kind"])
+                if not c["final"]:
+                    continue
+                norm = _normalize(df, c)
+                norm["placement_type"] = cfg["kind"]
+                norm_frames.append(norm)
+                truncation[sheet] = nrows >= 100000  # Tap export row cap heuristic
+                df = None
+        finally:
+            wb.close()
 
-    if not frames:
-        raise ValueError("No Site/App Overview sheets with a 'Final ... Name' column found.")
+    if not norm_frames:
+        raise ValueError("No Site/App Overview data with a 'Final ... Name' column found.")
 
-    allp = pd.concat(frames, ignore_index=True)
+    allp = pd.concat(norm_frames, ignore_index=True)
+    norm_frames.clear()
+    import gc
+    allp["placement_type"] = allp["placement_type"].astype("category")
+    gc.collect()
     leak = allp[allp["is_block"] & (allp["impressions"] > 0)]
     unresolved = allp[allp["is_unresolved"] & (allp["impressions"] > 0)]
 

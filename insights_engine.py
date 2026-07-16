@@ -161,12 +161,16 @@ def client_flags(product_df, strategy_df, min_impr=20000, ctr_multiple=3.0, ctr_
     return flagged.sort_values("x_over_norm", ascending=False)
 
 
-def build_insights(path_or_buffer, zero_conv_min_spend=300.0):
-    frames = load_workbook_frames(path_or_buffer)
-    prod = frames.get("product")
-    strat = frames.get("strategy")
+def build_insights(path_or_buffer=None, zero_conv_min_spend=300.0, frames=None):
+    if frames is not None:
+        prod = frames.get("product")
+        strat = frames.get("strategy")
+    else:
+        wframes = load_workbook_frames(path_or_buffer)
+        prod = wframes.get("product")
+        strat = wframes.get("strategy")
     if prod is None:
-        raise ValueError("Product Overview sheet not found.")
+        raise ValueError("Product Overview data not found.")
 
     bu = by_business_unit(prod, zero_conv_min_spend)
     pr = by_product(prod)
