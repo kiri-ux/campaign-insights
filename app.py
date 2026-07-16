@@ -431,6 +431,8 @@ def pull():
                 return jsonify({"ok": True, "skipped": True,
                                 "message": f"Need both a sites and an apps file under the prefix (found: {have})."})
             workbook_path = synthesize_workbook(read_flat(sbytes, sname), read_flat(abytes, aname))
+            sbytes = abytes = None
+            gc.collect()
             cleanup.append(workbook_path)
             source_file = f"{sname} + {aname}"
         else:

@@ -55,14 +55,45 @@ def _normalize_headers(df):
     return df.rename(columns=ren) if ren else df
 
 
+# The only columns the engines actually use. The export has ~30 more (CPV/CPCV,
+# budgets, margins, external IDs...) that we drop on read to save a lot of memory
+# on the full ~385k-row dataset.
+_KEEP = ["Date", "Client Business Unit", "Client", "Product 2", "Strategy Type",
+         "Strategy Name", "Site Domain", "Final Site Domain Name", "App Name",
+         "Final App Name", "App ID", "Impressions", "Clicks", "CTR",
+         "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend"]
+_FLOAT32 = ["CTR", "CPM"]              # display-only metrics; recomputed downstream
+_CATEGORY = ["Client Business Unit", "Client", "Product 2", "Strategy Type"]
+
+
+def _prune_and_downcast(df):
+    keep = [c for c in _KEEP if c in df.columns]
+    df = df[keep].copy()
+    # money + count columns stay full precision (no overflow / cent errors on big data)
+    for c in ("Impressions", "Clicks", "Post Click Conversions", "Post View Conversions"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    if "Billable Spend" in df.columns:
+        df["Billable Spend"] = pd.to_numeric(df["Billable Spend"], errors="coerce").fillna(0.0)
+    for c in _FLOAT32:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
+    # repeated text -> category is the big memory win (BU/Client/Product/Strategy)
+    for c in _CATEGORY:
+        if c in df.columns:
+            df[c] = df[c].astype("category")
+    return df
+
+
 def read_flat(data, filename=""):
-    """Read one flat export (xlsx or csv bytes) into a DataFrame with normalized headers."""
+    """Read one flat export (xlsx or csv bytes) into a DataFrame with normalized
+    headers, pruned to the columns the engines use, and memory-downcast."""
     bio = io.BytesIO(data)
     if (filename or "").lower().endswith(".csv"):
-        df = pd.read_csv(bio)
+        df = pd.read_csv(bio, low_memory=False)
     else:
         df = pd.read_excel(bio)
-    return _normalize_headers(df)
+    return _prune_and_downcast(_normalize_headers(df))
 
 
 def _bu_col(df):
@@ -106,6 +137,9 @@ def synthesize_workbook(sites_df, apps_df):
     strat_keys = [k for k in (bu, "Client", "Product 2", "Strategy Type", "Strategy Name")
                   if k in combined.columns]
     strat = _overview(combined, strat_keys).rename(columns={"Product 2": "Product"})
+    del combined
+    import gc
+    gc.collect()
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     tmp.close()
@@ -114,4 +148,6 @@ def synthesize_workbook(sites_df, apps_df):
         apps_df.to_excel(xl, sheet_name="App Overview", index=False)
         prod.to_excel(xl, sheet_name="Product Overview", index=False)
         strat.to_excel(xl, sheet_name="Strategy Overview", index=False)
+    del prod, strat
+    gc.collect()
     return tmp.name
