@@ -250,19 +250,20 @@
   }
   window.downloadSelected=downloadSelected;
   function pushBlocklist(){
-    var placements=[];
+    var placements=[], excluded=[];
     document.querySelectorAll('.blkchk').forEach(function(cb){
-      if(cb.checked) placements.push({type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||''});
+      var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||''};
+      (cb.checked?placements:excluded).push(p);
     });
     var msg=document.getElementById('pushmsg'), btn=document.getElementById('pushbtn');
-    if(!placements.length){ if(msg) msg.textContent='Nothing selected.'; return; }
+    if(!placements.length && !excluded.length){ if(msg) msg.textContent='Nothing to push.'; return; }
     if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
     if(msg) msg.textContent='';
     fetch('/push_blocklist',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({placements:placements})})
+      body:JSON.stringify({placements:placements, excluded:excluded})})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(msg) msg.textContent = d.ok ? ('Added '+(d.added!=null?d.added:placements.length)+', skipped '+(d.skipped||0)+' already listed.')
+        if(msg) msg.textContent = d.ok ? ('Added '+(d.added!=null?d.added:placements.length)+' to blocklist, skipped '+(d.skipped||0)+' already listed; '+excluded.length+' unchecked saved as excluded.')
                                        : ('Error: '+(d.error||'push failed'));
         if(msg) msg.style.color = d.ok ? '#177245' : 'var(--warn)';
       })

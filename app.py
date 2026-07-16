@@ -57,6 +57,7 @@ def analyze():
     sf = pd.DataFrame()
     bmap = load_buyer_map()  # {} unless BUYER_MAP_URL env var is set
     blocklist = load_blocklist()  # {} unless BLOCKLIST_READ_URL env var is set
+    excluded = set(load_blocklist(tabs=["Excluded"]).keys()) if os.environ.get("BLOCKLIST_READ_URL", "").strip() else set()
     _CACHE.clear()
 
     wb = request.files.get("insights_workbook")
@@ -159,6 +160,13 @@ def analyze():
             if len(rec_site) and "impressions" in rec_site:
                 rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
             rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
+            # Drop anything you've previously unchecked (logged to the Excluded tab),
+            # so it stops being recommended on every upload.
+            if excluded:
+                if len(rec_site) and "name" in rec_site:
+                    rec_site = rec_site[~rec_site["name"].astype(str).str.strip().str.lower().isin(excluded)]
+                if len(rec_app) and "app_id" in rec_app:
+                    rec_app = rec_app[~rec_app["app_id"].astype(str).str.strip().str.lower().isin(excluded)]
             _CACHE["ai_recommended_sites.csv"] = rec_site
             _CACHE["ai_recommended_apps.csv"] = rec_app
             app_vals = rec_app["app_id"].tolist() if "app_id" in rec_app else rec_app.get("name", pd.Series([])).tolist()
@@ -366,16 +374,18 @@ def push_blocklist():
     if not webhook:
         return jsonify({"ok": False, "error": "Blocklist sheet isn't configured (set BLOCKLIST_WEBHOOK_URL)."}), 400
     try:
-        placements = (request.get_json(force=True) or {}).get("placements", [])
+        body_in = request.get_json(force=True) or {}
+        placements = body_in.get("placements", [])
+        excluded = body_in.get("excluded", [])
     except Exception:
-        placements = []
-    if not placements:
-        return jsonify({"ok": False, "error": "No placements selected."}), 400
+        placements, excluded = [], []
+    if not placements and not excluded:
+        return jsonify({"ok": False, "error": "Nothing to push."}), 400
     try:
-        payload = json.dumps({"placements": placements}).encode()
+        payload = json.dumps({"placements": placements, "excluded": excluded}).encode()
         req = urllib.request.Request(webhook, data=payload,
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         try:
             result = json.loads(body)
