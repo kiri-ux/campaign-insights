@@ -8,6 +8,7 @@ import os
 import gc
 import json
 import tempfile
+import threading
 import urllib.request
 from flask import Flask, request, render_template, send_file, abort, jsonify
 import pandas as pd
@@ -25,6 +26,7 @@ PMAP = build_pmap()
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40 MB
 _CACHE = {}  # token -> {"name": df} for CSV downloads within the session
+_ANALYSIS_LOCK = threading.Lock()  # serialize heavy runs so they can't stack in memory
 
 
 def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
@@ -482,66 +484,73 @@ def ui_email():
 def _run_pull(send_email=False):
     """Pull latest data (S3 two files -> Graph -> IMAP), analyze, save a dated
     report, optionally email. Returns (result_dict, http_status)."""
-    frames = None
-    workbook_path = None
-    cleanup = []
+    if not _ANALYSIS_LOCK.acquire(blocking=False):
+        return {"ok": False, "busy": True,
+                "error": "A run is already in progress — give it a minute, then try again."}, 429
     try:
-        if os.environ.get("S3_BUCKET", "").strip():
-            from s3_pull import fetch_two
-            from tap_adapter import read_flat, build_frames
-            sname, sbytes, aname, abytes, date_str = fetch_two()
-            if not (sbytes and abytes):
-                have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
-                return {"ok": True, "skipped": True,
-                        "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
-            frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
-            sbytes = abytes = None
-            gc.collect()
-            source_file = f"{sname} + {aname}"
-        else:
-            if os.environ.get("GRAPH_CLIENT_ID", "").strip():
-                from graph_pull import fetch_latest_xlsx
+        frames = None
+        workbook_path = None
+        cleanup = []
+        try:
+            if os.environ.get("S3_BUCKET", "").strip():
+                from s3_pull import fetch_two
+                from tap_adapter import read_flat, build_frames
+                sname, sbytes, aname, abytes, date_str = fetch_two()
+                if not (sbytes and abytes):
+                    have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
+                    return {"ok": True, "skipped": True,
+                            "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
+                frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
+                sbytes = abytes = None
+                gc.collect()
+                source_file = f"{sname} + {aname}"
             else:
-                from mailbox_pull import fetch_latest_xlsx
-            fn, payload, date_str = fetch_latest_xlsx()
-            if not payload:
-                return {"ok": True, "skipped": True, "message": "No matching export found."}, 200
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            tmp.write(payload)
-            tmp.close()
-            workbook_path = tmp.name
-            cleanup.append(workbook_path)
-            source_file = fn
-    except Exception as e:
-        for p in cleanup:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-        return {"ok": False, "error": f"Source error: {e}"}, 502
+                if os.environ.get("GRAPH_CLIENT_ID", "").strip():
+                    from graph_pull import fetch_latest_xlsx
+                else:
+                    from mailbox_pull import fetch_latest_xlsx
+                fn, payload, date_str = fetch_latest_xlsx()
+                if not payload:
+                    return {"ok": True, "skipped": True, "message": "No matching export found."}, 200
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                tmp.write(payload)
+                tmp.close()
+                workbook_path = tmp.name
+                cleanup.append(workbook_path)
+                source_file = fn
+        except Exception as e:
+            for p in cleanup:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            return {"ok": False, "error": f"Source error: {e}"}, 502
 
-    try:
-        ctx = _analyze_path(workbook_path, frames=frames)
-        html = render_template("dashboard.html", **ctx)
-        saved = _save_report(html, date_str)
-        xlsx = _watchlists_xlsx_bytes()
-        _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
-        base = request.host_url.rstrip("/")
-        view_url = f"{base}/reports/{saved}"
-        result = {"ok": True, "date": saved, "file": source_file,
-                  "view_url": view_url, "latest_url": f"{base}/reports/latest"}
-        if send_email:
-            result["email"] = _send_weekly_email(saved, view_url, xlsx)
-        return result, 200
-    except Exception as e:
-        return {"ok": False, "error": f"Analysis failed: {e}"}, 500
+        try:
+            ctx = _analyze_path(workbook_path, frames=frames)
+            frames = None
+            html = render_template("dashboard.html", **ctx)
+            saved = _save_report(html, date_str)
+            xlsx = _watchlists_xlsx_bytes()
+            _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
+            base = request.host_url.rstrip("/")
+            view_url = f"{base}/reports/{saved}"
+            result = {"ok": True, "date": saved, "file": source_file,
+                      "view_url": view_url, "latest_url": f"{base}/reports/latest"}
+            if send_email:
+                result["email"] = _send_weekly_email(saved, view_url, xlsx)
+            return result, 200
+        except Exception as e:
+            return {"ok": False, "error": f"Analysis failed: {e}"}, 500
+        finally:
+            for p in cleanup:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            gc.collect()
     finally:
-        for p in cleanup:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-        gc.collect()
+        _ANALYSIS_LOCK.release()
 
 
 def _send_weekly_email(date_str, view_url, xlsx=None):

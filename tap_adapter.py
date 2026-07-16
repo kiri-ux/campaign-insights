@@ -117,7 +117,7 @@ def _overview(df, keys):
         agg["View-throughs"] = ("Post View Conversions", "sum")
     if "Billable Spend" in d.columns:
         agg["Internal Cost"] = ("Billable Spend", "sum")
-    g = d.groupby(keys, dropna=False).agg(**agg).reset_index()
+    g = d.groupby(keys, dropna=False, observed=True).agg(**agg).reset_index()
     # groupby on category keys yields category columns; the small overview frames
     # are tiny, so cast keys back to str to avoid category edge cases downstream.
     for k in keys:

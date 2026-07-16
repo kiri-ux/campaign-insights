@@ -153,10 +153,6 @@ def _normalize(df, c):
     out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
     out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
-    # Low-cardinality repeats -> category (big memory win on ~385k rows)
-    for col in ("bu", "client", "product", "strategy", "strategy_name", "placement_type"):
-        if col in out.columns:
-            out[col] = out[col].astype("category")
     return out
 
 
@@ -241,7 +237,6 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     allp = pd.concat(norm_frames, ignore_index=True)
     norm_frames.clear()
     import gc
-    allp["placement_type"] = allp["placement_type"].astype("category")
     gc.collect()
     leak = allp[allp["is_block"] & (allp["impressions"] > 0)]
     unresolved = allp[allp["is_unresolved"] & (allp["impressions"] > 0)]
