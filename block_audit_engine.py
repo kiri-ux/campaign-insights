@@ -313,6 +313,7 @@ def audit_block_leak(path_or_buffer, blocklist=None):
                     blocked=("is_block", "max"))
                .reset_index().rename(columns={"disp_name": "name"}))
     topbase["ctr"] = np.where(topbase["impressions"] > 0, topbase["clicks"] / topbase["impressions"], 0)
+    topbase["cpm"] = np.where(topbase["impressions"] > 0, topbase["spend"] / topbase["impressions"] * 1000, 0)
     # Serving status: still serving at the window edge (within ACTIVE_DAYS of the
     # last date in the file), stopped, or unknown (no date).
     if pd.notna(window_end):

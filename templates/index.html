@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Placement &amp; Impact Insights</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -36,21 +37,44 @@
   form.busy{opacity:.55;pointer-events:none;transition:opacity .2s;}
   .busy-note{margin-top:14px;color:var(--muted);font-size:13px;display:none;}
   form.busy + .busy-note{display:block;}
+  .dllink{color:var(--velocity);font-weight:600;text-decoration:none;border-bottom:1px solid rgba(30,111,224,.35);}
+  .dllink:hover{border-bottom-color:var(--velocity);}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span></div>
   <h1>Placement &amp; Impact Insights</h1>
+
+  {% if has_source %}
+  <div class="card">
+    <label>Latest data <span class="tag">automated</span></label>
+    <div class="hint">Pull the most recent export straight from the source and build the dashboard — no manual download needed.</div>
+    <button type="button" id="pullbtn" onclick="pullNow()">Pull from most recent data</button>
+    {% if has_email %}<button type="button" id="emailbtn" onclick="emailNow()" style="background:#177245;margin-left:8px">Email latest report</button>{% endif %}
+    <div id="pullmsg" class="hint" style="margin-top:12px"></div>
+  </div>
+  {% endif %}
+
+  {% if reports %}
+  <div class="card">
+    <label>Recent dashboards</label>
+    <div class="hint">Previously generated weekly dashboards.</div>
+    <ul style="margin:6px 0 0;padding-left:18px;line-height:1.9">
+      {% for d in reports %}<li><a class="dllink" href="/reports/{{ d }}">{{ d }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <form action="/analyze" method="post" enctype="multipart/form-data" id="f" onsubmit="return go()">
     <div class="card">
-      <label>Insights workbook <span class="tag">performance</span> <span class="tag">block check</span></label>
-      <div class="hint">Download the excel report from the <a href="https://www.reporting.zone/client/dist/#/dashboards/6272/section/78366" target="_blank" rel="noopener">Insights Dashboard</a> and upload here. Drives Business Unit / Product / Strategy insights, the block-status check and recommended block list, client &amp; strategy flags, exchange anomalies, and block-impact-by-product.</div>
+      <label>Or upload a workbook manually <span class="tag">performance</span> <span class="tag">block check</span></label>
+      <div class="hint">Download the excel report from the <a href="https://www.reporting.zone/client/dist/#/dashboards/6272/section/78366" target="_blank" rel="noopener">Insights Dashboard</a> and upload here. Drives Business Unit / Product / Strategy insights, the block check and recommended block list, client &amp; strategy watchlists, and block-impact by product/strategy.</div>
       <input type="file" name="insights_workbook" accept=".xlsx" required>
     </div>
     <button type="submit" id="btn">Generate insights</button>
   </form>
-  <div class="busy-note">Reading the workbook and crunching ~200k rows plus the AI block review — this can take up to a minute. You can leave this tab open.</div>
+  <div class="busy-note">Reading the workbook and crunching the rows plus the AI block review — this can take up to a minute. You can leave this tab open.</div>
   <script>
     function go(){
       var f=document.getElementById('f'), b=document.getElementById('btn');
@@ -59,6 +83,30 @@
       b.disabled=true;
       b.innerHTML='<span class="spin"></span>Generating…';
       return true;
+    }
+    function _busy(btn, label){ btn.disabled=true; btn.dataset.old=btn.innerHTML; btn.innerHTML='<span class="spin"></span>'+label; }
+    function _done(btn){ btn.disabled=false; if(btn.dataset.old) btn.innerHTML=btn.dataset.old; }
+    function pullNow(){
+      var b=document.getElementById('pullbtn'), m=document.getElementById('pullmsg');
+      var eb=document.getElementById('emailbtn'); if(eb) eb.disabled=true;
+      _busy(b,'Pulling…'); m.style.color='var(--muted)'; m.textContent='Pulling latest data and building the dashboard — up to a minute…';
+      fetch('/ui/pull',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.ok && d.view_url){ m.textContent='Done — opening dashboard…'; window.location=d.view_url; }
+        else if(d.skipped){ m.textContent=d.message||'No new data found.'; }
+        else { m.style.color='#b00'; m.textContent='Error: '+(d.error||'pull failed'); }
+      }).catch(function(e){ m.style.color='#b00'; m.textContent='Error: '+e; })
+        .finally(function(){ _done(b); if(eb) eb.disabled=false; });
+    }
+    function emailNow(){
+      var b=document.getElementById('emailbtn'), m=document.getElementById('pullmsg');
+      var pb=document.getElementById('pullbtn'); if(pb) pb.disabled=true;
+      _busy(b,'Emailing…'); m.style.color='var(--muted)'; m.textContent='Refreshing data and sending the email…';
+      fetch('/ui/email',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){ m.style.color='#177245'; m.textContent='Email: '+(d.email||'sent')+(d.view_url?(' · '+d.view_url):''); }
+        else if(d.skipped){ m.textContent=d.message||'No new data found.'; }
+        else { m.style.color='#b00'; m.textContent='Error: '+(d.error||'failed'); }
+      }).catch(function(e){ m.style.color='#b00'; m.textContent='Error: '+e; })
+        .finally(function(){ _done(b); if(pb) pb.disabled=false; });
     }
   </script>
 </div>

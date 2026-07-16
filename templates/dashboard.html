@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Insights — Results</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -109,9 +110,10 @@
       <th class="sortable num" data-col="5" data-type="pct">CTR</th>
       {% if audit.has_conv %}<th class="sortable num" data-col="6" data-type="num">Conv</th>{% endif %}
       <th class="sortable num" data-col="{% if audit.has_conv %}7{% else %}6{% endif %}" data-type="money">Spend</th>
+      <th class="sortable num" data-col="{% if audit.has_conv %}8{% else %}7{% endif %}" data-type="money">CPM</th>
       <th>Last served</th><th>Serving</th>
     </tr></thead><tbody>
-    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td>{{ r.last_served }}</td><td>{% if r.serving == 'serving' %}<span style="color:var(--warn);font-weight:600">serving</span>{% elif r.serving == 'stopped' %}<span style="color:var(--muted)">stopped</span>{% else %}—{% endif %}</td></tr>{% endfor %}
+    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td><td>{{ r.last_served }}</td><td>{% if r.serving == 'serving' %}<span style="color:var(--warn);font-weight:600">serving</span>{% elif r.serving == 'stopped' %}<span style="color:var(--muted)">stopped</span>{% else %}—{% endif %}</td></tr>{% endfor %}
     </tbody></table>
     <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list below.</p>
 
@@ -130,12 +132,13 @@
       <th class="sortable num" data-col="{% if has_buyer %}4{% else %}3{% endif %}" data-type="pct">CTR</th>
       <th class="sortable num" data-col="{% if has_buyer %}5{% else %}4{% endif %}" data-type="num">Conv</th>
       <th class="sortable num" data-col="{% if has_buyer %}6{% else %}5{% endif %}" data-type="money">Cost</th>
-      <th class="sortable num" data-col="{% if has_buyer %}7{% else %}6{% endif %}" data-type="money">Cost/conv</th>
-      <th class="sortable num" data-col="{% if has_buyer %}8{% else %}7{% endif %}" data-type="num">Blocked impr</th>
-      <th class="sortable num" data-col="{% if has_buyer %}9{% else %}8{% endif %}" data-type="num">Blocked plmts</th>
+      <th class="sortable num" data-col="{% if has_buyer %}7{% else %}6{% endif %}" data-type="money">CPM</th>
+      <th class="sortable num" data-col="{% if has_buyer %}8{% else %}7{% endif %}" data-type="money">Cost/conv</th>
+      <th class="sortable num" data-col="{% if has_buyer %}9{% else %}8{% endif %}" data-type="num">Blocked impr</th>
+      <th class="sortable num" data-col="{% if has_buyer %}10{% else %}9{% endif %}" data-type="num">Blocked plmts</th>
       <th>CTR after recs</th><th>% on recs</th>
     </tr></thead><tbody>
-    {% for r in partner %}<tr{% if r.flagged %} class="hot"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cost_per_conv }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.blocked_placements }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
+    {% for r in partner %}<tr{% if r.flagged %} class="hot"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.cost_per_conv }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.blocked_placements }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
     </tbody></table>
     <p class="note">Highlighted rows meet the CTR-vs-volume flag (≥10K impr &amp; CTR &gt;5%, or ≥30K &amp; &gt;3%, or ≥50K &amp; &gt;1%). <strong>CTR after recs</strong> recomputes CTR once delivery on recommended-block placements is removed — if it drops below the flag line, the flag is largely driven by junk the recommendations would remove. Showing 60.</p>
   {% endif %}
@@ -158,8 +161,8 @@
   {% if block_impact %}
     <h2>Block impact by product <span class="sub">(if you applied the recommended blocks, how much of each product's serve is removed)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
     <p class="note">Based on the <strong>recommended block list</strong> below. "% impr blocked" is the share of each product's serve that would be removed if you applied the recommendations. A very high % means the recommendations would cut a large chunk of that product — review before enforcing.</p>
-    <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
+    <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
@@ -170,8 +173,8 @@
 
     {% if block_impact_strategy %}
     <h2>Block impact by strategy <span class="sub">(if you applied the recommended blocks, how much of each strategy type's serve is removed)</span> <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h2>
-    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
+    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
     </table>
     {% endif %}
 
@@ -192,10 +195,6 @@
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_site',this)">Copy</button></div>
       <textarea id="ai_site" readonly rows="3">{{ ai.site_filter }}</textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>DSP format blocking — sites</span><button class="copybtn" onclick="cp('ai_site_dsp',this)">Copy</button></div>
-      <textarea id="ai_site_dsp" readonly rows="2">{{ ai.site_csv }}</textarea>
     </div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
@@ -205,11 +204,12 @@
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App ID)</span><button class="copybtn" onclick="cp('ai_app',this)">Copy</button></div>
       <textarea id="ai_app" readonly rows="3">{{ ai.app_filter }}</textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>DSP format blocking — apps (App ID, comma-separated)</span><button class="copybtn" onclick="cp('ai_app_dsp',this)">Copy</button></div>
-      <textarea id="ai_app_dsp" readonly rows="2">{{ ai.app_csv }}</textarea>
     </div>{% endif %}
+    <div class="copybox">
+      <div class="copyhead"><span>DSP format blocking — per blocklist (routed by product: All Products / CTV / Audio / Social Mirror)</span></div>
+      <p class="note" style="margin:2px 0 6px">Each checked placement is grouped into the blocklist it routes to, split into sites and apps, so you can paste the right set into each DSP list.</p>
+      <div id="dsp_per_blocklist"></div>
+    </div>
     {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
   {% endif %}
 
@@ -222,19 +222,55 @@
     if(navigator.clipboard){ navigator.clipboard.writeText(t.value).then(done, function(){document.execCommand('copy');done();}); }
     else { document.execCommand('copy'); done(); }
   }
-  // Recommended-block checkboxes: rebuild both copy formats live from checked rows
+  // Route a placement to its destination blocklist(s) — same rules as the push.
+  function routeTabs(products){
+    var prods=(products||'').split(',').map(function(s){return s.trim();}).filter(function(s){return s.length;});
+    var isSMonly = prods.length===1 && prods[0]==='Social Mirror';
+    var onlyCtvAudio = prods.length>0 && prods.every(function(x){return x==='CTV'||x==='Online Audio';});
+    if(isSMonly) return ['Social Mirror'];
+    if(onlyCtvAudio){ var t=[]; if(prods.indexOf('CTV')>=0)t.push('CTV'); if(prods.indexOf('Online Audio')>=0)t.push('Audio'); return t; }
+    return ['All Products'];
+  }
+  var TAB_ORDER=['All Products','CTV','Audio','Social Mirror'];
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  // Recommended-block checkboxes: rebuild copy formats live from checked rows
   function rebuildBlocks(){
-    var sites=[], apps=[];
+    var sites=[], apps=[], perTab={};
+    TAB_ORDER.forEach(function(t){perTab[t]={sites:[],apps:[]};});
     document.querySelectorAll('.blkchk').forEach(function(cb){
       if(!cb.checked) return;
-      (cb.dataset.kind==='site'?sites:apps).push(cb.dataset.val);
+      var kind=cb.dataset.kind, val=cb.dataset.val;
+      (kind==='site'?sites:apps).push(val);
+      routeTabs(cb.dataset.products).forEach(function(tab){
+        if(!perTab[tab]) perTab[tab]={sites:[],apps:[]};
+        perTab[tab][kind==='site'?'sites':'apps'].push(val);
+      });
     });
     var rz=function(field,vals){return vals.map(function(v){return 'OR {'+field+'}="'+v+'"';}).join(' ');};
     var set=function(id,val){var t=document.getElementById(id); if(t) t.value=val;};
     set('ai_site', rz('Site Domain',sites));
-    set('ai_site_dsp', sites.join(', '));
     set('ai_app', rz('App ID',apps));
-    set('ai_app_dsp', apps.join(', '));
+    // Per-blocklist DSP output
+    var wrap=document.getElementById('dsp_per_blocklist');
+    if(wrap){
+      var html='';
+      TAB_ORDER.forEach(function(tab){
+        var d=perTab[tab]; if(!d || (!d.sites.length && !d.apps.length)) return;
+        var idb='dsp_'+tab.replace(/[^A-Za-z]/g,'');
+        html+='<div style="margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px">';
+        html+='<div style="font-weight:600;margin-bottom:4px">'+tab+'</div>';
+        if(d.sites.length){
+          html+='<div class="copyhead"><span>Sites ('+d.sites.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_s\',this)">Copy</button></div>';
+          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(d.sites.join(', '))+'</textarea>';
+        }
+        if(d.apps.length){
+          html+='<div class="copyhead"><span>Apps ('+d.apps.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_a\',this)">Copy</button></div>';
+          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(d.apps.join(', '))+'</textarea>';
+        }
+        html+='</div>';
+      });
+      wrap.innerHTML = html || '<p class="note">Nothing selected.</p>';
+    }
   }
   document.querySelectorAll('.blkchk').forEach(function(cb){cb.addEventListener('change',rebuildBlocks);});
   if(document.querySelector('.blkchk')) rebuildBlocks();

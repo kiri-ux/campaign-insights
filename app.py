@@ -40,7 +40,13 @@ def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html",
+                           reports=_list_reports()[:12],
+                           has_source=bool(os.environ.get("S3_BUCKET", "").strip()
+                                           or os.environ.get("GRAPH_CLIENT_ID", "").strip()
+                                           or os.environ.get("IMAP_USER", "").strip()),
+                           has_email=bool(os.environ.get("EMAIL_FROM", "").strip()
+                                          and os.environ.get("EMAIL_TO", "").strip()))
 
 
 @app.route("/analyze", methods=["POST"])
@@ -141,8 +147,10 @@ def _analyze_path(path):
                 pm = leaked.assign(impressions=0, clicks=0, ctr=0, conversions=0,
                                    internal_cost=0, cost_per_conv=float("nan"), flagged=False)
             _CACHE["partner_summary.csv"] = pm
+            if "impressions" in pm:
+                pm["cpm"] = (pm["internal_cost"] / pm["impressions"] * 1000).where(pm["impressions"] > 0, 0).fillna(0)
             flagged = pm.get("flagged", pd.Series([False] * len(pm))).tolist()
-            prow = _fmt(pm.head(60), pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
+            prow = _fmt(pm.head(60), pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv", "cpm"],
                         int_cols=["impressions", "clicks", "conversions", "blocked_impr", "blocked_placements"]).to_dict("records")
             for row, fl in zip(prow, flagged):
                 row["flagged"] = bool(fl)
@@ -213,10 +221,11 @@ def _analyze_path(path):
             bimp["pct_impr_blocked"] = (bimp["blocked_impr"] / bimp["total_impr"]).where(bimp["total_impr"] > 0, 0).fillna(0)
             bimp["pct_spend_blocked"] = (bimp["blocked_spend"] / bimp["total_spend"]).where(bimp["total_spend"] > 0, 0).fillna(0)
             bimp = bimp.sort_values("pct_impr_blocked", ascending=False)
+            bimp["cpm"] = (bimp["total_spend"] / bimp["total_impr"] * 1000).where(bimp["total_impr"] > 0, 0).fillna(0)
             _CACHE["block_impact_by_product.csv"] = bimp
             hot_flags = (bimp["pct_impr_blocked"] >= 0.5).tolist()
             bi_rows = _fmt(bimp, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
-                           money_cols=["total_spend", "blocked_spend"],
+                           money_cols=["total_spend", "blocked_spend", "cpm"],
                            int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
             for row, hot in zip(bi_rows, hot_flags):
                 row["hot"] = hot
@@ -235,10 +244,11 @@ def _analyze_path(path):
             bis["pct_impr_blocked"] = (bis["blocked_impr"] / bis["total_impr"]).where(bis["total_impr"] > 0, 0).fillna(0)
             bis["pct_spend_blocked"] = (bis["blocked_spend"] / bis["total_spend"]).where(bis["total_spend"] > 0, 0).fillna(0)
             bis = bis.sort_values("pct_impr_blocked", ascending=False)
+            bis["cpm"] = (bis["total_spend"] / bis["total_impr"] * 1000).where(bis["total_impr"] > 0, 0).fillna(0)
             _CACHE["block_impact_by_strategy.csv"] = bis
             hs = (bis["pct_impr_blocked"] >= 0.5).tolist()
             bis_rows = _fmt(bis, pct_cols=["pct_impr_blocked", "pct_spend_blocked"],
-                            money_cols=["total_spend", "blocked_spend"],
+                            money_cols=["total_spend", "blocked_spend", "cpm"],
                             int_cols=["total_impr", "total_placements", "blocked_impr", "blocked_placements"]).to_dict("records")
             for row, hot in zip(bis_rows, hs):
                 row["hot"] = hot
@@ -311,7 +321,7 @@ def _analyze_path(path):
             }
 
             _CACHE["top_placements.csv"] = a["top_placements"]
-            top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend"],
+            top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend", "cpm"],
                             int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
             for row in top_rows:
                 row["rec"] = row.get("name") in rec_names
@@ -414,11 +424,31 @@ def ingest():
 @app.route("/pull", methods=["GET", "POST"])
 def pull():
     """Scheduled entry point. Auth via ?key= matching INGEST_KEY.
-    Source priority: S3 two flat files (adapter) -> Graph -> IMAP."""
+    Source priority: S3 two flat files (adapter) -> Graph -> IMAP. Sends email."""
     key = os.environ.get("INGEST_KEY", "").strip()
     if key and request.args.get("key", "") != key:
         return jsonify({"ok": False, "error": "Unauthorized (bad or missing key)."}), 401
+    result, status = _run_pull(send_email=True)
+    return jsonify(result), status
 
+
+@app.route("/ui/pull", methods=["POST"])
+def ui_pull():
+    """UI 'Pull latest data' button — same-origin, no email."""
+    result, status = _run_pull(send_email=False)
+    return jsonify(result), status
+
+
+@app.route("/ui/email", methods=["POST"])
+def ui_email():
+    """UI 'Email latest' button — re-pulls current data and emails it."""
+    result, status = _run_pull(send_email=True)
+    return jsonify(result), status
+
+
+def _run_pull(send_email=False):
+    """Pull latest data (S3 two files -> Graph -> IMAP), analyze, save a dated
+    report, optionally email. Returns (result_dict, http_status)."""
     workbook_path = None
     cleanup = []
     try:
@@ -428,8 +458,8 @@ def pull():
             sname, sbytes, aname, abytes, date_str = fetch_two()
             if not (sbytes and abytes):
                 have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
-                return jsonify({"ok": True, "skipped": True,
-                                "message": f"Need both a sites and an apps file under the prefix (found: {have})."})
+                return {"ok": True, "skipped": True,
+                        "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
             workbook_path = synthesize_workbook(read_flat(sbytes, sname), read_flat(abytes, aname))
             sbytes = abytes = None
             gc.collect()
@@ -442,7 +472,7 @@ def pull():
                 from mailbox_pull import fetch_latest_xlsx
             fn, payload, date_str = fetch_latest_xlsx()
             if not payload:
-                return jsonify({"ok": True, "skipped": True, "message": "No matching export found."})
+                return {"ok": True, "skipped": True, "message": "No matching export found."}, 200
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
             tmp.write(payload)
             tmp.close()
@@ -455,7 +485,7 @@ def pull():
                 os.unlink(p)
             except OSError:
                 pass
-        return jsonify({"ok": False, "error": f"Source error: {e}"}), 502
+        return {"ok": False, "error": f"Source error: {e}"}, 502
 
     try:
         ctx = _analyze_path(workbook_path)
@@ -465,10 +495,11 @@ def pull():
         view_url = f"{base}/reports/{saved}"
         result = {"ok": True, "date": saved, "file": source_file,
                   "view_url": view_url, "latest_url": f"{base}/reports/latest"}
-        result["email"] = _send_weekly_email(saved, view_url)
-        return jsonify(result)
+        if send_email:
+            result["email"] = _send_weekly_email(saved, view_url)
+        return result, 200
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Analysis failed: {e}"}), 500
+        return {"ok": False, "error": f"Analysis failed: {e}"}, 500
     finally:
         for p in cleanup:
             try:
@@ -545,6 +576,12 @@ def _serve_report(date):
     if not os.path.isfile(path):
         abort(404)
     return send_file(path, mimetype="text/html")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_file(os.path.join(app.static_folder, "favicon.svg"),
+                     mimetype="image/svg+xml")
 
 
 @app.route("/download/<name>")
