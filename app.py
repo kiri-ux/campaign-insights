@@ -411,6 +411,69 @@ def ingest():
         gc.collect()
 
 
+@app.route("/pull", methods=["GET", "POST"])
+def pull():
+    """Scheduled entry point. Auth via ?key= matching INGEST_KEY.
+    Source priority: S3 two flat files (adapter) -> Graph -> IMAP."""
+    key = os.environ.get("INGEST_KEY", "").strip()
+    if key and request.args.get("key", "") != key:
+        return jsonify({"ok": False, "error": "Unauthorized (bad or missing key)."}), 401
+
+    workbook_path = None
+    cleanup = []
+    try:
+        if os.environ.get("S3_BUCKET", "").strip():
+            from s3_pull import fetch_two
+            from tap_adapter import read_flat, synthesize_workbook
+            sname, sbytes, aname, abytes, date_str = fetch_two()
+            if not (sbytes and abytes):
+                have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
+                return jsonify({"ok": True, "skipped": True,
+                                "message": f"Need both a sites and an apps file under the prefix (found: {have})."})
+            workbook_path = synthesize_workbook(read_flat(sbytes, sname), read_flat(abytes, aname))
+            cleanup.append(workbook_path)
+            source_file = f"{sname} + {aname}"
+        else:
+            if os.environ.get("GRAPH_CLIENT_ID", "").strip():
+                from graph_pull import fetch_latest_xlsx
+            else:
+                from mailbox_pull import fetch_latest_xlsx
+            fn, payload, date_str = fetch_latest_xlsx()
+            if not payload:
+                return jsonify({"ok": True, "skipped": True, "message": "No matching export found."})
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            tmp.write(payload)
+            tmp.close()
+            workbook_path = tmp.name
+            cleanup.append(workbook_path)
+            source_file = fn
+    except Exception as e:
+        for p in cleanup:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        return jsonify({"ok": False, "error": f"Source error: {e}"}), 502
+
+    try:
+        ctx = _analyze_path(workbook_path)
+        html = render_template("dashboard.html", **ctx)
+        saved = _save_report(html, date_str)
+        base = request.host_url.rstrip("/")
+        return jsonify({"ok": True, "date": saved, "file": source_file,
+                        "view_url": f"{base}/reports/{saved}",
+                        "latest_url": f"{base}/reports/latest"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Analysis failed: {e}"}), 500
+    finally:
+        for p in cleanup:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        gc.collect()
+
+
 @app.route("/reports")
 def reports_index():
     dates = _list_reports()
