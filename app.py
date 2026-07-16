@@ -305,9 +305,22 @@ def _analyze_path(path=None, frames=None):
                 if len(_wl) and "impressions" in _wl.columns and "internal_cost" in _wl.columns:
                     _wl["cpm"] = (_wl["internal_cost"] / _wl["impressions"] * 1000).where(_wl["impressions"] > 0, 0).fillna(0)
 
-            _CACHE["wl_partner"] = _merge_adj(pm, partner_adj, "business_unit") if len(pm) else pm
-            _CACHE["wl_client"] = _merge_adj(cflag, client_adj, ["Client", "product"]) if len(cflag) else cflag
-            _CACHE["wl_strategy"] = _merge_adj(sf, strat_adj, "Strategy Name") if len(sf) else sf
+            # Buyer as the FIRST column on every tab (mapped from business unit),
+            # with a buyer_review flag second for manual sign-off.
+            def _buyer_first(df):
+                if not len(df):
+                    return df
+                df = df.copy()
+                if "buyer" in df.columns:
+                    df = df.drop(columns=["buyer"])
+                buyers = df["business_unit"].map(lambda b: buyer_for(b, bmap)) if ("business_unit" in df.columns and bmap) else ""
+                df.insert(0, "buyer", buyers)
+                df.insert(1, "buyer_review", False)
+                return df
+
+            _CACHE["wl_partner"] = _buyer_first(_merge_adj(pm, partner_adj, "business_unit")) if len(pm) else pm
+            _CACHE["wl_client"] = _buyer_first(_merge_adj(cflag, client_adj, ["Client", "product"])) if len(cflag) else cflag
+            _CACHE["wl_strategy"] = _buyer_first(_merge_adj(sf, strat_adj, "Strategy Name")) if len(sf) else sf
 
             # Top summary cards: date range, impr, CTR, internal cost, # placements,
             # # recommended-block placements, spend on recommended-block placements.

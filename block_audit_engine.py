@@ -300,6 +300,23 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
                   conversions=("conversions", "sum"), spend=("spend", "sum"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
+        # Also drop anything already covered by the external blocklist (what you've
+        # pushed). AdLib enforcement lags in the data, so a freshly-blocked site can
+        # still be serving (~is_block) — without this it would keep getting
+        # recommended. Product-aware: only drop if blocked for every product it ran on.
+        if blocklist:
+            def _covered(row):
+                mk = (str(row["app_id"]).strip().lower() if kind == "app"
+                      else str(row["name"]).strip().lower())
+                entry = blocklist.get(mk)
+                if not entry:
+                    return False
+                prods = [p.strip() for p in str(row["products"]).split(",") if p.strip()]
+                if not prods:
+                    return True  # on the list, no product detail -> treat as covered
+                return all(_is_blocked_for_product(p, entry) for p in prods)
+            if len(d):
+                d = d[~d.apply(_covered, axis=1)]
         return d.sort_values("spend", ascending=False).reset_index(drop=True)
 
     candidates = {"site": _candidates("site"), "app": _candidates("app")}
