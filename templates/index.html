@@ -39,13 +39,15 @@
   form.busy + .busy-note{display:block;}
   .dllink{color:var(--velocity);font-weight:600;text-decoration:none;border-bottom:1px solid rgba(30,111,224,.35);}
   .dllink:hover{border-bottom-color:var(--velocity);}
+  .brandbar{display:flex;align-items:baseline;justify-content:space-between;}
+  .ver{font-size:11px;color:var(--muted);opacity:.7;font-weight:500;letter-spacing:.02em;}
   .delbtn{background:none;border:0;color:#b00;font-size:13px;font-weight:700;cursor:pointer;padding:2px 6px;border-radius:6px;opacity:.55;font-family:var(--font-body);}
   .delbtn:hover{opacity:1;background:#fdecea;}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span></div>
+  <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="ver">build {{ build_version }}</span></div>
   <h1>Placement &amp; Impact Insights</h1>
 
   {% if has_source %}

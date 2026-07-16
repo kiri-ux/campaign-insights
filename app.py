@@ -29,6 +29,18 @@ _CACHE = {}  # token -> {"name": df} for CSV downloads within the session
 _ANALYSIS_LOCK = threading.Lock()  # serialize heavy runs so they can't stack in memory
 
 
+def _build_version():
+    """Build stamp baked into VERSION at package time; 'dev' if absent."""
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "VERSION"), encoding="utf-8") as f:
+            return f.read().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+BUILD_VERSION = _build_version()
+
+
 def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
     d = df.copy()
     for c in int_cols:
@@ -43,12 +55,18 @@ def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
 @app.route("/")
 def index():
     return render_template("index.html",
+                           build_version=BUILD_VERSION,
                            reports=_list_reports()[:12],
                            has_source=bool(os.environ.get("S3_BUCKET", "").strip()
                                            or os.environ.get("GRAPH_CLIENT_ID", "").strip()
                                            or os.environ.get("IMAP_USER", "").strip()),
                            has_email=bool(os.environ.get("EMAIL_FROM", "").strip()
                                           and os.environ.get("EMAIL_TO", "").strip()))
+
+
+@app.route("/version")
+def version():
+    return jsonify({"build": BUILD_VERSION})
 
 
 @app.route("/analyze", methods=["POST"])
