@@ -60,6 +60,13 @@ def _fetch_tab(sheet_id, tab, timeout=8):
     return list(csv.reader(io.StringIO(raw)))
 
 
+def _looks_like_header(row):
+    """True if any cell in the row is one of the known header labels. Used to skip
+    a header row ONLY when one is actually present — some tabs (e.g. 'Excluded')
+    have no header, and blindly dropping row 0 would lose the first real entry."""
+    return any(str(c).strip().lower() in _HEADER_WORDS for c in row if c is not None)
+
+
 def load_blocklist(url=None, tabs=None, value_col=1, date_col=4):
     """Return {value_lower: {'value': original, 'date_added': date|None, 'tabs': set}}.
     Column defaults: B (index 1) = block value, E (index 4) = date added.
@@ -77,7 +84,13 @@ def load_blocklist(url=None, tabs=None, value_col=1, date_col=4):
             rows = _fetch_tab(sheet_id, tab)
         except Exception:
             continue
-        for r in rows[1:]:  # skip header row
+        if not rows:
+            continue
+        # Drop the first row only if it's genuinely a header. The main tabs have a
+        # header ("Domain or App / Bundle ID / Type / ... / Date added"); the
+        # 'Excluded' tab does NOT, so its first entry must be kept.
+        body = rows[1:] if _looks_like_header(rows[0]) else rows
+        for r in body:
             if len(r) <= value_col:
                 continue
             val = (r[value_col] or "").strip()

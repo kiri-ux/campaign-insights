@@ -6,6 +6,7 @@ Upload a site/app-grain export -> block list + waste attributed to BU/Product/St
 import io
 import os
 import gc
+import re
 import json
 import tempfile
 import threading
@@ -39,6 +40,19 @@ def _build_version():
 
 
 BUILD_VERSION = _build_version()
+
+
+def _norm_site(s):
+    """Normalize a site domain for matching: lowercase, drop scheme, path, query,
+    a leading 'www.', and any trailing dot. So 'https://www.TMZ.com/foo' and
+    'tmz.com' compare equal — otherwise an excluded site slips back into the
+    recommendations on a www/case/path variant."""
+    s = str(s).strip().lower()
+    s = re.sub(r"^[a-z]+://", "", s)   # strip http:// / https://
+    s = s.split("/")[0].split("?")[0]  # drop path + query
+    if s.startswith("www."):
+        s = s[4:]
+    return s.rstrip(".")
 
 
 def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
@@ -218,8 +232,13 @@ def _analyze_path(path=None, frames=None):
             # Drop anything you've previously unchecked (logged to the Excluded tab),
             # so it stops being recommended on every upload.
             if excluded:
+                # Sites: match on a normalized domain so www/case/path variants of an
+                # excluded site are still dropped. Apps: exact match on the App ID.
+                excluded_sites = {_norm_site(k) for k in excluded}
                 if len(rec_site) and "name" in rec_site:
-                    rec_site = rec_site[~rec_site["name"].astype(str).str.strip().str.lower().isin(excluded)]
+                    rec_site = rec_site[~rec_site["name"].map(
+                        lambda x: _norm_site(x) in excluded_sites
+                        or str(x).strip().lower() in excluded)]
                 if len(rec_app) and "app_id" in rec_app:
                     rec_app = rec_app[~rec_app["app_id"].astype(str).str.strip().str.lower().isin(excluded)]
             _CACHE["ai_recommended_sites.csv"] = rec_site
