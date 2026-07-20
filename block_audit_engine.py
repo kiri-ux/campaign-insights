@@ -224,6 +224,51 @@ def low_ctr_sites_by_client(allp, min_impr=5000, ctr_multiple=3.0,
     return flagged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
+def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0005, conv_rate_keep=0.0003,
+                     exclude_keys=None):
+    """Sites to auto-add to the recommended block list. Judged ACROSS THE BOARD
+    (pooled over every client/campaign, not per client): a site delivering
+    meaningful volume on click-driven products with a very low CTR (<= ctr_floor)
+    AND little-to-no conversions (conv/impr < conv_rate_keep) is dead weight for
+    everyone, so it's safe to block globally. CTV / Social Mirror CTV / Online
+    Audio are excluded — low CTR is expected there. Returns the same schema as
+    auto_app_blocks so it merges straight into the site block list.
+    """
+    cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
+            "conversions", "category", "reason"]
+    if allp is None or not len(allp):
+        return pd.DataFrame(columns=cols)
+    site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
+    site["product"] = site["product"].astype(str).str.strip()
+    site = site[~site["product"].isin(LOW_CTR_EXCLUDED_PRODUCTS)]
+    site = site[~site["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
+    if site.empty:
+        return pd.DataFrame(columns=cols)
+    g = (site.groupby("placement")
+         .agg(products=("product", lambda s: ", ".join(sorted({str(p) for p in s if str(p).strip()}))),
+              impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+              conversions=("conversions", "sum"), spend=("spend", "sum"))
+         .reset_index().rename(columns={"placement": "name"}))
+    g = g[~g["name"].astype(str).str.strip().str.lower().isin({"na", "nan", "none", ""})]
+    # Don't re-recommend a site already flagged "Block" or already on the master
+    # blocklist — those are handled; we only want NEW dead sites.
+    if exclude_keys:
+        g = g[~g["name"].astype(str).str.strip().str.lower().isin(set(exclude_keys))]
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["conv_rate"] = np.where(g["impressions"] > 0, g["conversions"] / g["impressions"], 0)
+    flag = ((g["impressions"] >= min_impr) & (g["ctr"] <= ctr_floor) &
+            (g["conv_rate"] < conv_rate_keep))
+    g = g[flag].copy()
+    if g.empty:
+        return pd.DataFrame(columns=cols)
+    g["app_id"] = g["name"]
+    g["category"] = "Low CTR / no conv"
+    g["reason"] = g.apply(
+        lambda r: f"CTR {r['ctr']*100:.3f}% with {int(round(r['conversions']))} conversions "
+                  f"across {int(r['impressions']):,} impressions (all clients)", axis=1)
+    return g[cols].sort_values("spend", ascending=False).reset_index(drop=True)
+
+
 def _stream_sheet(ws):
     """Stream a worksheet in read_only mode, pulling only the columns we need.
     Keeps peak memory low (never materializes the full sheet) and avoids loading
@@ -448,6 +493,14 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     # product's CTR norm AND under an absolute floor. Excludes CTV/SM CTV/Audio.
     low_ctr_sites = low_ctr_sites_by_client(allp)
 
+    # Sites to auto-add to the recommended block list: across ALL clients, low CTR
+    # with little-to-no conversions (dead weight for everyone). Skip sites already
+    # flagged "Block" or already on the master blocklist.
+    _site_block_keys = {str(n).strip().lower() for n in already.get("site", set())}
+    if blocklist:
+        _site_block_keys |= set(blocklist.keys())
+    auto_site_blocks_df = auto_site_blocks(allp, exclude_keys=_site_block_keys)
+
     # Master-blocklist check: match delivery against the external blocklist sheet
     # (by domain for sites, App ID for apps) and flag anything still serving AFTER
     # its "date added" — but only on a product it's actually blocked on. A CTV-list
@@ -470,12 +523,37 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             a2["post_spend"] = np.where(a2["after_block"], a2["spend"], 0)
             a2["display_name"] = np.where(a2["placement_type"] == "app",
                                           a2["disp"].astype(str), a2["placement"].astype(str))
+
+            _BAD_CLIENT = {"nan", "none", "", "(not in export)"}
+
+            def _clist(series):
+                return sorted({str(c).strip() for c in series
+                               if str(c).strip().lower() not in _BAD_CLIENT})
+
             g = (a2.groupby("match_key")
                  .agg(name=("display_name", "first"), placement_type=("placement_type", "first"),
                       products=("product", _products), impressions=("impressions", "sum"),
                       spend=("spend", "sum"), post_impr=("post_impr", "sum"),
-                      post_spend=("post_spend", "sum"), last_dt=("served_date", "max"))
+                      post_spend=("post_spend", "sum"), last_dt=("served_date", "max"),
+                      all_clients=("client", _clist))
                  .reset_index())
+            # Clients still serving AFTER the block date (the ones whose settings
+            # need checking). Falls back to all serving clients when we can't tell
+            # timing (no dates in the file) so the column is never empty for a leak.
+            leak_map = (a2[a2["after_block"]].groupby("match_key")["client"].agg(_clist).to_dict()
+                        if a2["after_block"].any() else {})
+            g["leak_clients"] = g["match_key"].map(lambda k: leak_map.get(k, []))
+
+            def _clients_cell(row):
+                lst = row["leak_clients"] or row["all_clients"]
+                shown = ", ".join(lst[:8])
+                return shown + (f"  +{len(lst) - 8} more" if len(lst) > 8 else "")
+
+            g["clients"] = g.apply(_clients_cell, axis=1)
+            g["client_count"] = g.apply(
+                lambda r: len(r["leak_clients"] or r["all_clients"]), axis=1)
+            g["all_clients"] = g["all_clients"].apply(lambda lst: ", ".join(lst))
+            g = g.drop(columns=["leak_clients"])
             g["lists"] = g["match_key"].map(
                 lambda k: ", ".join(sorted(blocklist[k].get("tabs", set()))))
             g["date_added"] = g["match_key"].map(lambda k: blocklist[k].get("date_added"))
@@ -524,6 +602,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "block_names": block_names,
         "candidates": candidates,
         "auto_app_blocks": auto_app_blocks,
+        "auto_site_blocks": auto_site_blocks_df,
         "top_placements": top_placements,
         "delivery_pp": delivery_pp,
         "delivery_strat": delivery_strat,

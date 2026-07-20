@@ -106,6 +106,17 @@ def merge_app_blocks(ai_apps, auto_apps):
     return merged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
+def merge_site_blocks(ai_sites, auto_sites):
+    """Combine AI-flagged sites with the deterministic low-CTR/no-conversion site
+    blocks, de-duped by name. The AI's reason wins when both flag the same site."""
+    frames = [df for df in (ai_sites, auto_sites) if df is not None and len(df)]
+    if not frames:
+        return pd.DataFrame(columns=_COLS)
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset=["name"], keep="first")
+    return merged.sort_values("spend", ascending=False).reset_index(drop=True)
+
+
 def recommend_blocks(candidates, api_key=None, model=None,
                      batch_size=None, max_candidates=None, max_workers=None):
     """candidates: {'site': df[name,impressions,spend], 'app': df[...]}

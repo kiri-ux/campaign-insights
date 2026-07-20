@@ -17,7 +17,7 @@ import pandas as pd
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
 from exchange_engine import analyze_exchanges
-from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks
+from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks, merge_site_blocks
 from product_map import build_pmap
 from buyer_map import load_buyer_map, buyer_for
 from blocklist_read import load_blocklist
@@ -225,7 +225,9 @@ def _analyze_path(path=None, frames=None):
             # AI runs on every upload now. Merge Claude's picks with the
             # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
             rec = recommend_blocks(a["candidates"])
-            rec_site = rec.get("site", pd.DataFrame())
+            # Merge AI site picks with the deterministic across-the-board low-CTR /
+            # no-conversion site auto-blocks (dedupe by name; AI reason wins).
+            rec_site = merge_site_blocks(rec.get("site", pd.DataFrame()), a.get("auto_site_blocks", pd.DataFrame()))
             if len(rec_site) and "impressions" in rec_site:
                 rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
             rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
