@@ -507,6 +507,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     # placement that served on Display is NOT a leak (it was never blocked there).
     blocklist_check = None
     blocklist_by_bu = None
+    blocked_site_clients = None
     if blocklist:
         a2 = allp[allp["impressions"] > 0].copy()
         a2["match_key"] = np.where(a2["placement_type"] == "app",
@@ -523,37 +524,37 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             a2["post_spend"] = np.where(a2["after_block"], a2["spend"], 0)
             a2["display_name"] = np.where(a2["placement_type"] == "app",
                                           a2["disp"].astype(str), a2["placement"].astype(str))
-
-            _BAD_CLIENT = {"nan", "none", "", "(not in export)"}
-
-            def _clist(series):
-                return sorted({str(c).strip() for c in series
-                               if str(c).strip().lower() not in _BAD_CLIENT})
-
             g = (a2.groupby("match_key")
                  .agg(name=("display_name", "first"), placement_type=("placement_type", "first"),
                       products=("product", _products), impressions=("impressions", "sum"),
                       spend=("spend", "sum"), post_impr=("post_impr", "sum"),
-                      post_spend=("post_spend", "sum"), last_dt=("served_date", "max"),
-                      all_clients=("client", _clist))
+                      post_spend=("post_spend", "sum"), last_dt=("served_date", "max"))
                  .reset_index())
-            # Clients still serving AFTER the block date (the ones whose settings
-            # need checking). Falls back to all serving clients when we can't tell
-            # timing (no dates in the file) so the column is never empty for a leak.
-            leak_map = (a2[a2["after_block"]].groupby("match_key")["client"].agg(_clist).to_dict()
-                        if a2["after_block"].any() else {})
-            g["leak_clients"] = g["match_key"].map(lambda k: leak_map.get(k, []))
 
-            def _clients_cell(row):
-                lst = row["leak_clients"] or row["all_clients"]
-                shown = ", ".join(lst[:8])
-                return shown + (f"  +{len(lst) - 8} more" if len(lst) > 8 else "")
+            # Separate grid: any CLIENT serving on blocklisted placements — so you can
+            # verify that client's block settings. One row per partner+client, with the
+            # blocked sites they ran, the products, and delivery metrics (incl. the
+            # post-block "leak" portion).
+            _BAD_CLIENT = {"nan", "none", "", "(not in export)"}
 
-            g["clients"] = g.apply(_clients_cell, axis=1)
-            g["client_count"] = g.apply(
-                lambda r: len(r["leak_clients"] or r["all_clients"]), axis=1)
-            g["all_clients"] = g["all_clients"].apply(lambda lst: ", ".join(lst))
-            g = g.drop(columns=["leak_clients"])
+            def _site_list(series):
+                names = sorted({str(s).strip() for s in series if str(s).strip()})
+                shown = ", ".join(names[:12])
+                return shown + (f"  +{len(names) - 12} more" if len(names) > 12 else "")
+
+            cob = (a2.groupby(["bu", "client"])
+                   .agg(products=("product", _products), impressions=("impressions", "sum"),
+                        clicks=("clicks", "sum"), spend=("spend", "sum"),
+                        post_impr=("post_impr", "sum"), post_spend=("post_spend", "sum"),
+                        n_sites=("match_key", "nunique"),
+                        sites=("display_name", _site_list))
+                   .reset_index().rename(columns={"bu": "business_unit", "client": "Client"}))
+            cob = cob[~cob["Client"].astype(str).str.strip().str.lower().isin(_BAD_CLIENT)]
+            cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
+            cob = cob[["business_unit", "Client", "products", "sites", "n_sites",
+                       "impressions", "clicks", "ctr", "spend", "post_impr", "post_spend"]]
+            blocked_site_clients = cob.sort_values(
+                ["post_spend", "spend"], ascending=False).reset_index(drop=True)
             g["lists"] = g["match_key"].map(
                 lambda k: ", ".join(sorted(blocklist[k].get("tabs", set()))))
             g["date_added"] = g["match_key"].map(lambda k: blocklist[k].get("date_added"))
@@ -609,6 +610,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "wl_src": wl_src,
         "low_ctr_sites": low_ctr_sites,
         "blocklist_check": blocklist_check,
+        "blocked_site_clients": blocked_site_clients,
         "blocklist_by_bu": blocklist_by_bu,
         "has_conv": has_conv,
         "has_app_id": bool(app_c["app_id"].ne(app_c["name"]).any()) if len(app_c) else False,

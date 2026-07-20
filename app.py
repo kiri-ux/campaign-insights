@@ -111,6 +111,7 @@ def _analyze_path(path=None, frames=None):
            "partner": None, "pmap": PMAP, "blocklist_check": None, "topcards": None,
            "block_impact_strategy": None,
            "low_ctr_sites": None, "low_ctr_sites_total": 0,
+           "blocked_site_clients": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
@@ -221,6 +222,21 @@ def _analyze_path(path=None, frames=None):
                     "matched": bc["matched"], "leaking_count": bc["leaking_count"],
                     "leaking_spend": bc["leaking_spend"], "rows": brows,
                 }
+
+            # Separate grid: clients serving on blocklisted placements (verify their
+            # block settings). Kept in `bsc_df` for the watchlist-xlsx cache below.
+            bsc_df = a.get("blocked_site_clients")
+            if bsc_df is not None and len(bsc_df):
+                _CACHE["clients_on_blocked_sites.csv"] = bsc_df
+                leak_flags = (bsc_df["post_impr"] > 0).tolist()
+                brows2 = _fmt(bsc_df.head(200), pct_cols=["ctr"],
+                              money_cols=["spend", "post_spend"],
+                              int_cols=["impressions", "clicks", "post_impr", "n_sites"]).to_dict("records")
+                for row, lf in zip(brows2, leak_flags):
+                    row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
+                    row["leaking"] = bool(lf)
+                ctx["blocked_site_clients"] = brows2
+                ctx["has_buyer"] = ctx["has_buyer"] or bool(bmap)
 
             # AI runs on every upload now. Merge Claude's picks with the
             # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
@@ -377,6 +393,8 @@ def _analyze_path(path=None, frames=None):
             _CACHE["wl_client"] = _buyer_first(_merge_adj(cflag, client_adj, ["Client", "product"])) if len(cflag) else cflag
             _CACHE["wl_strategy"] = _buyer_first(_merge_adj(sf, strat_adj, "Strategy Name")) if len(sf) else sf
             _CACHE["wl_low_ctr_sites"] = _buyer_first(lcs) if len(lcs) else lcs
+            _CACHE["wl_blocked_site_clients"] = (_buyer_first(bsc_df)
+                if (bsc_df is not None and len(bsc_df)) else pd.DataFrame())
 
             # Top summary cards: date range, impr, CTR, internal cost, # placements,
             # # recommended-block placements, spend on recommended-block placements.
@@ -739,7 +757,8 @@ def _watchlists_xlsx_bytes():
     sheets = [("Partner watchlist", _CACHE.get("wl_partner")),
               ("Client watchlist", _CACHE.get("wl_client")),
               ("Strategy watchlist", _CACHE.get("wl_strategy")),
-              ("Low-CTR sites", _CACHE.get("wl_low_ctr_sites"))]
+              ("Low-CTR sites", _CACHE.get("wl_low_ctr_sites")),
+              ("Clients on blocked sites", _CACHE.get("wl_blocked_site_clients"))]
     if all(df is None or not len(df) for _, df in sheets):
         return None
     buf = io.BytesIO()
