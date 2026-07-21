@@ -162,8 +162,8 @@
   {% if low_ctr_sites %}
     <h3 style="margin:18px 0 4px">Low-CTR site watchlist <span class="sub" style="font-weight:normal">(sites both far below their product's CTR norm <em>and</em> under the 0.05% floor — by client &amp; site)</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h3>
     <p class="note">A site is flagged only when it's <strong>both</strong> ≤⅓ of its product's pooled CTR <strong>and</strong> below an absolute 0.05% floor, at ≥5K impressions. <strong>CTV, Social Mirror CTV &amp; Online Audio are excluded</strong> — a low CTR is expected there. Sites converting efficiently are never flagged. Showing {% if low_ctr_sites_total > 100 %}the top 100 of {{ low_ctr_sites_total }}{% else %}all {{ low_ctr_sites_total }}{% endif %}, by wasted spend.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Product</th><th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
-    {% for r in low_ctr_sites %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
+    {% for r in low_ctr_sites %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.conversions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
