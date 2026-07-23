@@ -61,6 +61,7 @@
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <input type="date" id="rgstart"> <span class="hint">to</span> <input type="date" id="rgend">
         <button type="button" id="rangebtn" onclick="pullRange()">Pull date range</button>
+        <span class="hint">These are <strong>delivery dates inside the exports</strong> — not file drop dates. Rows outside the range are filtered out even when a file spans wider.</span>
       </div>
       <div id="s3dates" class="hint" style="margin-top:8px">Checking what data is available in S3…</div>
     </div>
@@ -71,9 +72,9 @@
   {% if reports %}
   <div class="card">
     <label>Recent dashboards</label>
-    <div class="hint">Previously generated weekly dashboards.</div>
+    <div class="hint">Named by the delivery date range each covers — re-pulling the same range replaces its report.</div>
     <ul id="dashlist" style="margin:6px 0 0;padding-left:18px;line-height:2">
-      {% for d in reports %}<li data-date="{{ d }}"><a class="dllink" href="/reports/{{ d }}">{{ d }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %} <button type="button" class="delbtn" title="Delete this dashboard" onclick="delDash('{{ d }}', this)">✕</button></li>{% endfor %}
+      {% for d in reports %}<li data-date="{{ d }}"><a class="dllink" href="/reports/{{ d }}">{{ d.replace('_to_', ' → ') }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %} <button type="button" class="delbtn" title="Delete this dashboard" onclick="delDash('{{ d }}', this)">✕</button></li>{% endfor %}
     </ul>
   </div>
   {% endif %}
