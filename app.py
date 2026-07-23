@@ -237,7 +237,10 @@ def _analyze_path(path=None, frames=None):
             # block settings). Kept in `bsc_df` for the watchlist-xlsx cache below.
             bsc_df = a.get("blocked_site_clients")
             if bsc_df is not None and len(bsc_df):
-                _CACHE["clients_on_blocked_sites.csv"] = bsc_df
+                # sites_list is a Python list (for the full-width drawer); drop it from
+                # the flat CSV/Excel outputs, which keep the joined `sites` string.
+                bsc_flat = bsc_df.drop(columns=["sites_list"], errors="ignore")
+                _CACHE["clients_on_blocked_sites.csv"] = bsc_flat
                 leak_flags = (bsc_df["post_impr"] > 0).tolist()
                 brows2 = _fmt(bsc_df.head(200), pct_cols=["ctr"],
                               money_cols=["spend", "post_spend"],
@@ -245,6 +248,8 @@ def _analyze_path(path=None, frames=None):
                 for row, lf in zip(brows2, leak_flags):
                     row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
                     row["leaking"] = bool(lf)
+                    if not isinstance(row.get("sites_list"), list):
+                        row["sites_list"] = [s for s in str(row.get("sites", "")).split(", ") if s]
                 ctx["blocked_site_clients"] = brows2
                 ctx["has_buyer"] = ctx["has_buyer"] or bool(bmap)
 
@@ -272,13 +277,18 @@ def _analyze_path(path=None, frames=None):
                 if len(rec_app) and "app_id" in rec_app:
                     rec_app = rec_app[~rec_app["app_id"].astype(str).str.strip().str.lower().isin(excluded)]
 
-            # Flag every recommended block High-CTR vs Low-CTR. "High CTR" = the
-            # abnormal-CTR sites (possible invalid traffic); everything else — low-CTR/
-            # no-conversion sites, AI-flagged MFA/junk, gaming/junk apps — is the
-            # low-value "Low CTR" bucket. is_low_ctr_block marks the account-level
-            # low-CTR/no-conv site blocks specifically (highlighted in the UI).
+            # Flag every recommended block: High CTR (abnormal CTR — possible invalid
+            # traffic), Low CTR (across-the-board low-CTR/no-conversion sites), or
+            # Quality (AI-flagged MFA/junk/brand-safety sites + gaming/junk/unresolved
+            # apps — blocked on quality, not CTR). is_low_ctr_block marks the account-
+            # level low-CTR/no-conv site blocks (highlighted in the UI).
             def _flag(c):
-                return "High CTR" if str(c) == "High CTR" else "Low CTR"
+                c = str(c)
+                if c == "High CTR":
+                    return "High CTR"
+                if c == "Low CTR / no conv":
+                    return "Low CTR"
+                return "Quality"
             for _df in (rec_site, rec_app):
                 if len(_df):
                     cat = _df["category"] if "category" in _df else pd.Series([""] * len(_df))
@@ -443,7 +453,8 @@ def _analyze_path(path=None, frames=None):
             _CACHE["wl_client"] = _buyer_first(_merge_adj(cflag, client_adj, ["Client", "product"])) if len(cflag) else cflag
             _CACHE["wl_strategy"] = _buyer_first(_merge_adj(sf, strat_adj, "Strategy Name")) if len(sf) else sf
             _CACHE["wl_low_ctr_sites"] = _buyer_first(lcs) if len(lcs) else lcs
-            _CACHE["wl_blocked_site_clients"] = (_buyer_first(bsc_df)
+            _CACHE["wl_blocked_site_clients"] = (
+                _buyer_first(bsc_df.drop(columns=["sites_list"], errors="ignore"))
                 if (bsc_df is not None and len(bsc_df)) else pd.DataFrame())
 
             # Top summary cards: date range, impr, CTR, internal cost, # placements,
@@ -493,6 +504,10 @@ def _analyze_path(path=None, frames=None):
                 }
         except Exception as e:
             ctx["errors"].append(f"Exchange analysis: {e}")
+        # Persist every cached CSV to disk so /download links keep working after the
+        # in-memory cache is cleared (next run) or the process restarts (e.g. saved
+        # reports served later). The latest analysis's CSVs are always available.
+        _persist_download_csvs()
     finally:
         gc.collect()
 
@@ -500,6 +515,21 @@ def _analyze_path(path=None, frames=None):
 
 
 REPORTS_DIR = os.environ.get("REPORTS_DIR", os.path.join(tempfile.gettempdir(), "insights_reports"))
+DOWNLOADS_DIR = os.environ.get("DOWNLOADS_DIR", os.path.join(tempfile.gettempdir(), "insights_downloads"))
+
+
+def _persist_download_csvs():
+    """Write each cached DataFrame CSV to DOWNLOADS_DIR (latest run wins)."""
+    try:
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        for k, v in list(_CACHE.items()):
+            if k.endswith(".csv") and isinstance(v, pd.DataFrame):
+                try:
+                    v.to_csv(os.path.join(DOWNLOADS_DIR, os.path.basename(k)), index=False)
+                except Exception:
+                    pass
+    except OSError:
+        pass
 
 
 def _save_report(html, date_str=None):
@@ -794,12 +824,17 @@ def favicon():
 @app.route("/download/<name>")
 def download(name):
     df = _CACHE.get(name)
-    if df is None:
-        abort(404)
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv",
-                     as_attachment=True, download_name=name)
+    if df is not None:
+        buf = io.StringIO()
+        df.to_csv(buf, index=False)
+        return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv",
+                         as_attachment=True, download_name=name)
+    # Fallback: the in-memory cache was cleared/restarted — serve the last analysis's
+    # CSV persisted to disk (so downloads work on saved reports too).
+    disk = os.path.join(DOWNLOADS_DIR, os.path.basename(name))
+    if os.path.isfile(disk):
+        return send_file(disk, mimetype="text/csv", as_attachment=True, download_name=name)
+    abort(404)
 
 
 def _watchlists_xlsx_bytes():

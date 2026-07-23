@@ -51,7 +51,8 @@ def classify_app_junk(name):
 NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("app", "id"),
                ("bundle",), ("impression",), ("click",), ("conversion",), ("conv",),
                ("billable", "spend"), ("spend",), ("cost",), ("date",),
-               ("business", "unit"), ("client",), ("product",), ("strategy",)]
+               ("business", "unit"), ("client",), ("product",), ("strategy",),
+               ("campaign",)]
 
 SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
@@ -125,6 +126,8 @@ def _detect(df, kind):
         "strategy": _find(cols, ("strategy", "type"), ("strategy",)),
         "strategy_name": _find(cols, ("strategy", "name")),
         "app_id": _find(cols, ("app", "id"), ("app", "bundle"), ("bundle",)),
+        "campaign": _find(cols, ("campaign", "name"), ("campaign",)),
+        "campaign_id": _find(cols, ("campaign", "id"), ("campaign", "#"), ("campaign", "number")),
     }
 
 
@@ -151,6 +154,8 @@ def _normalize(df, c):
     for dim in ("bu", "client", "product", "strategy"):
         out[dim] = (df[c[dim]].astype(str) if c[dim] else "(not in export)")
     out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
+    out["campaign"] = df[c["campaign"]].astype(str) if c.get("campaign") else "(not in export)"
+    out["campaign_id"] = df[c["campaign_id"]].astype(str) if c.get("campaign_id") else ""
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
     out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
     return out
@@ -587,22 +592,27 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             _BAD_CLIENT = {"nan", "none", "", "(not in export)"}
 
             def _site_list(series):
-                # Full list (no truncation) — the dashboard shows it in a collapsible
-                # drawer, so a long list no longer blows up the row height.
-                names = sorted({str(s).strip() for s in series if str(s).strip()})
-                return ", ".join(names)
+                # Full, de-duped, sorted list of blocklisted placements (no truncation)
+                # — the dashboard shows it in a collapsible full-width drawer.
+                return sorted({str(s).strip() for s in series if str(s).strip()})
 
-            cob = (a2.groupby(["bu", "client"])
+            # Broken out by partner + client + campaign (name & id). When the export
+            # carries no campaign columns, Campaign collapses to "(not in export)" and
+            # the grain is effectively one row per client (as before).
+            cob = (a2.groupby(["bu", "client", "campaign", "campaign_id"], dropna=False)
                    .agg(products=("product", _products), impressions=("impressions", "sum"),
                         clicks=("clicks", "sum"), spend=("spend", "sum"),
                         post_impr=("post_impr", "sum"), post_spend=("post_spend", "sum"),
                         n_sites=("match_key", "nunique"),
-                        sites=("display_name", _site_list))
-                   .reset_index().rename(columns={"bu": "business_unit", "client": "Client"}))
+                        sites_list=("display_name", _site_list))
+                   .reset_index().rename(columns={"bu": "business_unit", "client": "Client",
+                                                  "campaign": "Campaign", "campaign_id": "Campaign ID"}))
             cob = cob[~cob["Client"].astype(str).str.strip().str.lower().isin(_BAD_CLIENT)]
             cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
-            cob = cob[["business_unit", "Client", "products", "sites", "n_sites",
-                       "impressions", "clicks", "ctr", "spend", "post_impr", "post_spend"]]
+            cob["sites"] = cob["sites_list"].apply(lambda lst: ", ".join(lst))
+            cob = cob[["business_unit", "Client", "Campaign", "Campaign ID", "products",
+                       "sites", "sites_list", "n_sites", "impressions", "clicks", "ctr",
+                       "spend", "post_impr", "post_spend"]]
             blocked_site_clients = cob.sort_values(
                 ["post_spend", "spend"], ascending=False).reset_index(drop=True)
             g["lists"] = g["match_key"].map(

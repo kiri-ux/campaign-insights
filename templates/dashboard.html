@@ -71,10 +71,22 @@
   td > details > summary{cursor:pointer;color:var(--velocity);font-weight:600;font-size:12px;white-space:nowrap;}
   td > details[open] > summary{margin-bottom:4px;}
   td > details .sitelist{white-space:normal;font-size:12px;color:var(--ink);line-height:1.5;}
+  /* Clients-serving-blocked-sites: wrap long text so the table keeps its width */
+  table.cbs td.wrapcell, table.cbs th{white-space:normal;}
+  table.cbs td.wrapcell{max-width:220px;word-break:break-word;}
+  .drawer-toggle{cursor:pointer;color:var(--velocity);font-weight:600;white-space:nowrap;user-select:none;}
+  .drawer-toggle:hover{text-decoration:underline;}
+  tr.sitedetail > td{background:#fbfaf5;padding:8px 12px;}
+  .sitegrid{columns:210px auto;column-gap:26px;white-space:normal;font-size:12px;line-height:1.7;}
+  .sitegrid > div{break-inside:avoid;color:var(--ink);}
   /* Recommended-block CTR flags + account-level low-CTR block highlight */
   .flag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;}
   .flag.hi{background:#fff1d6;color:#8a5a00;}
   .flag.lo{background:#e3edfb;color:#1a4f9c;}
+  .flag.q{background:#ece8f6;color:#5b3fa3;}
+  .pager{display:flex;align-items:center;gap:10px;margin:8px 0 2px;font-size:13px;color:var(--muted);}
+  .pager button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--velocity);font-family:var(--font-body);}
+  .pager button:disabled{color:var(--muted);cursor:default;opacity:.5;}
   tr.lowctrblock{background:#eef4fc;}
   tr.lowctrblock td{border-bottom-color:#d5e3f5;}
   .acctbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#ffe9e4;color:#b42318;letter-spacing:.02em;}
@@ -120,7 +132,7 @@
     {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
 
     <h2>Placements <span class="sub">(all delivery — click a column to sort; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = on the recommended-block list)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
-    <table id="topgrid"><thead><tr>
+    <table id="topgrid" class="paginate"><thead><tr>
       <th>Placement</th><th>Type</th><th>Products</th>
       <th class="sortable num" data-col="3" data-type="num">Impr</th>
       <th class="sortable num" data-col="4" data-type="num">Clicks</th>
@@ -143,16 +155,17 @@
       <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
     </div>
     <p class="note">Cross-checked against your master blocklist sheet, <strong>per product</strong>: a <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> its block date <em>on a product it's actually blocked on</em> &mdash; a real leak worth verifying in the DSP. A placement on the CTV list that only served on Display is not flagged. The <strong>Block list(s)</strong> column shows which tabs it's on.</p>
-    <table><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
+    <table class="paginate"><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
     {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
   {% if blocked_site_clients %}
     <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
-    <p class="note">One row per client. Click <strong>“N sites”</strong> to expand the blocklisted placements that client served; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Products</th><th>Blocked sites</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.products) }}</td><td style="text-align:left"><details><summary>{{ r.n_sites }} site{{ 's' if r.n_sites != '1' else '' }}</summary><div class="sitelist">{{ r.sites }}</div></details></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>{% endfor %}
+    <p class="note">One row per client &amp; campaign. Click <strong>“N sites”</strong> to expand the blocklisted placements served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
+    <table class="cbs paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Campaign</th><th>Campaign ID</th><th>Products</th><th>Blocked sites</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wrapcell">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wrapcell">{{ r.Client }}</td><td class="wrapcell">{{ r.Campaign if r.Campaign and r.Campaign != '(not in export)' else '—' }}</td><td>{{ r['Campaign ID'] or '—' }}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {{ r.n_sites }} site{{ 's' if r.n_sites != '1' else '' }}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>
+    <tr class="sitedetail" style="display:none"><td colspan="20"><div class="sitegrid">{% for s in r.sites_list %}<div>{{ s }}</div>{% endfor %}</div></td></tr>{% endfor %}
     </table>
   {% endif %}
 
@@ -172,20 +185,20 @@
   {% endif %}
 
   {% if ai %}
-    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(combined high- &amp; low-CTR sites + junk/gaming apps — <span class="flag hi">High CTR</span> = possible invalid traffic, <span class="flag lo">Low CTR</span> = low-value/no-conversion)</span></h2>
+    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(<span class="flag hi">High CTR</span> = possible invalid traffic, <span class="flag lo">Low CTR</span> = low-value/no-conversion, <span class="flag q">Quality</span> = MFA / junk / brand-safety)</span></h2>
     {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
     {% if ai.site_count or ai.app_count %}
-    <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking — abnormally high-CTR sites (invalid-traffic signal), across-the-board low-CTR/no-conversion sites, AI-flagged MFA/junk sites, and every gaming / junk / unresolved-bundle app. Each row carries a <strong>Flag</strong> (High vs Low CTR) plus its category &amp; reason; <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
+    <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking. Each row carries a <strong>Flag</strong> plus its category &amp; reason: <span class="flag hi">High CTR</span> and <span class="flag lo">Low CTR</span> blocks each require <strong>≥10,000 impressions</strong> before they're flagged; <span class="flag q">Quality</span> blocks (AI-flagged MFA / content-farm / brand-safety sites and gaming / junk / unresolved apps) are blocked on quality and have <strong>no impression minimum</strong>. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
        <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
-    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else 'lo' }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else ('lo' if r.flag == 'Low CTR' else 'q') }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
-    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else 'lo' }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else ('lo' if r.flag == 'Low CTR' else 'q') }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_rz_site',this)">Copy</button></div>
@@ -218,7 +231,7 @@
 
   {% if partner %}
     <h3 style="margin:8px 0 4px">Partner watchlist <span class="sub" style="font-weight:normal">(performance + blocklist exposure — click a column to sort; highlighted = CTR flag)</span></h3>
-    <table class="sortgrid"><thead><tr>
+    <table class="sortgrid paginate"><thead><tr>
       <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
       <th class="sortable num" data-col="{% if has_buyer %}2{% else %}1{% endif %}" data-type="num">Impr</th>
       <th class="sortable num" data-col="{% if has_buyer %}3{% else %}2{% endif %}" data-type="num">Clicks</th>
@@ -239,22 +252,22 @@
   {% if clients %}
     <h3 style="margin:18px 0 4px">Client watchlist <span class="sub" style="font-weight:normal">(abnormally high CTR vs the product's own norm — by client &amp; product)</span></h3>
     <p class="note">CTR is judged <em>per product</em>. Showing {% if clients_total > 50 %}the top 50 of {{ clients_total }}{% else %}all {{ clients_total }}{% endif %}. <strong>CTR after recs</strong> = CTR once delivery on recommended-block placements is removed; <strong>% on recs</strong> = share of impressions from those placements.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th>Impr</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
+    <table class="paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th>Impr</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
     {% for r in clients %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
   {% if insights and insights.strategy_flags %}
     <h3 style="margin:18px 0 4px">Strategy watchlist <span class="sub" style="font-weight:normal">(strategy names with abnormally high CTR for their strategy type)</span></h3>
-    <table><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
+    <table class="paginate"><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
     {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
   {% if rec_high %}
     <h3 style="margin:18px 0 4px">Recommended blocks — high CTR <span class="sub" style="font-weight:normal">(abnormally high CTR — possible invalid traffic; sites &amp; apps combined)</span></h3>
-    <p class="note">These are part of the full recommended block list on the <strong>All Placements</strong> tab, where you can select &amp; push them. Shown here as the high-CTR view.</p>
-    <div class="tblwrap"><table class="lalign"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    <p class="note">Only <span class="flag hi">High CTR</span> blocks — sites whose CTR is ≥3× their product norm at <strong>≥10,000 impressions</strong>. Select &amp; push these from the full recommended block list on the <strong>All Placements</strong> tab.</p>
+    <div class="tblwrap"><table class="lalign paginate"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
     {% for r in rec_high %}<tr><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td><span class="flag hi">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>
   {% endif %}
@@ -270,15 +283,15 @@
     <h2>Low-CTR site watchlist <span class="sub">(sites both far below their product's CTR norm <em>and</em> under the 0.05% floor — by client &amp; site)</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h2>
     <p class="note">A site is flagged only when it's <strong>both</strong> ≤⅓ of its product's pooled CTR <strong>and</strong> below an absolute 0.05% floor, at ≥5K impressions. <strong>CTV, Social Mirror CTV &amp; Online Audio are excluded</strong> — a low CTR is expected there. Sites converting efficiently are never flagged. Showing {% if low_ctr_sites_total > 100 %}the top 100 of {{ low_ctr_sites_total }}{% else %}all {{ low_ctr_sites_total }}{% endif %}, by wasted spend.</p>
     <p class="note" style="background:#eef4fc;border-radius:8px;padding:8px 12px"><strong>This list is per client &amp; diagnostic — we do <em>not</em> block these individually.</strong> A site is only added to the block list when it's low across <strong>all</strong> clients (account level) and overall performance is poor. Rows tagged <span class="acctbadge">blocked account-wide</span> are the ones actually being recommended for blocking for every client{% if low_ctr_sites_acct_blocked %} ({{ low_ctr_sites_acct_blocked }} here){% endif %} — see the Recommended block list on the All Placements tab.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Account block?</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
+    <table class="paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Account block?</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
     {% for r in low_ctr_sites %}<tr{% if r.acct_blocked %} class="lowctrblock"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{% if r.acct_blocked %}<span class="acctbadge">blocked account-wide</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.conversions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
   {% if rec_low %}
-    <h2>Recommended blocks — low CTR <span class="sub">(low-value / no-conversion sites &amp; junk / gaming apps; sites &amp; apps combined)</span></h2>
-    <p class="note">The full recommended block list — where you select &amp; push these — is on the <strong>All Placements</strong> tab. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue</span> rows are account-level low-CTR/no-conversion site blocks (blocked across <strong>all</strong> clients).</p>
-    <div class="tblwrap"><table class="lalign"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    <h2>Recommended blocks — low CTR <span class="sub">(across-the-board low-CTR / no-conversion sites; sites &amp; apps combined)</span></h2>
+    <p class="note">Only <span class="flag lo">Low CTR</span> blocks — sites that are low-CTR with little-to-no conversions across <strong>all</strong> clients, at <strong>≥10,000 impressions</strong> (quality/junk blocks live on the All Placements list, not here). Select &amp; push from the full list on the <strong>All Placements</strong> tab.</p>
+    <div class="tblwrap"><table class="lalign paginate"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
     {% for r in rec_low %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td><span class="flag lo">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
     </table></div>
   {% endif %}
@@ -297,6 +310,18 @@
       });
     });
   });
+  // Expand/collapse the full-width blocked-sites list for a client row
+  function toggleSites(el){
+    var row=el.closest('tr');
+    var detail=row.nextElementSibling;
+    if(!detail || !detail.classList.contains('sitedetail')) return;
+    var open=detail.style.display!=='none';
+    detail.style.display = open ? 'none' : '';
+    var label=el.getAttribute('data-label');
+    if(!label){ label=el.textContent.replace(/^[^0-9]*/,''); el.setAttribute('data-label',label); }
+    el.innerHTML=(open?'&#9656; ':'&#9662; ')+label;
+  }
+  window.toggleSites=toggleSites;
   function cp(id, btn){
     var t=document.getElementById(id);
     t.select(); t.setSelectionRange(0, t.value.length);
@@ -406,9 +431,53 @@
           return (x>y?1:x<y?-1:0)*(asc?1:-1);
         });
         asc=!asc; rows.forEach(function(r){tb.appendChild(r);});
+        if(t._repaginate) t._repaginate();
       });
     });
   });
+
+  // Client-side pagination: show 25 rows per page on big grids (class="paginate").
+  // Handles header rows (thead or all-TH) and the paired blocked-sites detail rows.
+  (function(){
+    var PAGE=25;
+    function isHeader(tr){
+      if(tr.parentNode && tr.parentNode.tagName==='THEAD') return true;
+      return tr.cells.length>0 && Array.prototype.every.call(tr.cells,function(c){return c.tagName==='TH';});
+    }
+    document.querySelectorAll('table.paginate').forEach(function(tbl){
+      function units(){
+        var u=[], cur=null;
+        Array.prototype.slice.call(tbl.rows).forEach(function(tr){
+          if(isHeader(tr)) return;
+          if(tr.classList.contains('sitedetail')){ if(cur) cur.rows.push(tr); }
+          else { cur={rows:[tr]}; u.push(cur); }
+        });
+        return u;
+      }
+      if(units().length<=PAGE) return;
+      var page=0;
+      var bar=document.createElement('div'); bar.className='pager';
+      var prev=document.createElement('button'); prev.type='button'; prev.innerHTML='&#8249; Prev';
+      var next=document.createElement('button'); next.type='button'; next.innerHTML='Next &#8250;';
+      var label=document.createElement('span');
+      bar.appendChild(prev); bar.appendChild(label); bar.appendChild(next);
+      tbl.parentNode.insertBefore(bar, tbl.nextSibling);
+      function render(){
+        var U=units(), pages=Math.max(1,Math.ceil(U.length/PAGE));
+        if(page>=pages) page=pages-1; if(page<0) page=0;
+        U.forEach(function(unit,i){
+          var vis=(i>=page*PAGE && i<(page+1)*PAGE);
+          unit.rows.forEach(function(tr,j){ tr.style.display=(vis && j===0)?'':'none'; });
+        });
+        label.textContent='Page '+(page+1)+' of '+pages+' · '+U.length+' rows';
+        prev.disabled=(page===0); next.disabled=(page>=pages-1);
+      }
+      prev.onclick=function(){page--;render();};
+      next.onclick=function(){page++;render();};
+      tbl._repaginate=function(){ page=0; render(); };
+      render();
+    });
+  })();
 </script>
 </body>
 </html>
