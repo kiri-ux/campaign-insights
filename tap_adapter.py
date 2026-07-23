@@ -99,14 +99,61 @@ def _prune_and_downcast(df):
     return df
 
 
+def _wanted_engine_name(header):
+    """Engine column name for a raw export header, or None if we don't use it."""
+    cn = _canon(header)
+    name = _CANON_MAP.get(cn)
+    return name if name in _KEEP else None
+
+
+def _read_xlsx_slim(bio):
+    """Stream the first worksheet in read_only mode, materializing ONLY the
+    columns the engines use. pandas.read_excel builds every one of the export's
+    ~30+ columns before we prune — on a 385k-row file that's the single biggest
+    memory spike in the app, and it's what OOM-killed workers mid-pull."""
+    from openpyxl import load_workbook
+    wb = load_workbook(bio, read_only=True, data_only=True)
+    try:
+        ws = wb[wb.sheetnames[0]]
+        it = ws.iter_rows(values_only=True)
+        header = next(it, None)
+        if header is None:
+            return pd.DataFrame()
+        wanted = {}
+        for i, h in enumerate(header):
+            if h is None:
+                continue
+            name = _wanted_engine_name(h)
+            if name and name not in wanted.values():
+                wanted[i] = name
+        if not wanted:
+            # Unrecognized layout — fall back to the full read so the existing
+            # error path can report it sensibly.
+            bio.seek(0)
+            return pd.read_excel(bio)
+        data = {name: [] for name in wanted.values()}
+        for row in it:
+            for i, name in wanted.items():
+                data[name].append(row[i] if i < len(row) else None)
+        return pd.DataFrame(data)
+    finally:
+        wb.close()
+
+
 def read_flat(data, filename=""):
     """Read one flat export (xlsx or csv bytes) into a DataFrame with normalized
-    headers, pruned to the columns the engines use, and memory-downcast."""
+    headers, pruned to the columns the engines use, and memory-downcast. Both
+    readers load only the needed columns to keep peak memory low."""
     bio = io.BytesIO(data)
     if (filename or "").lower().endswith(".csv"):
-        df = pd.read_csv(bio, low_memory=False)
+        try:
+            df = pd.read_csv(bio, low_memory=False,
+                             usecols=lambda c: _wanted_engine_name(c) is not None)
+        except ValueError:  # no recognizable columns — full read for the error path
+            bio.seek(0)
+            df = pd.read_csv(bio, low_memory=False)
     else:
-        df = pd.read_excel(bio)
+        df = _read_xlsx_slim(bio)
     return _prune_and_downcast(_normalize_headers(df))
 
 

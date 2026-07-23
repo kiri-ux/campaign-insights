@@ -137,19 +137,23 @@
           return;
         }
         var comp=d.days.filter(function(x){return x.complete;}).length;
-        var first=d.days[0].date, last=d.days[d.days.length-1].date;
+        var last=d.days[d.days.length-1].date;
+        // Cap only the END picker to the newest drop (data can't be newer than
+        // that). No MIN: each export is a rolling multi-day window, so pullable
+        // delivery extends EARLIER than the earliest drop date.
         var rs=document.getElementById('rgstart'), re=document.getElementById('rgend');
-        if(rs){ rs.min=first; rs.max=last; }
-        if(re){ re.min=first; re.max=last; }
+        if(rs){ rs.max=last; }
+        if(re){ re.max=last; }
         var days=d.days, more='';
-        if(days.length>30){ more='<span class="hint">… and '+(days.length-30)+' earlier day(s)</span> '; days=days.slice(-30); }
+        if(days.length>30){ more='<span class="hint">… and '+(days.length-30)+' earlier drop(s)</span> '; days=days.slice(-30); }
         var chips=days.map(function(x){
           return '<span style="display:inline-block;background:'+(x.complete?'#eef4fc':'#ffe9e4')+
                  ';border-radius:5px;padding:1px 7px;margin:2px 3px 0 0;font-size:11px" title="'+
                  (x.complete?'site + app files present':'missing the site or app file')+'">'+
                  x.date+(x.complete?'':' ⚠ partial')+'</span>';
         }).join('');
-        el.innerHTML='<strong>Data in S3:</strong> '+comp+' day(s) with complete site+app pairs, '+first+' → '+last+'<br>'+more+chips;
+        el.innerHTML='<strong>Export drops in S3:</strong> '+comp+' drop(s) with complete site+app pairs, newest '+last+'. '
+          +'<span class="hint">Each drop is a rolling multi-day export, so the pullable <em>delivery</em> dates reach back further than the drop dates below — pick the delivery range you want above and the app pools every export covering it.</span><br>'+more+chips;
       }).catch(function(){ el.textContent=''; });
     })();
     function pullRange(){

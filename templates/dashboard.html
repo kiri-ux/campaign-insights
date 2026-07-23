@@ -507,10 +507,23 @@
     var btn=document.getElementById('syncBtn');
     if(btn) btn.onclick=function(){
       btn.disabled=true; btn.textContent='Syncing\u2026';
-      fetch('/ui/pull',{method:'POST'}).then(function(r){return r.json();}).then(function(res){
-        if(res && res.ok && res.view_url){ window.location.href=res.view_url; }
-        else{
-          alert((res && (res.error || res.message)) || 'Sync failed.');
+      fetch('/ui/pull',{method:'POST'}).then(function(r){
+        // The server can return an HTML error page (worker restarted or ran out
+        // of memory mid-analysis) — parse defensively instead of assuming JSON.
+        return r.text().then(function(t){
+          var d=null; try{ d=JSON.parse(t); }catch(_e){}
+          return {status:r.status, data:d};
+        });
+      }).then(function(res){
+        var d=res.data;
+        if(d && d.ok && d.view_url){ window.location.href=d.view_url; }
+        else if(d){
+          alert(d.error || d.message || 'Sync failed.');
+          btn.disabled=false; btn.textContent='Sync';
+        } else {
+          alert('The server returned an error page (HTTP '+res.status+') instead of a result. '
+                +'This usually means the service restarted or ran out of memory during the analysis — '
+                +'wait a minute and try Sync again. If it happens repeatedly, the Render instance likely needs more memory.');
           btn.disabled=false; btn.textContent='Sync';
         }
       }).catch(function(e){

@@ -40,15 +40,19 @@ def _client_and_cfg():
     return boto3.client("s3", region_name=region), bucket
 
 
-def list_range(start_iso, end_iso, grace_days=3):
+def list_range(start_iso, end_iso, grace_days=None):
     """List sites/apps files whose per-file date (filename date, else LastModified)
-    falls in [start, end + grace_days] — the grace catches exports dropped a few
-    days after the window that still carry in-range delivery (rows get filtered
-    to the exact range downstream). Returns (site_metas, app_metas, capped):
+    falls in [start, end + grace_days]. Exports are rolling multi-day windows
+    dropped AFTER the delivery they contain, so the grace (default 8 days,
+    override with S3_RANGE_GRACE_DAYS) catches files dropped up to a week+ after
+    the requested window that still carry in-range delivery — rows get filtered
+    to the exact range downstream. Returns (site_metas, app_metas, capped):
     metas are [{'name','key','date'}] oldest-first (so later files win de-dupe);
     capped=True if the S3_RANGE_MAX_FILES cap (default 16 per side) trimmed the
     oldest files out."""
     import datetime as _dt
+    if grace_days is None:
+        grace_days = int(os.environ.get("S3_RANGE_GRACE_DAYS", "8"))
     start = _dt.date.fromisoformat(start_iso)
     end = _dt.date.fromisoformat(end_iso) + _dt.timedelta(days=grace_days)
     s3, bucket = _client_and_cfg()
