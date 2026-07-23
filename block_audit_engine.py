@@ -616,6 +616,11 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             a2["_site_key"] = a2["match_key"].where(a2["placement_type"] == "site")
             a2["_app_key"] = a2["match_key"].where(a2["placement_type"] == "app")
             a2["_bd"] = pd.to_datetime(a2["blocked_date"], errors="coerce")
+            # The engine encodes a BLANK date cell as a 1970 sentinel ("blocked
+            # long ago") so leak math counts all delivery as post-block. Keep
+            # that for the math, but mask it here so "Date added" shows the
+            # earliest KNOWN date — or "—" when the sheet has no date at all.
+            a2["_bd"] = a2["_bd"].mask(a2["_bd"] <= pd.Timestamp("1971-01-01"))
             cob = (a2.groupby(["bu", "client", "strategy_name", "campaign_id"], dropna=False)
                    .agg(products=("product", _products), impressions=("impressions", "sum"),
                         clicks=("clicks", "sum"), spend=("spend", "sum"),

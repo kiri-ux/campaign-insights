@@ -705,6 +705,11 @@ def _blocklist_check_xlsx_bytes():
     df = _CACHE.get("wl_blocked_site_clients")
     if df is None or not len(df):
         return None
+    df = df.drop(columns=["buyer", "buyer_review"], errors="ignore")
+    # Second-layer scrub: epoch sentinels from any cached/older frame read "—".
+    for c in ("Date added", "Last served"):
+        if c in df.columns:
+            df[c] = df[c].astype(str).replace({"1970-01-01": "—", "nan": "—", "NaT": "—"})
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         df.to_excel(xl, sheet_name="Clients serving blocked sites"[:31], index=False)
