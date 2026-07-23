@@ -96,27 +96,51 @@ def _classify_batch(rows, kind, api_key, model):
 
 
 def merge_app_blocks(ai_apps, auto_apps):
-    """Combine AI-flagged apps with the deterministic auto-block apps, de-duped by
-    name. Auto-block reasons are kept unless the AI already flagged the same app."""
+    """Combine AI-flagged apps with the deterministic auto-block apps. An app
+    caught by both shows a combined category instead of silently keeping one."""
     frames = [df for df in (ai_apps, auto_apps) if df is not None and len(df)]
     if not frames:
         return pd.DataFrame(columns=_COLS)
+    return _merge_flagged(frames)
+
+
+def _merge_flagged(frames):
+    """Concat block frames and de-dupe by name — but instead of silently dropping
+    duplicates, a placement caught by MULTIPLE rules keeps the primary row's
+    metrics and gets a combined category ('MFA + High CTR') with the secondary
+    reasons appended, so overlaps are visible instead of hidden."""
     merged = pd.concat(frames, ignore_index=True)
-    merged = merged.drop_duplicates(subset=["name"], keep="first")
+    dup = merged.duplicated(subset=["name"], keep="first")
+    if dup.any():
+        primary = merged[~dup].copy()
+        extras = merged[dup]
+        add_cat, add_rsn = {}, {}
+        for name, g in extras.groupby("name"):
+            add_cat[name] = list(dict.fromkeys(str(c) for c in g["category"]))
+            add_rsn[name] = [f"{c}: {r}" for c, r in
+                             zip(g["category"].astype(str), g["reason"].astype(str))]
+        def _cat(row):
+            base = str(row["category"])
+            extra = [c for c in add_cat.get(row["name"], []) if c and c != base]
+            return " + ".join([base] + extra) if extra else base
+        def _rsn(row):
+            ex = add_rsn.get(row["name"])
+            return f"{row['reason']} | Also: " + " · ".join(ex) if ex else row["reason"]
+        primary["category"] = primary.apply(_cat, axis=1)
+        primary["reason"] = primary.apply(_rsn, axis=1)
+        merged = primary
     return merged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
 def merge_site_blocks(ai_sites, auto_low_sites, auto_high_sites=None):
     """Combine AI-flagged sites with the deterministic HIGH-CTR (invalid-traffic) and
-    LOW-CTR/no-conversion site blocks, de-duped by name. Priority when the same site
-    appears more than once: AI reason first, then high-CTR, then low-CTR."""
+    LOW-CTR/no-conversion site blocks. A site flagged by more than one rule shows a
+    combined category (priority for metrics: AI first, then high-CTR, then low-CTR)."""
     frames = [df for df in (ai_sites, auto_high_sites, auto_low_sites)
               if df is not None and len(df)]
     if not frames:
         return pd.DataFrame(columns=_COLS)
-    merged = pd.concat(frames, ignore_index=True)
-    merged = merged.drop_duplicates(subset=["name"], keep="first")
-    return merged.sort_values("spend", ascending=False).reset_index(drop=True)
+    return _merge_flagged(frames)
 
 
 def recommend_blocks(candidates, api_key=None, model=None,

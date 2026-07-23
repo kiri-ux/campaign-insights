@@ -297,17 +297,22 @@ def _analyze_path(path=None, frames=None):
             # apps — blocked on quality, not CTR). is_low_ctr_block marks the account-
             # level low-CTR/no-conv site blocks (highlighted in the UI).
             def _flag(c):
-                c = str(c)
-                if c == "High CTR":
-                    return "High CTR"
-                if c == "Low CTR / no conv":
-                    return "Low CTR"
-                return "Quality"
+                # Category may now be composite ("MFA + High CTR"); map each
+                # component and de-dupe, e.g. -> "Quality + High CTR".
+                parts = []
+                for x in [p.strip() for p in str(c).split(" + ")] or [str(c)]:
+                    if x == "High CTR":
+                        parts.append("High CTR")
+                    elif x == "Low CTR / no conv":
+                        parts.append("Low CTR")
+                    elif x:
+                        parts.append("Quality")
+                return " + ".join(dict.fromkeys(parts)) or "Quality"
             for _df in (rec_site, rec_app):
                 if len(_df):
                     cat = _df["category"] if "category" in _df else pd.Series([""] * len(_df))
                     _df["flag"] = cat.apply(_flag)
-                    _df["is_low_ctr_block"] = cat.apply(lambda c: str(c) == "Low CTR / no conv")
+                    _df["is_low_ctr_block"] = cat.apply(lambda c: "Low CTR / no conv" in str(c))
 
             _CACHE["ai_recommended_sites.csv"] = rec_site
             _CACHE["ai_recommended_apps.csv"] = rec_app
@@ -344,7 +349,9 @@ def _analyze_path(path=None, frames=None):
             def _comb_rows(mask_flag):
                 if not len(comb):
                     return []
-                sub = comb[comb["flag"] == mask_flag]
+                # substring match so "Quality + High CTR" rows still appear on the
+                # High CTR tab (equality would drop every multi-flagged row).
+                sub = comb[comb["flag"].astype(str).str.contains(mask_flag, regex=False)]
                 return _fmt(sub.head(100), pct_cols=["ctr"], money_cols=["spend"],
                             int_cols=_int).to_dict("records")
             ctx["rec_high"] = _comb_rows("High CTR")
