@@ -110,8 +110,8 @@ def _analyze_path(path=None, frames=None):
            "exchanges": None, "top": None, "block_impact": None,
            "partner": None, "pmap": PMAP, "blocklist_check": None, "topcards": None,
            "block_impact_strategy": None,
-           "low_ctr_sites": None, "low_ctr_sites_total": 0,
-           "blocked_site_clients": None,
+           "low_ctr_sites": None, "low_ctr_sites_total": 0, "low_ctr_sites_acct_blocked": 0,
+           "blocked_site_clients": None, "rec_high": None, "rec_low": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
            "errors": []}
     perf_bu = pd.DataFrame()
@@ -174,13 +174,23 @@ def _analyze_path(path=None, frames=None):
             lcs = a.get("low_ctr_sites", pd.DataFrame())
             _CACHE["low_ctr_sites_by_client.csv"] = lcs
             if len(lcs):
+                # Which of these per-client sites are ALSO on the account-level
+                # recommended block list (low across ALL clients). We only block at
+                # the account level, not per individual client — this lets buyers see
+                # which watchlist sites are actually getting blocked for everyone.
+                acct_block_sites = set()
+                _asb = a.get("auto_site_blocks", pd.DataFrame())
+                if _asb is not None and len(_asb) and "name" in _asb:
+                    acct_block_sites = {_norm_site(n) for n in _asb["name"].tolist()}
                 lrows = _fmt(lcs.head(100), pct_cols=["ctr", "product_ctr", "conv_rate"],
                              money_cols=["spend"],
                              int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
                 for row in lrows:
                     row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
+                    row["acct_blocked"] = _norm_site(row.get("site", "")) in acct_block_sites
                 ctx["low_ctr_sites"] = lrows
                 ctx["low_ctr_sites_total"] = int(len(lcs))
+                ctx["low_ctr_sites_acct_blocked"] = sum(1 for r in lrows if r["acct_blocked"])
                 ctx["has_buyer"] = ctx["has_buyer"] or bool(bmap)
 
             # Combined Partner grid: performance (all delivery) + block-leak exposure,
@@ -241,9 +251,11 @@ def _analyze_path(path=None, frames=None):
             # AI runs on every upload now. Merge Claude's picks with the
             # deterministic gaming/junk/unresolved auto-block. Apps key on App ID.
             rec = recommend_blocks(a["candidates"])
-            # Merge AI site picks with the deterministic across-the-board low-CTR /
-            # no-conversion site auto-blocks (dedupe by name; AI reason wins).
-            rec_site = merge_site_blocks(rec.get("site", pd.DataFrame()), a.get("auto_site_blocks", pd.DataFrame()))
+            # Merge AI site picks with the deterministic auto-blocks: abnormally HIGH
+            # CTR (invalid traffic) and across-the-board LOW CTR / no-conversion sites.
+            rec_site = merge_site_blocks(rec.get("site", pd.DataFrame()),
+                                         a.get("auto_site_blocks", pd.DataFrame()),
+                                         a.get("auto_high_ctr_site_blocks", pd.DataFrame()))
             if len(rec_site) and "impressions" in rec_site:
                 rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
             rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
@@ -259,22 +271,60 @@ def _analyze_path(path=None, frames=None):
                         or str(x).strip().lower() in excluded)]
                 if len(rec_app) and "app_id" in rec_app:
                     rec_app = rec_app[~rec_app["app_id"].astype(str).str.strip().str.lower().isin(excluded)]
+
+            # Flag every recommended block High-CTR vs Low-CTR. "High CTR" = the
+            # abnormal-CTR sites (possible invalid traffic); everything else — low-CTR/
+            # no-conversion sites, AI-flagged MFA/junk, gaming/junk apps — is the
+            # low-value "Low CTR" bucket. is_low_ctr_block marks the account-level
+            # low-CTR/no-conv site blocks specifically (highlighted in the UI).
+            def _flag(c):
+                return "High CTR" if str(c) == "High CTR" else "Low CTR"
+            for _df in (rec_site, rec_app):
+                if len(_df):
+                    cat = _df["category"] if "category" in _df else pd.Series([""] * len(_df))
+                    _df["flag"] = cat.apply(_flag)
+                    _df["is_low_ctr_block"] = cat.apply(lambda c: str(c) == "Low CTR / no conv")
+
             _CACHE["ai_recommended_sites.csv"] = rec_site
             _CACHE["ai_recommended_apps.csv"] = rec_app
             app_vals = rec_app["app_id"].tolist() if "app_id" in rec_app else rec_app.get("name", pd.Series([])).tolist()
+            _int = ["impressions", "clicks"]
             ctx["ai"] = {
                 "error": rec.get("error"),
                 "has_app_id": a.get("has_app_id", False),
                 "site_count": len(rec_site), "app_count": len(rec_app),
                 "sites": _fmt(rec_site.head(50), pct_cols=["ctr"], money_cols=["spend"],
-                              int_cols=["impressions", "clicks"]).to_dict("records"),
+                              int_cols=_int).to_dict("records"),
                 "apps": _fmt(rec_app.head(50), pct_cols=["ctr"], money_cols=["spend"],
-                             int_cols=["impressions", "clicks"]).to_dict("records"),
+                             int_cols=_int).to_dict("records"),
                 "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
                 "app_filter": to_adlib_filter(app_vals, "app") if len(rec_app) else "",
                 "site_csv": ", ".join(rec_site["name"].tolist()) if len(rec_site) else "",
                 "app_csv": ", ".join(app_vals) if len(rec_app) else "",
             }
+
+            # Combined (site + app) recommended-block rows split by CTR flag, for the
+            # per-CTR-type tables on the High CTR and Low CTR tabs (read-only).
+            def _combined(kind_df_pairs):
+                frames = []
+                for kind, df in kind_df_pairs:
+                    if df is None or not len(df):
+                        continue
+                    d = df.copy()
+                    d["kind"] = kind
+                    frames.append(d)
+                if not frames:
+                    return pd.DataFrame()
+                return pd.concat(frames, ignore_index=True, sort=False).sort_values("spend", ascending=False)
+            comb = _combined([("site", rec_site), ("app", rec_app)])
+            def _comb_rows(mask_flag):
+                if not len(comb):
+                    return []
+                sub = comb[comb["flag"] == mask_flag]
+                return _fmt(sub.head(100), pct_cols=["ctr"], money_cols=["spend"],
+                            int_cols=_int).to_dict("records")
+            ctx["rec_high"] = _comb_rows("High CTR")
+            ctx["rec_low"] = _comb_rows("Low CTR")
 
             # Combined Placements grid (all delivery), with a coral flag for any
             # placement on the recommended-block list.

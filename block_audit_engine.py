@@ -269,6 +269,53 @@ def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0005, conv_rate_keep=0.00
     return g[cols].sort_values("spend", ascending=False).reset_index(drop=True)
 
 
+def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=0.01,
+                              exclude_keys=None):
+    """Sites to auto-add to the block list for ABNORMALLY HIGH CTR. Pooled across all
+    clients, a site whose CTR is both >= ctr_floor (absolute) AND >= ctr_multiple× its
+    product's own norm is a likely invalid-traffic / bot signal worth blocking. CTV /
+    Social Mirror CTV / Online Audio are excluded — their near-zero click norms make
+    the ratio meaningless. Same schema as auto_app_blocks so it merges into the list.
+    """
+    cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
+            "conversions", "category", "reason"]
+    if allp is None or not len(allp):
+        return pd.DataFrame(columns=cols)
+    site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
+    site["product"] = site["product"].astype(str).str.strip()
+    site = site[~site["product"].isin(LOW_CTR_EXCLUDED_PRODUCTS)]
+    site = site[~site["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
+    if site.empty:
+        return pd.DataFrame(columns=cols)
+    g = (site.groupby(["placement", "product"])
+         .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+              conversions=("conversions", "sum"), spend=("spend", "sum"))
+         .reset_index())
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    norms = (g.groupby("product").apply(
+        lambda x: (x["clicks"].sum() / x["impressions"].sum()) if x["impressions"].sum() else 0)
+        .rename("product_ctr").reset_index())
+    g = g.merge(norms, on="product", how="left")
+    g["x_over_norm"] = np.where(g["product_ctr"] > 0, g["ctr"] / g["product_ctr"], 0)
+    flag = ((g["impressions"] >= min_impr) & (g["ctr"] >= ctr_floor) &
+            (g["product_ctr"] > 0) & (g["x_over_norm"] >= ctr_multiple))
+    g = g[flag].copy()
+    g = g[~g["placement"].astype(str).str.strip().str.lower().isin({"na", "nan", "none", ""})]
+    if exclude_keys:
+        g = g[~g["placement"].astype(str).str.strip().str.lower().isin(set(exclude_keys))]
+    if g.empty:
+        return pd.DataFrame(columns=cols)
+    # One row per site — keep the product on which it's most extreme.
+    g = g.sort_values("x_over_norm", ascending=False).drop_duplicates("placement", keep="first")
+    g = g.rename(columns={"placement": "name", "product": "products"})
+    g["app_id"] = g["name"]
+    g["category"] = "High CTR"
+    g["reason"] = g.apply(
+        lambda r: f"CTR {r['ctr']*100:.2f}% is {r['x_over_norm']:.1f}× the {r['products']} "
+                  f"norm — abnormally HIGH (possible invalid traffic)", axis=1)
+    return g[cols].sort_values("spend", ascending=False).reset_index(drop=True)
+
+
 def _stream_sheet(ws):
     """Stream a worksheet in read_only mode, pulling only the columns we need.
     Keeps peak memory low (never materializes the full sheet) and avoids loading
@@ -500,6 +547,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     if blocklist:
         _site_block_keys |= set(blocklist.keys())
     auto_site_blocks_df = auto_site_blocks(allp, exclude_keys=_site_block_keys)
+    # Abnormally HIGH CTR sites (possible invalid traffic) — also auto-block candidates.
+    auto_high_ctr_site_blocks_df = auto_high_ctr_site_blocks(allp, exclude_keys=_site_block_keys)
 
     # Master-blocklist check: match delivery against the external blocklist sheet
     # (by domain for sites, App ID for apps) and flag anything still serving AFTER
@@ -605,6 +654,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "candidates": candidates,
         "auto_app_blocks": auto_app_blocks,
         "auto_site_blocks": auto_site_blocks_df,
+        "auto_high_ctr_site_blocks": auto_high_ctr_site_blocks_df,
         "top_placements": top_placements,
         "delivery_pp": delivery_pp,
         "delivery_strat": delivery_strat,

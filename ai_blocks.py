@@ -106,10 +106,12 @@ def merge_app_blocks(ai_apps, auto_apps):
     return merged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
-def merge_site_blocks(ai_sites, auto_sites):
-    """Combine AI-flagged sites with the deterministic low-CTR/no-conversion site
-    blocks, de-duped by name. The AI's reason wins when both flag the same site."""
-    frames = [df for df in (ai_sites, auto_sites) if df is not None and len(df)]
+def merge_site_blocks(ai_sites, auto_low_sites, auto_high_sites=None):
+    """Combine AI-flagged sites with the deterministic HIGH-CTR (invalid-traffic) and
+    LOW-CTR/no-conversion site blocks, de-duped by name. Priority when the same site
+    appears more than once: AI reason first, then high-CTR, then low-CTR."""
+    frames = [df for df in (ai_sites, auto_high_sites, auto_low_sites)
+              if df is not None and len(df)]
     if not frames:
         return pd.DataFrame(columns=_COLS)
     merged = pd.concat(frames, ignore_index=True)

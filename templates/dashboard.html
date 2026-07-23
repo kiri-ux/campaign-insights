@@ -71,6 +71,13 @@
   td > details > summary{cursor:pointer;color:var(--velocity);font-weight:600;font-size:12px;white-space:nowrap;}
   td > details[open] > summary{margin-bottom:4px;}
   td > details .sitelist{white-space:normal;font-size:12px;color:var(--ink);line-height:1.5;}
+  /* Recommended-block CTR flags + account-level low-CTR block highlight */
+  .flag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;}
+  .flag.hi{background:#fff1d6;color:#8a5a00;}
+  .flag.lo{background:#e3edfb;color:#1a4f9c;}
+  tr.lowctrblock{background:#eef4fc;}
+  tr.lowctrblock td{border-bottom-color:#d5e3f5;}
+  .acctbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#ffe9e4;color:#b42318;letter-spacing:.02em;}
 </style>
 </head>
 <body>
@@ -149,14 +156,61 @@
     </table>
   {% endif %}
 
-  {% if not (audit or blocklist_check or blocked_site_clients) %}
+  {% if block_impact %}
+    <h2>Block impact by product <span class="sub">(if you applied the recommended blocks, how much of each product's serve is removed)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
+    <p class="note">Based on the <strong>recommended block list</strong> below. "% impr blocked" is the share of each product's serve that would be removed if you applied the recommendations. A very high % means the recommendations would cut a large chunk of that product — review before enforcing.</p>
+    <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if block_impact_strategy %}
+    <h2>Block impact by strategy <span class="sub">(if you applied the recommended blocks, how much of each strategy type's serve is removed)</span> <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h2>
+    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
+    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if ai %}
+    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(combined high- &amp; low-CTR sites + junk/gaming apps — <span class="flag hi">High CTR</span> = possible invalid traffic, <span class="flag lo">Low CTR</span> = low-value/no-conversion)</span></h2>
+    {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
+    {% if ai.site_count or ai.app_count %}
+    <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking — abnormally high-CTR sites (invalid-traffic signal), across-the-board low-CTR/no-conversion sites, AI-flagged MFA/junk sites, and every gaming / junk / unresolved-bundle app. Each row carries a <strong>Flag</strong> (High vs Low CTR) plus its category &amp; reason; <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
+       <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
+    {% if ai.sites %}
+    <h2 style="font-size:14px">Recommended site blocks</h2>
+    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else 'lo' }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    </table></div>{% endif %}
+    {% if ai.apps %}
+    <h2 style="font-size:14px">Recommended app blocks</h2>
+    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td><span class="flag {{ 'hi' if r.flag == 'High CTR' else 'lo' }}">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    </table></div>{% endif %}
+    <div class="copybox">
+      <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_rz_site',this)">Copy</button></div>
+      <textarea id="ai_rz_site" readonly rows="3"></textarea>
+    </div>
+    <div class="copybox">
+      <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App ID)</span><button class="copybtn" onclick="cp('ai_rz_app',this)">Copy</button></div>
+      <textarea id="ai_rz_app" readonly rows="3"></textarea>
+    </div>
+    <div class="copybox">
+      <div class="copyhead"><span>DSP format blocking — per blocklist (routed by product: All Products / CTV / Audio / Social Mirror)</span></div>
+      <p class="note" style="margin:2px 0 6px">Each checked placement is grouped into the blocklist it routes to, split into sites and apps, so you can paste the right set into each DSP list.</p>
+      <div id="dsp_per_blocklist"></div>
+    </div>
+    {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
+  {% endif %}
+
+  {% if not (audit or blocklist_check or blocked_site_clients or block_impact or block_impact_strategy or ai) %}
     <p class="note">No placement data for this window.</p>
   {% endif %}
   </div><!-- /tab-all -->
 
   <!-- ==================== HIGH CTR TAB ==================== -->
   <div class="tabpane" id="tab-high" style="display:none">
-  {% if partner or clients or (insights and insights.strategy_flags) %}
+  {% if partner or clients or rec_high or (insights and insights.strategy_flags) %}
     <h2>High-CTR watchlists <span class="sub">(partners, clients &amp; strategies with abnormally HIGH CTR — possible invalid traffic — and what the recommendations would do to each)</span></h2>
   {% else %}
     <p class="note">No high-CTR anomalies flagged for this window.</p>
@@ -196,67 +250,37 @@
     {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
     </table>
   {% endif %}
+
+  {% if rec_high %}
+    <h3 style="margin:18px 0 4px">Recommended blocks — high CTR <span class="sub" style="font-weight:normal">(abnormally high CTR — possible invalid traffic; sites &amp; apps combined)</span></h3>
+    <p class="note">These are part of the full recommended block list on the <strong>All Placements</strong> tab, where you can select &amp; push them. Shown here as the high-CTR view.</p>
+    <div class="tblwrap"><table class="lalign"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in rec_high %}<tr><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td><span class="flag hi">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    </table></div>
+  {% endif %}
   </div><!-- /tab-high -->
 
   <!-- ==================== LOW CTR TAB ==================== -->
   <div class="tabpane" id="tab-low" style="display:none">
-  {% if not (low_ctr_sites or block_impact or block_impact_strategy or ai) %}
+  {% if not (low_ctr_sites or rec_low) %}
     <p class="note">No low-CTR / blocking insights for this window.</p>
   {% endif %}
 
   {% if low_ctr_sites %}
     <h2>Low-CTR site watchlist <span class="sub">(sites both far below their product's CTR norm <em>and</em> under the 0.05% floor — by client &amp; site)</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h2>
     <p class="note">A site is flagged only when it's <strong>both</strong> ≤⅓ of its product's pooled CTR <strong>and</strong> below an absolute 0.05% floor, at ≥5K impressions. <strong>CTV, Social Mirror CTV &amp; Online Audio are excluded</strong> — a low CTR is expected there. Sites converting efficiently are never flagged. Showing {% if low_ctr_sites_total > 100 %}the top 100 of {{ low_ctr_sites_total }}{% else %}all {{ low_ctr_sites_total }}{% endif %}, by wasted spend.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
-    {% for r in low_ctr_sites %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.conversions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
+    <p class="note" style="background:#eef4fc;border-radius:8px;padding:8px 12px"><strong>This list is per client &amp; diagnostic — we do <em>not</em> block these individually.</strong> A site is only added to the block list when it's low across <strong>all</strong> clients (account level) and overall performance is poor. Rows tagged <span class="acctbadge">blocked account-wide</span> are the ones actually being recommended for blocking for every client{% if low_ctr_sites_acct_blocked %} ({{ low_ctr_sites_acct_blocked }} here){% endif %} — see the Recommended block list on the All Placements tab.</p>
+    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Account block?</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th></tr>
+    {% for r in low_ctr_sites %}<tr{% if r.acct_blocked %} class="lowctrblock"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{% if r.acct_blocked %}<span class="acctbadge">blocked account-wide</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.conversions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td></tr>{% endfor %}
     </table>
   {% endif %}
 
-  {% if block_impact %}
-    <h2>Block impact by product <span class="sub">(if you applied the recommended blocks, how much of each product's serve is removed)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
-    <p class="note">Based on the <strong>recommended block list</strong> below. "% impr blocked" is the share of each product's serve that would be removed if you applied the recommendations. A very high % means the recommendations would cut a large chunk of that product — review before enforcing.</p>
-    <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if block_impact_strategy %}
-    <h2>Block impact by strategy <span class="sub">(if you applied the recommended blocks, how much of each strategy type's serve is removed)</span> <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h2>
-    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if ai %}
-    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(AI review + auto-block: low-CTR/no-conversion sites, gaming, junk &amp; unresolved apps)</span></h2>
-    {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
-    {% if ai.site_count or ai.app_count %}
-    <p class="note">{{ ai.site_count }} sites and {{ ai.app_count }} apps recommended for blocking — an AI review of placements not yet on your list, plus every gaming / junk / unresolved-bundle app and across-the-board low-CTR/no-conversion site caught automatically. Every row is <strong>checked by default</strong>; uncheck any placement to drop it from both copy blocks and the export below. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
-       <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
-    {% if ai.sites %}
-    <h2 style="font-size:14px">Recommended site blocks</h2>
-    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>Site</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.sites %}<tr><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
-    </table></div>{% endif %}
-    {% if ai.apps %}
-    <h2 style="font-size:14px">Recommended app blocks</h2>
-    <div class="tblwrap"><table class="lalign"><tr><th>✓</th><th>App</th><th>App ID</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
-    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
-    </table></div>{% endif %}
-    <div class="copybox">
-      <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_rz_site',this)">Copy</button></div>
-      <textarea id="ai_rz_site" readonly rows="3"></textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App ID)</span><button class="copybtn" onclick="cp('ai_rz_app',this)">Copy</button></div>
-      <textarea id="ai_rz_app" readonly rows="3"></textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>DSP format blocking — per blocklist (routed by product: All Products / CTV / Audio / Social Mirror)</span></div>
-      <p class="note" style="margin:2px 0 6px">Each checked placement is grouped into the blocklist it routes to, split into sites and apps, so you can paste the right set into each DSP list.</p>
-      <div id="dsp_per_blocklist"></div>
-    </div>
-    {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
+  {% if rec_low %}
+    <h2>Recommended blocks — low CTR <span class="sub">(low-value / no-conversion sites &amp; junk / gaming apps; sites &amp; apps combined)</span></h2>
+    <p class="note">The full recommended block list — where you select &amp; push these — is on the <strong>All Placements</strong> tab. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue</span> rows are account-level low-CTR/no-conversion site blocks (blocked across <strong>all</strong> clients).</p>
+    <div class="tblwrap"><table class="lalign"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th></tr>
+    {% for r in rec_low %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td><span class="flag lo">{{ r.flag }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td></tr>{% endfor %}
+    </table></div>
   {% endif %}
   </div><!-- /tab-low -->
 
