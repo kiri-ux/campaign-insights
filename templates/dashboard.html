@@ -41,6 +41,12 @@
   th{background:#faf7ef;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
   tr:last-child td{border-bottom:0;}
   .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
+  .pillgroup{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .pilllink{display:inline-flex;align-items:center;padding:4px 14px;border-radius:999px;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:.01em;transition:background .15s,color .15s;}
+  .pill-blue{background:#eef4fc;color:var(--velocity);border:1px solid #cfe0f5;}
+  .pill-blue:hover{background:var(--velocity);color:#fff;}
+  .pill-gold{background:#fdf3d9;color:#8a6410;border:1px solid #f1dfae;}
+  .pill-gold:hover{background:var(--gold);color:#332500;}
   .err{background:var(--warnbg);border:1px solid #f3cfc9;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
   .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
   .copybox{margin:12px 0;}
@@ -127,9 +133,11 @@
     <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
     <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
     {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
-    {% if sheet_links and sheet_links.watchlists %}<a class="dl" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener" style="margin-left:auto">Watchlists (Google Sheet)</a>{% endif %}
-    {% if sheet_links and sheet_links.blocked_clients %}<a class="dl" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener"{% if not (sheet_links and sheet_links.watchlists) %} style="margin-left:auto"{% endif %}>Clients on blocked sites (Google Sheet)</a>{% endif %}
-    <a class="dl" href="/download_watchlists.xlsx"{% if not sheet_links %} style="margin-left:auto"{% endif %}>Download all watchlists (Excel)</a>
+    <span class="pillgroup">
+      {% if sheet_links and sheet_links.watchlists %}<a class="pilllink pill-blue" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer Watchlists</a>{% endif %}
+      {% if sheet_links and sheet_links.blocked_clients %}<a class="pilllink pill-blue" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener">Serving Block List</a>{% endif %}
+      <a class="pilllink pill-gold" href="/download_watchlists.xlsx">Excel Download</a>
+    </span>
     {% endif %}
   </div>
 

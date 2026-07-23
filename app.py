@@ -102,6 +102,21 @@ def _fmt_report_name(d):
 app.jinja_env.filters["report_name"] = _fmt_report_name
 
 
+def _range_label(date_str):
+    """Filename-safe range label: '2026-07-16_to_2026-07-22' -> '07.16.26-07.22.26',
+    '2026-07-23' -> '07.23.26'. Unparseable ids pass through."""
+    import datetime as _dt
+    def _one(iso):
+        try:
+            return _dt.date.fromisoformat(iso).strftime("%m.%d.%y")
+        except ValueError:
+            return iso
+    if "_to_" in str(date_str):
+        a, b = str(date_str).split("_to_", 1)
+        return f"{_one(a)}-{_one(b)}"
+    return _one(str(date_str))
+
+
 @app.route("/")
 def index():
     return render_template("index.html",
@@ -1024,15 +1039,17 @@ def _run_pull(send_email=False, start=None, end=None):
             xlsx = _watchlists_xlsx_bytes()
             bl_xlsx = _blocklist_check_xlsx_bytes()
             sheet_links = {}
+            _rl = _range_label(date_str)
+            _CACHE["report_range"] = _rl
             try:
                 import google_sheet
                 if google_sheet.configured():
                     if xlsx:
                         sheet_links["watchlists"] = google_sheet.upload_as_sheet(
-                            xlsx, f"Insights watchlists — {date_str}")
+                            xlsx, f"buyer watchlists_{_rl}")
                     if bl_xlsx:
                         sheet_links["blocked_clients"] = google_sheet.upload_as_sheet(
-                            bl_xlsx, f"Clients serving blocked sites — {date_str}")
+                            bl_xlsx, f"serving block list_{_rl}")
             except Exception as e:
                 app.logger.warning("Sheet creation at report time failed: %s", e)
             ctx["sheet_links"] = sheet_links or None
@@ -1080,11 +1097,12 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None, sheet_links=
         try:
             import google_sheet
             if google_sheet.configured():
+                _rl = _range_label(date_str)
                 if xlsx and not sheet_url:
-                    sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
+                    sheet_url = google_sheet.upload_as_sheet(xlsx, f"buyer watchlists_{_rl}")
                 if bl_xlsx and not bl_sheet_url:
                     bl_sheet_url = google_sheet.upload_as_sheet(
-                        bl_xlsx, f"Clients serving blocked sites — {date_str}")
+                        bl_xlsx, f"serving block list_{_rl}")
         except Exception as e:
             app.logger.warning("Google Sheet upload failed: %s", e)
 
@@ -1094,7 +1112,7 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None, sheet_links=
             attach, attach_name = None, None
         elif xlsx:
             wl_line = "<p><strong>Watchlists:</strong> attached (Partner / Client / Strategy tabs).</p>"
-            attach, attach_name = xlsx, f"watchlists-{date_str}.xlsx"
+            attach, attach_name = xlsx, f"buyer watchlists_{_range_label(date_str)}.xlsx"
         else:
             wl_line = ""
             attach, attach_name = None, None
@@ -1104,7 +1122,7 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None, sheet_links=
                        f'<a href="{bl_sheet_url}">{bl_sheet_url}</a></p>')
         elif bl_xlsx:
             bl_line = "<p><strong>Clients serving blocked sites:</strong> attached.</p>"
-            extra.append((bl_xlsx, f"blocklist-check-{date_str}.xlsx"))
+            extra.append((bl_xlsx, f"serving block list_{_range_label(date_str)}.xlsx"))
         else:
             bl_line = ""
 
@@ -1215,7 +1233,8 @@ def download_watchlists():
         abort(404)
     return send_file(io.BytesIO(data),
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                     as_attachment=True, download_name="watchlists.xlsx")
+                     as_attachment=True,
+                     download_name=f"buyer watchlists_{_CACHE.get('report_range', 'latest')}.xlsx")
 
 
 @app.route("/push_blocklist", methods=["POST"])
