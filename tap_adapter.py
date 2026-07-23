@@ -29,6 +29,7 @@ _COLMAP = {
     "product_2": "Product 2",
     "strategy_type": "Strategy Type",
     "strategy_name": "Strategy Name",
+    "campaign_id": "Campaign ID",
     "site_domain": "Site Domain",
     "final_site_domain_name": "Final Site Domain Name",
     "app_name": "App Name",
@@ -47,11 +48,24 @@ _COLMAP = {
 }
 
 
+def _canon(s):
+    """Canonical form for header matching: lowercase, alphanumerics only.
+    'Campaign ID', 'campaign_id', 'CampaignId ' all -> 'campaignid' — while
+    'Campaign Pool ID' -> 'campaignpoolid' stays distinct."""
+    import re
+    return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+
+# canon(header) -> engine name, built from the snake_case map AND the Title Case
+# targets themselves, so any casing/spacing variant of either form matches.
+_CANON_MAP = {_canon(k): v for k, v in _COLMAP.items()}
+_CANON_MAP.update({_canon(v): v for v in _COLMAP.values()})
+
+
 def _normalize_headers(df):
-    """Rename snake_case export headers to the Title Case names the engines use.
-    Leaves already-correct headers untouched, so both formats work."""
-    ren = {c: _COLMAP[str(c).strip().lower()] for c in df.columns
-           if str(c).strip().lower() in _COLMAP}
+    """Rename export headers to the Title Case names the engines use, matching
+    on canonical form so 'Campaign Id', 'campaign_id', 'CAMPAIGN ID' all work."""
+    ren = {c: _CANON_MAP[_canon(c)] for c in df.columns if _canon(c) in _CANON_MAP}
     return df.rename(columns=ren) if ren else df
 
 
@@ -59,11 +73,11 @@ def _normalize_headers(df):
 # budgets, margins, external IDs...) that we drop on read to save a lot of memory
 # on the full ~385k-row dataset.
 _KEEP = ["Date", "Client Business Unit", "Client", "Product 2", "Strategy Type",
-         "Strategy Name", "Site Domain", "Final Site Domain Name", "App Name",
-         "Final App Name", "App ID", "Impressions", "Clicks", "CTR",
+         "Strategy Name", "Campaign ID", "Site Domain", "Final Site Domain Name",
+         "App Name", "Final App Name", "App ID", "Impressions", "Clicks", "CTR",
          "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend"]
 _FLOAT32 = ["CTR", "CPM"]              # display-only metrics; recomputed downstream
-_CATEGORY = ["Client Business Unit", "Client", "Product 2", "Strategy Type"]
+_CATEGORY = ["Client Business Unit", "Client", "Product 2", "Strategy Type", "Campaign ID"]
 
 
 def _prune_and_downcast(df):

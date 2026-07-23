@@ -607,11 +607,16 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             # what the org calls the campaign name, and its Campaign ID is surfaced
             # as "Strategy ID". When the export carries neither, both collapse to
             # placeholders and the grain is effectively one row per client (as before).
+            # Per-type unique counts for the drawer label ("3 sites · 2 apps").
+            # .where() leaves NaN for the other type, which nunique ignores.
+            a2["_site_key"] = a2["match_key"].where(a2["placement_type"] == "site")
+            a2["_app_key"] = a2["match_key"].where(a2["placement_type"] == "app")
             cob = (a2.groupby(["bu", "client", "strategy_name", "campaign_id"], dropna=False)
                    .agg(products=("product", _products), impressions=("impressions", "sum"),
                         clicks=("clicks", "sum"), spend=("spend", "sum"),
                         post_impr=("post_impr", "sum"), post_spend=("post_spend", "sum"),
                         n_sites=("match_key", "nunique"),
+                        n_site=("_site_key", "nunique"), n_app=("_app_key", "nunique"),
                         sites_list=("display_name", _site_list))
                    .reset_index().rename(columns={"bu": "business_unit", "client": "Client",
                                                   "strategy_name": "Strategy Name",
@@ -620,7 +625,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
             cob["sites"] = cob["sites_list"].apply(lambda lst: ", ".join(lst))
             cob = cob[["business_unit", "Client", "Strategy Name", "Strategy ID", "products",
-                       "sites", "sites_list", "n_sites", "impressions", "clicks", "ctr",
+                       "sites", "sites_list", "n_sites", "n_site", "n_app",
+                       "impressions", "clicks", "ctr",
                        "spend", "post_impr", "post_spend"]]
             blocked_site_clients = cob.sort_values(
                 ["post_spend", "spend"], ascending=False).reset_index(drop=True)

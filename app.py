@@ -251,13 +251,20 @@ def _analyze_path(path=None, frames=None):
                 leak_flags = (bsc_df["post_impr"] > 0).tolist()
                 brows2 = _fmt(bsc_df.head(200), pct_cols=["ctr"],
                               money_cols=["spend", "post_spend"],
-                              int_cols=["impressions", "clicks", "post_impr", "n_sites"]).to_dict("records")
+                              int_cols=["impressions", "clicks", "post_impr",
+                                        "n_sites", "n_site", "n_app"]).to_dict("records")
                 for row, lf in zip(brows2, leak_flags):
                     row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
                     row["leaking"] = bool(lf)
                     if not isinstance(row.get("sites_list"), list):
                         row["sites_list"] = [s for s in str(row.get("sites", "")).split(", ") if s]
                 ctx["blocked_site_clients"] = brows2
+                # True when no row carries a Strategy ID — i.e. the Campaign ID
+                # column never made it through from the export. Surfaced in the
+                # grid note so a schema/mapping problem is visible, not silent.
+                _sid = bsc_df.get("Strategy ID")
+                ctx["bsc_no_sid"] = bool(_sid is None or _sid.astype(str).str.strip()
+                                         .isin(["", "nan", "none"]).all())
                 ctx["has_buyer"] = ctx["has_buyer"] or bool(bmap)
 
             # AI runs on every upload now. Merge Claude's picks with the
