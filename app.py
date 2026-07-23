@@ -84,10 +84,29 @@ def _add_cpm(df, impr_col="impressions", spend_col="spend"):
     return df
 
 
+def _fmt_report_name(d):
+    """Human display for a report id: '2026-07-16_to_2026-07-22' -> '07/16/26 – 07/22/26',
+    '2026-07-23' -> '07/23/26'. Unparseable parts pass through untouched."""
+    import datetime as _dt
+    def _one(iso):
+        try:
+            return _dt.date.fromisoformat(iso).strftime("%m/%d/%y")
+        except ValueError:
+            return iso
+    if "_to_" in d:
+        a, b = d.split("_to_", 1)
+        return f"{_one(a)} – {_one(b)}"
+    return _one(d)
+
+
+app.jinja_env.filters["report_name"] = _fmt_report_name
+
+
 @app.route("/")
 def index():
     return render_template("index.html",
                            build_version=BUILD_VERSION,
+                           default_pull_days=int(os.environ.get("DEFAULT_PULL_DAYS", "7")),
                            reports=_list_reports()[:12],
                            has_source=bool(os.environ.get("S3_BUCKET", "").strip()
                                            or os.environ.get("GRAPH_CLIENT_ID", "").strip()
@@ -123,6 +142,11 @@ def analyze():
 def _analyze_path(path=None, frames=None):
     """Run the full analysis and return the template ctx. Pass either an .xlsx
     `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read)."""
+    # Free the previous run's cached DataFrames before loading a new dataset —
+    # every MB matters on a small instance, and disk-persisted CSVs still serve
+    # downloads for saved reports while the new run repopulates the cache.
+    _CACHE.clear()
+    gc.collect()
     ctx = {"insights": None, "audit": None, "blocks": None, "ai": None,
            "clients": None, "clients_total": 0, "has_buyer": False,
            "exchanges": None, "top": None, "block_impact": None,
@@ -589,13 +613,80 @@ def _save_report(html, date_str=None):
     return date_str
 
 
+def _migrate_report_names():
+    """One-time cleanup: reports saved before range-naming were named by export
+    DROP date even though each covers a multi-day delivery window. Their real
+    range is baked into their own topcards ('Insights date range: Jul 16 – Jul 22'),
+    so read it back out and rename the report (and its paired watchlists /
+    blocklist-check files) to the full range. Runs at startup; skips anything
+    unparseable or already range-named. os.rename keeps mtime, so 'latest'
+    ordering is unaffected."""
+    import glob
+    import datetime as _dt
+    if not os.path.isdir(REPORTS_DIR):
+        return
+    pat = re.compile(r"^insights-(\d{4}-\d{2}-\d{2})\.html$")
+    rng = re.compile(r'<div class="n">([A-Z][a-z]{2} \d{1,2})\s*–\s*([A-Z][a-z]{2} \d{1,2})</div>\s*'
+                     r'<div class="l">Insights date range</div>')
+    for f in glob.glob(os.path.join(REPORTS_DIR, "insights-*.html")):
+        m = pat.match(os.path.basename(f))
+        if not m:
+            continue  # already range-named
+        year = int(m.group(1)[:4])
+        try:
+            with open(f, encoding="utf-8", errors="ignore") as fh:
+                html = fh.read()
+        except OSError:
+            continue
+        r = rng.search(html)
+        if not r:
+            continue
+        def _p(txt, yr):
+            return _dt.datetime.strptime(f"{txt} {yr}", "%b %d %Y").date()
+        try:
+            gen_date = _dt.date.fromisoformat(m.group(1))
+            start, end = _p(r.group(1), year), _p(r.group(2), year)
+            if start > end:  # Dec–Jan wrap: the start belongs to the prior year
+                start = _p(r.group(1), year - 1)
+            if start > gen_date:  # whole window after the generation date is
+                # impossible — a January-generated report covering December data
+                # inherited the wrong year; shift both back one.
+                start = _p(r.group(1), start.year - 1)
+                end = _p(r.group(2), end.year - 1)
+        except ValueError:
+            continue
+        new_id = f"{start.isoformat()}_to_{end.isoformat()}" if start != end else start.isoformat()
+        if new_id == m.group(1):
+            continue
+        target = os.path.join(REPORTS_DIR, f"insights-{new_id}.html")
+        if os.path.exists(target):
+            continue  # a range-named twin already exists — touch nothing
+        try:
+            os.rename(f, target)
+            for prefix in ("watchlists", "blocklist-check"):
+                oldp = os.path.join(REPORTS_DIR, f"{prefix}-{m.group(1)}.xlsx")
+                newp = os.path.join(REPORTS_DIR, f"{prefix}-{new_id}.xlsx")
+                if os.path.isfile(oldp) and not os.path.exists(newp):
+                    os.rename(oldp, newp)
+        except OSError:
+            pass
+
+
+try:
+    _migrate_report_names()
+except Exception as _e:  # never let a migration hiccup block startup
+    app.logger.warning("Report-name migration skipped: %s", _e)
+
+
 def _list_reports():
     import glob
     if not os.path.isdir(REPORTS_DIR):
         return []
     files = glob.glob(os.path.join(REPORTS_DIR, "insights-*.html"))
-    dates = sorted((os.path.basename(f)[len("insights-"):-len(".html")] for f in files), reverse=True)
-    return dates
+    # Sort by generation time (mtime), newest first — with range-named reports
+    # ("2026-07-16_to_2026-07-22"), name order no longer matches recency.
+    files.sort(key=os.path.getmtime, reverse=True)
+    return [os.path.basename(f)[len("insights-"):-len(".html")] for f in files]
 
 
 def _watchlists_path(date_str):
@@ -821,10 +912,32 @@ def _run_pull(send_email=False, start=None, end=None):
                         have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
                                 "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
-                    frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
+                    sdf = read_flat(sbytes, sname)
+                    adf = read_flat(abytes, aname)
                     sbytes = abytes = None
                     gc.collect()
-                    source_file = f"{sname} + {aname}"
+                    # Default pull = the last DEFAULT_PULL_DAYS days of DELIVERY in
+                    # the newest export (7 unless overridden; 0 = whole file). The
+                    # exports are rolling windows that can span a month — without
+                    # this trim, "pull latest" quietly meant "whatever window the
+                    # file happens to contain".
+                    trim_days = int(os.environ.get("DEFAULT_PULL_DAYS", "7"))
+                    if trim_days > 0:
+                        maxd = None
+                        for _df in (sdf, adf):
+                            if _df is not None and len(_df) and "Date" in _df.columns:
+                                m = pd.to_datetime(_df["Date"], errors="coerce").max()
+                                if pd.notna(m) and (maxd is None or m > maxd):
+                                    maxd = m
+                        if maxd is not None:
+                            cut_s = (maxd - pd.Timedelta(days=trim_days - 1)).date().isoformat()
+                            cut_e = maxd.date().isoformat()
+                            sdf = filter_date_range(sdf, cut_s, cut_e)
+                            adf = filter_date_range(adf, cut_s, cut_e)
+                    frames = build_frames(sdf, adf)
+                    sdf = adf = None
+                    gc.collect()
+                    source_file = f"{sname} + {aname}" + (f" (last {trim_days} delivery days)" if trim_days > 0 else "")
             else:
                 if os.environ.get("GRAPH_CLIENT_ID", "").strip():
                     from graph_pull import fetch_latest_xlsx
@@ -850,6 +963,14 @@ def _run_pull(send_email=False, start=None, end=None):
         try:
             ctx = _analyze_path(workbook_path, frames=frames)
             frames = None
+            # Name the report by the DELIVERY date range actually in the data,
+            # not the export drop date — multiple same-day pulls of different
+            # windows get distinct names, while re-pulling the same window
+            # overwrites its report (same data, freshest build wins).
+            _asum = (ctx.get("audit") or {}).get("summary", {})
+            _ws, _we = _asum.get("window_start_iso"), _asum.get("window_end_iso")
+            if _ws and _we:
+                date_str = _ws if _ws == _we else f"{_ws}_to_{_we}"
             html = render_template("dashboard.html", **ctx)
             saved = _save_report(html, date_str)
             xlsx = _watchlists_xlsx_bytes()
@@ -937,7 +1058,7 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
 @app.route("/reports")
 def reports_index():
     dates = _list_reports()
-    links = "".join(f'<li><a href="/reports/{d}">{d}</a></li>' for d in dates)
+    links = "".join(f'<li><a href="/reports/{d}">{_fmt_report_name(d)}</a></li>' for d in dates)
     body = f"<h2>Saved insights dashboards</h2><p>{len(dates)} report(s).</p><ul>{links}</ul>" \
         if dates else "<h2>Saved insights dashboards</h2><p>None yet.</p>"
     return f"<!doctype html><meta charset='utf-8'><title>Reports</title><body style='font-family:sans-serif;max-width:700px;margin:40px auto'>{body}</body>"
