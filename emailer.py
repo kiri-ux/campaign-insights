@@ -20,8 +20,11 @@ def configured():
                 and os.environ.get("EMAIL_TO", "").strip())
 
 
-def send_email(subject, html_body, attachment=None, attachment_name="watchlists.xlsx"):
-    """Send an HTML email, optionally with one attachment (bytes). Returns SES msg id."""
+def send_email(subject, html_body, attachment=None, attachment_name="watchlists.xlsx",
+               extra_attachments=None):
+    """Send an HTML email, optionally with attachments. `attachment` is the
+    original single-file path (bytes); `extra_attachments` is an optional list
+    of (bytes, filename) tuples appended after it. Returns SES msg id."""
     import boto3
     sender = os.environ["EMAIL_FROM"].strip()
     recipients = [r.strip() for r in os.environ["EMAIL_TO"].split(",") if r.strip()]
@@ -34,9 +37,15 @@ def send_email(subject, html_body, attachment=None, attachment_name="watchlists.
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(html_body, "html"))
     msg.attach(alt)
+    parts = []
     if attachment is not None:
-        part = MIMEApplication(attachment)
-        part.add_header("Content-Disposition", "attachment", filename=attachment_name)
+        parts.append((attachment, attachment_name))
+    for data, name in (extra_attachments or []):
+        if data:
+            parts.append((data, name))
+    for data, name in parts:
+        part = MIMEApplication(data)
+        part.add_header("Content-Disposition", "attachment", filename=name)
         msg.attach(part)
 
     ses = boto3.client("ses", region_name=region)

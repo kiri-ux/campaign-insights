@@ -570,6 +570,42 @@ def _watchlists_path(date_str):
     return os.path.join(REPORTS_DIR, f"watchlists-{date_str}.xlsx")
 
 
+def _blocklist_check_path(date_str):
+    return os.path.join(REPORTS_DIR, f"blocklist-check-{date_str}.xlsx")
+
+
+def _blocklist_check_xlsx_bytes():
+    """One-tab workbook mirroring the dashboard's 'Master blocklist check' grid
+    (same columns & full row set as the blocklist_check.csv download)."""
+    df = _CACHE.get("blocklist_check.csv")
+    if df is None or not len(df):
+        return None
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
+        df.to_excel(xl, sheet_name="Blocklist check", index=False)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _save_blocklist_check(date_str, xlsx_bytes):
+    if not xlsx_bytes:
+        return
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(_blocklist_check_path(date_str), "wb") as f:
+            f.write(xlsx_bytes)
+    except OSError:
+        pass
+
+
+def _load_blocklist_check(date_str):
+    try:
+        with open(_blocklist_check_path(date_str), "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def _save_watchlists(date_str, xlsx_bytes):
     if not xlsx_bytes:
         return
@@ -666,7 +702,9 @@ def ui_email():
     base = request.host_url.rstrip("/")
     view_url = f"{base}/reports/{date}"
     xlsx = _load_watchlists(date)  # from disk; None if not saved (older report)
-    status = _send_weekly_email(date, view_url, xlsx if xlsx is not None else b"")
+    bl_xlsx = _load_blocklist_check(date)
+    status = _send_weekly_email(date, view_url, xlsx if xlsx is not None else b"",
+                                bl_xlsx if bl_xlsx is not None else b"")
     return jsonify({"ok": True, "date": date, "view_url": view_url, "email": status}), 200
 
 
@@ -722,12 +760,14 @@ def _run_pull(send_email=False):
             saved = _save_report(html, date_str)
             xlsx = _watchlists_xlsx_bytes()
             _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
+            bl_xlsx = _blocklist_check_xlsx_bytes()
+            _save_blocklist_check(saved, bl_xlsx)
             base = request.host_url.rstrip("/")
             view_url = f"{base}/reports/{saved}"
             result = {"ok": True, "date": saved, "file": source_file,
                       "view_url": view_url, "latest_url": f"{base}/reports/latest"}
             if send_email:
-                result["email"] = _send_weekly_email(saved, view_url, xlsx)
+                result["email"] = _send_weekly_email(saved, view_url, xlsx, bl_xlsx)
             return result, 200
         except Exception as e:
             return {"ok": False, "error": f"Analysis failed: {e}"}, 500
@@ -742,25 +782,32 @@ def _run_pull(send_email=False):
         _ANALYSIS_LOCK.release()
 
 
-def _send_weekly_email(date_str, view_url, xlsx=None):
-    """Email the dashboard link + the 3 watchlists (native Google Sheet if
-    configured, else .xlsx attachment). Pass xlsx bytes to avoid re-computing.
-    No-op unless EMAIL_FROM/EMAIL_TO are set. Returns a status string."""
+def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
+    """Email the dashboard link + the watchlists + the blocklist-check grid
+    (native Google Sheets if configured, else .xlsx attachments). Pass bytes to
+    avoid re-computing. No-op unless EMAIL_FROM/EMAIL_TO are set."""
     try:
         import emailer
         if not emailer.configured():
             return "skipped (EMAIL_FROM/EMAIL_TO not set)"
         if xlsx is None:
             xlsx = _watchlists_xlsx_bytes()
+        if bl_xlsx is None:
+            bl_xlsx = _blocklist_check_xlsx_bytes()
         sheet_url = None
+        bl_sheet_url = None
         try:
             import google_sheet
-            if xlsx and google_sheet.configured():
-                sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
+            if google_sheet.configured():
+                if xlsx:
+                    sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
+                if bl_xlsx:
+                    bl_sheet_url = google_sheet.upload_as_sheet(
+                        bl_xlsx, f"Blocklist check — still serving — {date_str}")
         except Exception as e:
-            sheet_url = None
             app.logger.warning("Google Sheet upload failed: %s", e)
 
+        extra = []
         if sheet_url:
             wl_line = f'<p><strong>Watchlists (Google Sheet):</strong> <a href="{sheet_url}">{sheet_url}</a></p>'
             attach, attach_name = None, None
@@ -771,13 +818,23 @@ def _send_weekly_email(date_str, view_url, xlsx=None):
             wl_line = ""
             attach, attach_name = None, None
 
+        if bl_sheet_url:
+            bl_line = (f'<p><strong>Blocklist check — still serving (Google Sheet):</strong> '
+                       f'<a href="{bl_sheet_url}">{bl_sheet_url}</a></p>')
+        elif bl_xlsx:
+            bl_line = "<p><strong>Blocklist check — still serving:</strong> attached.</p>"
+            extra.append((bl_xlsx, f"blocklist-check-{date_str}.xlsx"))
+        else:
+            bl_line = ""
+
         body = (f"<p>The weekly Insights dashboard for <strong>{date_str}</strong> is ready.</p>"
                 f'<p><strong>Dashboard:</strong> <a href="{view_url}">{view_url}</a></p>'
-                f"{wl_line}")
+                f"{wl_line}{bl_line}")
         prefix = os.environ.get("EMAIL_SUBJECT_PREFIX", "Weekly Insights")
         mid = emailer.send_email(f"{prefix} — {date_str}", body,
-                                 attachment=attach, attachment_name=attach_name or "watchlists.xlsx")
-        return f"sent ({'sheet link' if sheet_url else 'xlsx attached'}), id={mid}"
+                                 attachment=attach, attachment_name=attach_name or "watchlists.xlsx",
+                                 extra_attachments=extra)
+        return f"sent ({'sheet links' if (sheet_url or bl_sheet_url) else 'xlsx attached'}), id={mid}"
     except Exception as e:
         app.logger.warning("Weekly email failed: %s", e)
         return f"email failed: {e}"
