@@ -22,6 +22,37 @@ def configured():
     return bool(os.environ.get("GOOGLE_SA_JSON", "").strip())
 
 
+def _apply_checkbox_columns(creds, spreadsheet_id, header_names):
+    """Apply BOOLEAN data validation (checkbox rendering) to every column whose
+    header matches one of `header_names` (case-insensitive), on every tab."""
+    from googleapiclient.discovery import build
+    sheets = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    meta = sheets.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(sheetId,title,gridProperties(rowCount)))").execute()
+    tabs = [sh["properties"] for sh in meta.get("sheets", [])]
+    if not tabs:
+        return
+    headers = sheets.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=[f"'{t['title']}'!1:1" for t in tabs]).execute()
+    wanted = {h.lower() for h in header_names}
+    requests = []
+    for t, vr in zip(tabs, headers.get("valueRanges", [])):
+        row = (vr.get("values") or [[]])[0]
+        for j, h in enumerate(row):
+            if str(h).strip().lower() in wanted:
+                requests.append({"repeatCell": {
+                    "range": {"sheetId": t["sheetId"], "startRowIndex": 1,
+                              "endRowIndex": t.get("gridProperties", {}).get("rowCount", 1000),
+                              "startColumnIndex": j, "endColumnIndex": j + 1},
+                    "cell": {"dataValidation": {"condition": {"type": "BOOLEAN"}}},
+                    "fields": "dataValidation"}})
+    if requests:
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
+
+
 def upload_as_sheet(xlsx_bytes, title):
     """Create a native Google Sheet from xlsx bytes; return its webViewLink."""
     from google.oauth2 import service_account
@@ -43,6 +74,15 @@ def upload_as_sheet(xlsx_bytes, title):
         resumable=False)
     f = drive.files().create(body=meta, media_body=media,
                              fields="id,webViewLink", supportsAllDrives=True).execute()
+
+    # Render buyer_review columns as real checkboxes: Sheets shows a checkbox
+    # wherever a cell holds a boolean AND carries BOOLEAN data validation, so
+    # find the column on each tab and apply the rule. Best-effort — the link is
+    # returned even if this decoration fails.
+    try:
+        _apply_checkbox_columns(creds, f["id"], ("buyer_review",))
+    except Exception:
+        pass
 
     share_email = os.environ.get("GSHEET_SHARE_EMAIL", "").strip()
     if share_email:

@@ -26,6 +26,8 @@
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
   h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
   h2{font-family:var(--font-head);font-size:16px;margin:28px 0 10px;color:var(--atlas);}
+  h3{font-family:var(--font-head);font-size:15px;color:var(--atlas);}
+  .tabhead{font-size:21px;}
   h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;}
   .cards{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
   .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
@@ -235,13 +237,13 @@
   <!-- ==================== HIGH CTR TAB ==================== -->
   <div class="tabpane" id="tab-high" style="display:none">
   {% if partner or clients or rec_high or (insights and insights.strategy_flags) %}
-    <h2>High-CTR watchlists <span class="sub">(partners, clients &amp; strategies with abnormally HIGH CTR — possible invalid traffic — and what the recommendations would do to each)</span></h2>
+    <h2 class="tabhead">High-CTR watchlists <span class="sub">(partners, clients &amp; strategies with abnormally HIGH CTR — possible invalid traffic — and what the recommendations would do to each)</span></h2>
   {% else %}
     <p class="note">No high-CTR anomalies flagged for this window.</p>
   {% endif %}
 
   {% if partner %}
-    <h3 style="margin:8px 0 4px">Partner watchlist <span class="sub" style="font-weight:normal">(only partners meeting the CTR-vs-volume flag — click a column to sort)</span></h3>
+    <h3 style="margin:8px 0 4px">Partner watchlist</h3>
     <table class="sortgrid paginate"><thead><tr>
       <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
       <th class="sortable num" data-col="{% if has_buyer %}2{% else %}1{% endif %}" data-type="num">Impr</th>
