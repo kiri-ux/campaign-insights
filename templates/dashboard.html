@@ -127,7 +127,9 @@
     <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
     <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
     {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
-    <a class="dl" href="/download_watchlists.xlsx" style="margin-left:auto">Download all watchlists (Excel)</a>
+    {% if sheet_links and sheet_links.watchlists %}<a class="dl" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener" style="margin-left:auto">Watchlists (Google Sheet)</a>{% endif %}
+    {% if sheet_links and sheet_links.blocked_clients %}<a class="dl" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener"{% if not (sheet_links and sheet_links.watchlists) %} style="margin-left:auto"{% endif %}>Clients on blocked sites (Google Sheet)</a>{% endif %}
+    <a class="dl" href="/download_watchlists.xlsx"{% if not sheet_links %} style="margin-left:auto"{% endif %}>Download all watchlists (Excel)</a>
     {% endif %}
   </div>
 

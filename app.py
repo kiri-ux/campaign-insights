@@ -693,6 +693,29 @@ def _watchlists_path(date_str):
     return os.path.join(REPORTS_DIR, f"watchlists-{date_str}.xlsx")
 
 
+def _sheet_links_path(date_str):
+    return os.path.join(REPORTS_DIR, f"sheet-links-{date_str}.json")
+
+
+def _save_sheet_links(date_str, links):
+    if not links:
+        return
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(_sheet_links_path(date_str), "w", encoding="utf-8") as f:
+            json.dump(links, f)
+    except OSError:
+        pass
+
+
+def _load_sheet_links(date_str):
+    try:
+        with open(_sheet_links_path(date_str), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def _blocklist_check_path(date_str):
     return os.path.join(REPORTS_DIR, f"blocklist-check-{date_str}.xlsx")
 
@@ -867,7 +890,8 @@ def ui_email():
     xlsx = _load_watchlists(date)  # from disk; None if not saved (older report)
     bl_xlsx = _load_blocklist_check(date)
     status = _send_weekly_email(date, view_url, xlsx if xlsx is not None else b"",
-                                bl_xlsx if bl_xlsx is not None else b"")
+                                bl_xlsx if bl_xlsx is not None else b"",
+                                _load_sheet_links(date))
     return jsonify({"ok": True, "date": date, "view_url": view_url, "email": status}), 200
 
 
@@ -994,18 +1018,35 @@ def _run_pull(send_email=False, start=None, end=None):
                     pass
             if _ws and _we:
                 date_str = _ws if _ws == _we else f"{_ws}_to_{_we}"
+            # Build the export workbooks once, create their Google Sheets now (if
+            # configured), and bake the links into the dashboard itself. The
+            # email reuses these same sheets instead of minting duplicates.
+            xlsx = _watchlists_xlsx_bytes()
+            bl_xlsx = _blocklist_check_xlsx_bytes()
+            sheet_links = {}
+            try:
+                import google_sheet
+                if google_sheet.configured():
+                    if xlsx:
+                        sheet_links["watchlists"] = google_sheet.upload_as_sheet(
+                            xlsx, f"Insights watchlists — {date_str}")
+                    if bl_xlsx:
+                        sheet_links["blocked_clients"] = google_sheet.upload_as_sheet(
+                            bl_xlsx, f"Clients serving blocked sites — {date_str}")
+            except Exception as e:
+                app.logger.warning("Sheet creation at report time failed: %s", e)
+            ctx["sheet_links"] = sheet_links or None
             html = render_template("dashboard.html", **ctx)
             saved = _save_report(html, date_str)
-            xlsx = _watchlists_xlsx_bytes()
             _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
-            bl_xlsx = _blocklist_check_xlsx_bytes()
             _save_blocklist_check(saved, bl_xlsx)
+            _save_sheet_links(saved, sheet_links)
             base = request.host_url.rstrip("/")
             view_url = f"{base}/reports/{saved}"
             result = {"ok": True, "date": saved, "file": source_file,
                       "view_url": view_url, "latest_url": f"{base}/reports/latest"}
             if send_email:
-                result["email"] = _send_weekly_email(saved, view_url, xlsx, bl_xlsx)
+                result["email"] = _send_weekly_email(saved, view_url, xlsx, bl_xlsx, sheet_links)
             return result, 200
         except Exception as e:
             return {"ok": False, "error": f"Analysis failed: {e}"}, 500
@@ -1020,10 +1061,11 @@ def _run_pull(send_email=False, start=None, end=None):
         _ANALYSIS_LOCK.release()
 
 
-def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
-    """Email the dashboard link + the watchlists + the blocklist-check grid
-    (native Google Sheets if configured, else .xlsx attachments). Pass bytes to
-    avoid re-computing. No-op unless EMAIL_FROM/EMAIL_TO are set."""
+def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None, sheet_links=None):
+    """Email the dashboard link + the watchlists + the clients-serving-blocked-
+    sites grid. Reuses the Google Sheets created at report time (sheet_links)
+    when available; otherwise uploads fresh ones if configured, else attaches
+    the .xlsx files. No-op unless EMAIL_FROM/EMAIL_TO are set."""
     try:
         import emailer
         if not emailer.configured():
@@ -1032,14 +1074,15 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
             xlsx = _watchlists_xlsx_bytes()
         if bl_xlsx is None:
             bl_xlsx = _blocklist_check_xlsx_bytes()
-        sheet_url = None
-        bl_sheet_url = None
+        sheet_links = sheet_links or {}
+        sheet_url = sheet_links.get("watchlists")
+        bl_sheet_url = sheet_links.get("blocked_clients")
         try:
             import google_sheet
             if google_sheet.configured():
-                if xlsx:
+                if xlsx and not sheet_url:
                     sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
-                if bl_xlsx:
+                if bl_xlsx and not bl_sheet_url:
                     bl_sheet_url = google_sheet.upload_as_sheet(
                         bl_xlsx, f"Clients serving blocked sites — {date_str}")
         except Exception as e:
