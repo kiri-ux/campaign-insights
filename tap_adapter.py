@@ -110,6 +110,37 @@ def read_flat(data, filename=""):
     return _prune_and_downcast(_normalize_headers(df))
 
 
+_MEASURE_COLS = set(_MEASURES) | {"CTR", "CPM", "Total Spend"}
+
+
+def combine_flats(dfs):
+    """Concat several date-ranged flat exports into one frame. Overlapping exports
+    (rolling windows / restated data) produce duplicate dimension rows — keep the
+    LAST occurrence (files are processed oldest-first, so the newest export's
+    version of any restated row wins) and drop the rest so pooled metrics never
+    double-count."""
+    dfs = [d for d in dfs if d is not None and len(d)]
+    if not dfs:
+        return pd.DataFrame()
+    combined = pd.concat(dfs, ignore_index=True, sort=False)
+    dims = [c for c in combined.columns if c not in _MEASURE_COLS]
+    if dims:
+        combined = combined.drop_duplicates(subset=dims, keep="last")
+    return combined.reset_index(drop=True)
+
+
+def filter_date_range(df, start_iso, end_iso):
+    """Keep only rows whose Date falls within [start, end] inclusive. Frames
+    without a Date column pass through untouched (nothing to filter on)."""
+    if df is None or not len(df) or "Date" not in df.columns:
+        return df
+    d = pd.to_datetime(df["Date"], errors="coerce")
+    import datetime as _dt
+    start = pd.Timestamp(_dt.date.fromisoformat(start_iso))
+    end = pd.Timestamp(_dt.date.fromisoformat(end_iso))
+    return df[(d >= start) & (d <= end)].reset_index(drop=True)
+
+
 def _bu_col(df):
     for c in ("Business Unit", "Client Business Unit"):
         if c in df.columns:

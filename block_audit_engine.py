@@ -187,12 +187,12 @@ LOW_CTR_EXCLUDED_PRODUCTS = {"CTV", "Social Mirror CTV", "Online Audio", "Audio"
 
 
 def low_ctr_sites_by_client(allp, min_impr=5000, ctr_multiple=3.0,
-                            ctr_floor=0.0005, conv_rate_keep=0.0003):
+                            ctr_floor=0.0007, conv_rate_keep=0.0003):
     """Per-client, per-site watchlist of SITES with abnormally LOW CTR.
 
     A site is flagged only when it is BOTH far below its product's own CTR norm
     (<= 1/ctr_multiple of the pooled product CTR) AND under an absolute ctr_floor
-    (0.05% by default). CTV / Social Mirror CTV / Online Audio are excluded — a low
+    (0.07% by default). CTV / Social Mirror CTV / Online Audio are excluded — a low
     CTR is expected on those non-click products. Sites converting efficiently
     (conv/impr >= conv_rate_keep) are never flagged, even at low CTR — they're
     working. Returns one row per client + site (+ product, since CTR norms are
@@ -236,7 +236,7 @@ def low_ctr_sites_by_client(allp, min_impr=5000, ctr_multiple=3.0,
     return flagged.sort_values("spend", ascending=False).reset_index(drop=True)
 
 
-def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0005, conv_rate_keep=0.0003,
+def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0007, conv_rate_keep=0.0003,
                      exclude_keys=None):
     """Sites to auto-add to the recommended block list. Judged ACROSS THE BOARD
     (pooled over every client/campaign, not per client): a site delivering
@@ -615,12 +615,14 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             # .where() leaves NaN for the other type, which nunique ignores.
             a2["_site_key"] = a2["match_key"].where(a2["placement_type"] == "site")
             a2["_app_key"] = a2["match_key"].where(a2["placement_type"] == "app")
+            a2["_bd"] = pd.to_datetime(a2["blocked_date"], errors="coerce")
             cob = (a2.groupby(["bu", "client", "strategy_name", "campaign_id"], dropna=False)
                    .agg(products=("product", _products), impressions=("impressions", "sum"),
                         clicks=("clicks", "sum"), spend=("spend", "sum"),
                         post_impr=("post_impr", "sum"), post_spend=("post_spend", "sum"),
                         n_sites=("match_key", "nunique"),
                         n_site=("_site_key", "nunique"), n_app=("_app_key", "nunique"),
+                        date_added=("_bd", "min"), last_dt=("served_date", "max"),
                         sites_list=("display_name", _site_list))
                    .reset_index().rename(columns={"bu": "business_unit", "client": "Client",
                                                   "strategy_name": "Strategy Name",
@@ -628,8 +630,12 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             cob = cob[~cob["Client"].astype(str).str.strip().str.lower().isin(_BAD_CLIENT)]
             cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
             cob["sites"] = cob["sites_list"].apply(lambda lst: ", ".join(lst))
+            # Earliest block date across the matched placements + most recent serve.
+            cob["Date added"] = pd.to_datetime(cob["date_added"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+            cob["Last served"] = pd.to_datetime(cob["last_dt"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
             cob = cob[["business_unit", "Client", "Strategy Name", "Strategy ID", "products",
                        "sites", "sites_list", "n_sites", "n_site", "n_app",
+                       "Date added", "Last served",
                        "impressions", "clicks", "ctr",
                        "spend", "post_impr", "post_spend"]]
             blocked_site_clients = cob.sort_values(

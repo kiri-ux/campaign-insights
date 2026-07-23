@@ -31,6 +31,70 @@ def _date_from_key(key, last_modified):
     return datetime.date.today().strftime("%Y-%m-%d")
 
 
+def _client_and_cfg():
+    import boto3
+    bucket = os.environ.get("S3_BUCKET", "").strip()
+    if not bucket:
+        raise RuntimeError("S3_BUCKET not set")
+    region = os.environ.get("AWS_REGION", "").strip() or None
+    return boto3.client("s3", region_name=region), bucket
+
+
+def list_range(start_iso, end_iso, grace_days=3):
+    """List sites/apps files whose per-file date (filename date, else LastModified)
+    falls in [start, end + grace_days] — the grace catches exports dropped a few
+    days after the window that still carry in-range delivery (rows get filtered
+    to the exact range downstream). Returns (site_metas, app_metas, capped):
+    metas are [{'name','key','date'}] oldest-first (so later files win de-dupe);
+    capped=True if the S3_RANGE_MAX_FILES cap (default 16 per side) trimmed the
+    oldest files out."""
+    import datetime as _dt
+    start = _dt.date.fromisoformat(start_iso)
+    end = _dt.date.fromisoformat(end_iso) + _dt.timedelta(days=grace_days)
+    s3, bucket = _client_and_cfg()
+    prefix = os.environ.get("S3_PREFIX", "").strip()
+    suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
+    site_match = os.environ.get("S3_SITES_MATCH", "site").strip().lower()
+    app_match = os.environ.get("S3_APPS_MATCH", "app").strip().lower()
+    cap = int(os.environ.get("S3_RANGE_MAX_FILES", "16"))
+
+    sites, apps = [], []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/") or not key.lower().endswith(suffix):
+                continue
+            fdate = _dt.date.fromisoformat(_date_from_key(key, obj.get("LastModified")))
+            if not (start <= fdate <= end):
+                continue
+            base = key.rsplit("/", 1)[-1]
+            meta = {"name": base, "key": key, "date": fdate.isoformat(),
+                    "_lm": obj["LastModified"]}
+            if site_match in base.lower():
+                sites.append(meta)
+            elif app_match in base.lower():
+                apps.append(meta)
+
+    capped = False
+    out = []
+    for lst in (sites, apps):
+        lst.sort(key=lambda m: (m["date"], m["_lm"]))  # oldest first
+        if len(lst) > cap:
+            lst = lst[-cap:]  # keep the newest `cap` files
+            capped = True
+        for m in lst:
+            m.pop("_lm", None)
+        out.append(lst)
+    return out[0], out[1], capped
+
+
+def get_bytes(key):
+    """Download one object's bytes (used file-by-file to keep peak memory low)."""
+    s3, bucket = _client_and_cfg()
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+
 def fetch_two():
     """For the two-flat-file export: return (sites_name, sites_bytes, apps_name,
     apps_bytes, date_str). Classifies objects by a filename substring

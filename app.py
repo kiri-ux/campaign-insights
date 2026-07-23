@@ -693,8 +693,25 @@ def pull():
 
 @app.route("/ui/pull", methods=["POST"])
 def ui_pull():
-    """UI 'Pull latest data' button — same-origin, no email."""
-    result, status = _run_pull(send_email=False)
+    """UI 'Pull latest data' button — same-origin, no email. Optional JSON body
+    {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"} pools every S3 export in that
+    range into one combined dashboard."""
+    body = request.get_json(silent=True) or {}
+    start = (body.get("start") or "").strip() or None
+    end = (body.get("end") or "").strip() or None
+    if bool(start) != bool(end):
+        return jsonify({"ok": False, "error": "Provide both a start and an end date."}), 400
+    if start and end:
+        import datetime as _dt
+        try:
+            s, e = _dt.date.fromisoformat(start), _dt.date.fromisoformat(end)
+        except ValueError:
+            return jsonify({"ok": False, "error": "Dates must be YYYY-MM-DD."}), 400
+        if s > e:
+            start, end = end, start
+        if not os.environ.get("S3_BUCKET", "").strip():
+            return jsonify({"ok": False, "error": "Date-range pulls need the S3 source configured."}), 400
+    result, status = _run_pull(send_email=False, start=start, end=end)
     return jsonify(result), status
 
 
@@ -715,9 +732,11 @@ def ui_email():
     return jsonify({"ok": True, "date": date, "view_url": view_url, "email": status}), 200
 
 
-def _run_pull(send_email=False):
+def _run_pull(send_email=False, start=None, end=None):
     """Pull latest data (S3 two files -> Graph -> IMAP), analyze, save a dated
-    report, optionally email. Returns (result_dict, http_status)."""
+    report, optionally email. When start/end (ISO dates) are given and S3 is the
+    source, pools EVERY sites/apps export in the window into one combined,
+    de-duped, date-filtered analysis. Returns (result_dict, http_status)."""
     if not _ANALYSIS_LOCK.acquire(blocking=False):
         return {"ok": False, "busy": True,
                 "error": "A run is already in progress — give it a minute, then try again."}, 429
@@ -727,17 +746,44 @@ def _run_pull(send_email=False):
         cleanup = []
         try:
             if os.environ.get("S3_BUCKET", "").strip():
-                from s3_pull import fetch_two
-                from tap_adapter import read_flat, build_frames
-                sname, sbytes, aname, abytes, date_str = fetch_two()
-                if not (sbytes and abytes):
-                    have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
-                    return {"ok": True, "skipped": True,
-                            "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
-                frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
-                sbytes = abytes = None
-                gc.collect()
-                source_file = f"{sname} + {aname}"
+                from s3_pull import fetch_two, list_range, get_bytes
+                from tap_adapter import read_flat, build_frames, combine_flats, filter_date_range
+                if start and end:
+                    smetas, ametas, capped = list_range(start, end)
+                    if not (smetas and ametas):
+                        have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
+                        return {"ok": True, "skipped": True,
+                                "message": f"No complete site+app file pairs dated {start} → {end} (found: {have})."}, 200
+                    sdfs, adfs = [], []
+                    for metas, acc in ((smetas, sdfs), (ametas, adfs)):
+                        for m in metas:
+                            b = get_bytes(m["key"])
+                            acc.append(read_flat(b, m["name"]))
+                            b = None
+                            gc.collect()
+                    sites = filter_date_range(combine_flats(sdfs), start, end)
+                    apps = filter_date_range(combine_flats(adfs), start, end)
+                    sdfs = adfs = None
+                    gc.collect()
+                    if not len(sites) and not len(apps):
+                        return {"ok": True, "skipped": True,
+                                "message": f"Files found, but no delivery rows dated {start} → {end}."}, 200
+                    frames = build_frames(sites, apps)
+                    sites = apps = None
+                    gc.collect()
+                    date_str = f"{start}_to_{end}"
+                    source_file = (f"{len(smetas)} site + {len(ametas)} app files pooled ({start} → {end})"
+                                   + (" — oldest files trimmed by S3_RANGE_MAX_FILES cap" if capped else ""))
+                else:
+                    sname, sbytes, aname, abytes, date_str = fetch_two()
+                    if not (sbytes and abytes):
+                        have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
+                        return {"ok": True, "skipped": True,
+                                "message": f"Need both a sites and an apps file under the prefix (found: {have})."}, 200
+                    frames = build_frames(read_flat(sbytes, sname), read_flat(abytes, aname))
+                    sbytes = abytes = None
+                    gc.collect()
+                    source_file = f"{sname} + {aname}"
             else:
                 if os.environ.get("GRAPH_CLIENT_ID", "").strip():
                     from graph_pull import fetch_latest_xlsx
