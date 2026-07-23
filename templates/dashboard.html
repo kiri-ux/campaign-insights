@@ -204,12 +204,12 @@
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
     <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
+    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" checked></td><td>{{ r.name }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
     <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
+    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     <div class="copybox">
       <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_rz_site',this)">Copy</button></div>
@@ -341,7 +341,12 @@
     else { document.execCommand('copy'); done(); }
   }
   // Route a placement to its destination blocklist(s) — same rules as the push.
-  function routeTabs(products){
+  // QUALITY blocks (gaming / junk / MFA — anything about the placement itself)
+  // always go to All Products, even when delivery was CTV/Audio/SM-only: the
+  // content category is universally blockable. Only pure CTR-anomaly blocks
+  // keep delivery-based routing to the product-specific tabs.
+  function routeTabs(products, flag){
+    if((flag||'').indexOf('Quality')>=0) return ['All Products'];
     var prods=(products||'').split(',').map(function(s){return s.trim();}).filter(function(s){return s.length;});
     var isSMonly = prods.length===1 && prods[0]==='Social Mirror';
     var onlyCtvAudio = prods.length>0 && prods.every(function(x){return x==='CTV'||x==='Online Audio';});
@@ -359,7 +364,7 @@
       if(!cb.checked) return;
       var kind=cb.dataset.kind, val=cb.dataset.val;
       (kind==='site'?sites:apps).push(val);
-      routeTabs(cb.dataset.products).forEach(function(tab){
+      routeTabs(cb.dataset.products, cb.dataset.flag).forEach(function(tab){
         if(!perTab[tab]) perTab[tab]={sites:[],apps:[]};
         perTab[tab][kind==='site'?'sites':'apps'].push(val);
       });
@@ -406,7 +411,9 @@
   function pushBlocklist(){
     var placements=[], excluded=[];
     document.querySelectorAll('.blkchk').forEach(function(cb){
-      var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||''};
+      var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val,
+             products:cb.dataset.products||'', flag:cb.dataset.flag||'',
+             tabs:routeTabs(cb.dataset.products, cb.dataset.flag)};
       (cb.checked?placements:excluded).push(p);
     });
     var msg=document.getElementById('pushmsg'), btn=document.getElementById('pushbtn');
