@@ -42,6 +42,13 @@ def _build_version():
 BUILD_VERSION = _build_version()
 
 
+@app.context_processor
+def _inject_build_version():
+    """Make the build stamp available to every template (home, dashboards,
+    saved-report snapshots) without threading it through each ctx dict."""
+    return {"build_version": BUILD_VERSION}
+
+
 def _norm_site(s):
     """Normalize a site domain for matching: lowercase, drop scheme, path, query,
     a leading 'www.', and any trailing dot. So 'https://www.TMZ.com/foo' and

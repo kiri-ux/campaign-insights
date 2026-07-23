@@ -98,11 +98,15 @@ def _pick_client(cols):
     return None
 
 
-def _find(cols, *tokens_any):
-    """Return first column whose lowercased name contains ALL tokens in any group."""
+def _find(cols, *tokens_any, exclude=()):
+    """Return first column whose lowercased name contains ALL tokens in any group,
+    skipping any column that contains an `exclude` token (e.g. 'pool' so that
+    'Campaign ID' matches but 'Campaign Pool ID' doesn't)."""
     low = {c.lower(): c for c in cols}
     for group in tokens_any:
         for lc, orig in low.items():
+            if any(x in lc for x in exclude):
+                continue
             if all(t in lc for t in group):
                 return orig
     return None
@@ -126,8 +130,8 @@ def _detect(df, kind):
         "strategy": _find(cols, ("strategy", "type"), ("strategy",)),
         "strategy_name": _find(cols, ("strategy", "name")),
         "app_id": _find(cols, ("app", "id"), ("app", "bundle"), ("bundle",)),
-        "campaign": _find(cols, ("campaign", "name"), ("campaign",)),
-        "campaign_id": _find(cols, ("campaign", "id"), ("campaign", "#"), ("campaign", "number")),
+        "campaign": _find(cols, ("campaign", "name"), exclude=("pool",)),
+        "campaign_id": _find(cols, ("campaign", "id"), ("campaign", "#"), ("campaign", "number"), exclude=("pool",)),
     }
 
 
@@ -155,7 +159,10 @@ def _normalize(df, c):
         out[dim] = (df[c[dim]].astype(str) if c[dim] else "(not in export)")
     out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
     out["campaign"] = df[c["campaign"]].astype(str) if c.get("campaign") else "(not in export)"
-    out["campaign_id"] = df[c["campaign_id"]].astype(str) if c.get("campaign_id") else ""
+    # IDs come out of Excel as floats ("12345.0") — normalize to clean strings.
+    out["campaign_id"] = (df[c["campaign_id"]].astype(str).str.strip()
+                          .str.replace(r"\.0$", "", regex=True)
+                          if c.get("campaign_id") else "")
     out["is_block"] = out["final"].str.lower().isin(SENTINELS)
     out["is_unresolved"] = df[c["final"]].isna() | (out["final"].str.lower().isin({"nan", ""}))
     return out
@@ -596,21 +603,23 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
                 # — the dashboard shows it in a collapsible full-width drawer.
                 return sorted({str(s).strip() for s in series if str(s).strip()})
 
-            # Broken out by partner + client + campaign (name & id). When the export
-            # carries no campaign columns, Campaign collapses to "(not in export)" and
-            # the grain is effectively one row per client (as before).
-            cob = (a2.groupby(["bu", "client", "campaign", "campaign_id"], dropna=False)
+            # Broken out by partner + client + strategy. AdLib's "Strategy Name" is
+            # what the org calls the campaign name, and its Campaign ID is surfaced
+            # as "Strategy ID". When the export carries neither, both collapse to
+            # placeholders and the grain is effectively one row per client (as before).
+            cob = (a2.groupby(["bu", "client", "strategy_name", "campaign_id"], dropna=False)
                    .agg(products=("product", _products), impressions=("impressions", "sum"),
                         clicks=("clicks", "sum"), spend=("spend", "sum"),
                         post_impr=("post_impr", "sum"), post_spend=("post_spend", "sum"),
                         n_sites=("match_key", "nunique"),
                         sites_list=("display_name", _site_list))
                    .reset_index().rename(columns={"bu": "business_unit", "client": "Client",
-                                                  "campaign": "Campaign", "campaign_id": "Campaign ID"}))
+                                                  "strategy_name": "Strategy Name",
+                                                  "campaign_id": "Strategy ID"}))
             cob = cob[~cob["Client"].astype(str).str.strip().str.lower().isin(_BAD_CLIENT)]
             cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
             cob["sites"] = cob["sites_list"].apply(lambda lst: ", ".join(lst))
-            cob = cob[["business_unit", "Client", "Campaign", "Campaign ID", "products",
+            cob = cob[["business_unit", "Client", "Strategy Name", "Strategy ID", "products",
                        "sites", "sites_list", "n_sites", "impressions", "clicks", "ctr",
                        "spend", "post_impr", "post_spend"]]
             blocked_site_clients = cob.sort_values(

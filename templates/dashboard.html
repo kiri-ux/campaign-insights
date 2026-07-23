@@ -18,6 +18,7 @@
   .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
   .brandbar .mark span{color:var(--velocity);}
   .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
+  .brandbar .ver{font-size:11px;color:var(--muted);opacity:.7;font-weight:500;letter-spacing:.02em;}
   .wrap{max-width:min(1680px,96vw);margin:0 auto;padding-top:14px;}
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
   h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
@@ -84,7 +85,7 @@
   .flag.hi{background:#fff1d6;color:#8a5a00;}
   .flag.lo{background:#e3edfb;color:#1a4f9c;}
   .flag.q{background:#ece8f6;color:#5b3fa3;}
-  .pager{display:flex;align-items:center;gap:10px;margin:8px 0 2px;font-size:13px;color:var(--muted);}
+  .pager{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:2px 0 8px;font-size:13px;color:var(--muted);}
   .pager button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--velocity);font-family:var(--font-body);}
   .pager button:disabled{color:var(--muted);cursor:default;opacity:.5;}
   tr.lowctrblock{background:#eef4fc;}
@@ -93,7 +94,7 @@
 </style>
 </head>
 <body>
-<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span></div>
+<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span><span class="ver" style="margin-left:auto;">build {{ build_version }}</span></div>
 {% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
 <div class="wrap">
@@ -162,9 +163,9 @@
 
   {% if blocked_site_clients %}
     <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
-    <p class="note">One row per client &amp; campaign. Click <strong>“N sites”</strong> to expand the blocklisted placements served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
-    <table class="cbs paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Campaign</th><th>Campaign ID</th><th>Products</th><th>Blocked sites</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wrapcell">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wrapcell">{{ r.Client }}</td><td class="wrapcell">{{ r.Campaign if r.Campaign and r.Campaign != '(not in export)' else '—' }}</td><td>{{ r['Campaign ID'] or '—' }}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {{ r.n_sites }} site{{ 's' if r.n_sites != '1' else '' }}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>
+    <p class="note">One row per client &amp; strategy. Click <strong>“N sites”</strong> to expand the blocklisted placements served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
+    <table class="cbs paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Strategy Name</th><th>Strategy ID</th><th>Products</th><th>Blocked sites</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wrapcell">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wrapcell">{{ r.Client }}</td><td class="wrapcell">{{ r['Strategy Name'] if r['Strategy Name'] and r['Strategy Name'] not in ('(not in export)', 'nan') else '—' }}</td><td>{{ r['Strategy ID'] if r['Strategy ID'] and r['Strategy ID'] != 'nan' else '—' }}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {{ r.n_sites }} site{{ 's' if r.n_sites != '1' else '' }}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>
     <tr class="sitedetail" style="display:none"><td colspan="20"><div class="sitegrid">{% for s in r.sites_list %}<div>{{ s }}</div>{% endfor %}</div></td></tr>{% endfor %}
     </table>
   {% endif %}
@@ -461,7 +462,8 @@
       var next=document.createElement('button'); next.type='button'; next.innerHTML='Next &#8250;';
       var label=document.createElement('span');
       bar.appendChild(prev); bar.appendChild(label); bar.appendChild(next);
-      tbl.parentNode.insertBefore(bar, tbl.nextSibling);
+      var anchor = tbl.parentNode.classList && tbl.parentNode.classList.contains('tblwrap') ? tbl.parentNode : tbl;
+      anchor.parentNode.insertBefore(bar, anchor);
       function render(){
         var U=units(), pages=Math.max(1,Math.ceil(U.length/PAGE));
         if(page>=pages) page=pages-1; if(page<0) page=0;
