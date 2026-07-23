@@ -139,16 +139,17 @@
     <table id="topgrid" class="paginate"><thead><tr>
       <th>Placement</th><th>Type</th><th>Products</th>
       <th class="sortable num" data-col="3" data-type="num">Impr</th>
-      <th class="sortable num" data-col="4" data-type="num">Clicks</th>
-      <th class="sortable num" data-col="5" data-type="pct">CTR</th>
-      {% if audit.has_conv %}<th class="sortable num" data-col="6" data-type="num">Conv</th>{% endif %}
-      <th class="sortable num" data-col="{% if audit.has_conv %}7{% else %}6{% endif %}" data-type="money">Spend</th>
-      <th class="sortable num" data-col="{% if audit.has_conv %}8{% else %}7{% endif %}" data-type="money">CPM</th>
+      <th class="sortable num" data-col="4" data-type="pct">% of impr</th>
+      <th class="sortable num" data-col="5" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="6" data-type="pct">CTR</th>
+      {% if audit.has_conv %}<th class="sortable num" data-col="7" data-type="num">Conv</th>{% endif %}
+      <th class="sortable num" data-col="{% if audit.has_conv %}8{% else %}7{% endif %}" data-type="money">Spend</th>
+      <th class="sortable num" data-col="{% if audit.has_conv %}9{% else %}8{% endif %}" data-type="money">CPM</th>
       <th>Last served</th><th>Serving</th>
     </tr></thead><tbody>
-    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td><td>{{ r.last_served }}</td><td>{% if r.serving == 'serving' %}<span style="color:var(--warn);font-weight:600">serving</span>{% elif r.serving == 'stopped' %}<span style="color:var(--muted)">stopped</span>{% else %}—{% endif %}</td></tr>{% endfor %}
+    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.pct_impr }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td><td>{{ r.last_served }}</td><td>{% if r.serving == 'serving' %}<span style="color:var(--warn);font-weight:600">serving</span>{% elif r.serving == 'stopped' %}<span style="color:var(--muted)">stopped</span>{% else %}—{% endif %}</td></tr>{% endfor %}
     </tbody></table>
-    <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list (Low CTR tab).</p>
+    <p class="note">Showing top 100 by impressions; download the CSV for the full set. "% of impr" is each placement's share of all delivery in this report. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list (Low CTR tab).</p>
   {% endif %}
 
   {% if blocklist_check %}

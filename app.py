@@ -493,7 +493,8 @@ def _analyze_path(path=None, frames=None):
             }
 
             _CACHE["top_placements.csv"] = a["top_placements"]
-            top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr"], money_cols=["spend", "cpm"],
+            top_rows = _fmt(a["top_placements"].head(100), pct_cols=["ctr", "pct_impr"],
+                            money_cols=["spend", "cpm"],
                             int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
             for row in top_rows:
                 row["rec"] = row.get("name") in rec_names

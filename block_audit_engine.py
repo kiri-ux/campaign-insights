@@ -517,7 +517,11 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         topbase["serving"] = "—"
     topbase["last_served"] = topbase["last_dt"].dt.strftime("%Y-%m-%d").fillna("—")
     topbase = topbase.drop(columns=["last_dt"])
-    top_placements = topbase.sort_values("spend", ascending=False).head(300)
+    # Share of ALL delivery impressions (denominator is the full dataset, not
+    # just the rows that survive the head() cut below).
+    _tot_impr = float(alld["impressions"].sum())
+    topbase["pct_impr"] = np.where(_tot_impr > 0, topbase["impressions"] / _tot_impr, 0)
+    top_placements = topbase.sort_values("impressions", ascending=False).head(300)
 
     # Per-placement-per-product delivery, so the app can compute Block-impact against
     # the RECOMMENDED block set (which is only known after the AI step).
