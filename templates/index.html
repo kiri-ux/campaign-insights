@@ -53,7 +53,7 @@
   {% if has_source %}
   <div class="card">
     <label>Latest data <span class="tag">sent weekly on Mondays</span></label>
-    <div class="hint">Pulls the newest export and builds the dashboard from {% if default_pull_days %}the <strong>last {{ default_pull_days }} days of delivery</strong> in it (exports can span a month — for a different window use the date-range pull below){% else %}everything in it{% endif %}.</div>
+    <div class="hint">Pulls the newest export and builds the dashboard from {% if default_pull_days %}the <strong>last {{ default_pull_days }} days of delivery</strong>{% else %}everything in it{% endif %}.</div>
     <button type="button" id="pullbtn" onclick="pullNow()">Pull last{% if default_pull_days %} {{ default_pull_days }} days{% else %}est{% endif %}</button>
     {% if has_email %}<button type="button" id="emailbtn" onclick="emailNow()" style="background:#177245;margin-left:8px">Email latest report</button>{% endif %}
     <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);">

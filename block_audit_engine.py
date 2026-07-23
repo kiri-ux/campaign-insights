@@ -673,6 +673,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "unresolved_spend": float(unresolved["spend"].sum()),
         "window_start": window_start.strftime("%b %d") if pd.notna(window_start) else None,
         "window_end": window_end.strftime("%b %d") if pd.notna(window_end) else None,
+        "window_start_iso": window_start.strftime("%Y-%m-%d") if pd.notna(window_start) else None,
+        "window_end_iso": window_end.strftime("%Y-%m-%d") if pd.notna(window_end) else None,
         "active_placements": int(len(active)),
         "active_spend": float(active["spend"].sum()) if len(active) else 0.0,
         "has_dates": bool(pd.notna(window_end)),

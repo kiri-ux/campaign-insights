@@ -969,6 +969,22 @@ def _run_pull(send_email=False, start=None, end=None):
             # overwrites its report (same data, freshest build wins).
             _asum = (ctx.get("audit") or {}).get("summary", {})
             _ws, _we = _asum.get("window_start_iso"), _asum.get("window_end_iso")
+            if not (_ws and _we) and _asum.get("window_start") and _asum.get("window_end"):
+                # Belt-and-braces: derive ISO dates from the display fields
+                # ('Jul 16' / 'Jul 22') so naming survives an engine that
+                # predates the ISO keys. Year = today's, with Dec–Jan wrap.
+                import datetime as _dt
+                _yr = _dt.date.today().year
+                try:
+                    _s = _dt.datetime.strptime(f"{_asum['window_start']} {_yr}", "%b %d %Y").date()
+                    _e = _dt.datetime.strptime(f"{_asum['window_end']} {_yr}", "%b %d %Y").date()
+                    if _s > _e:
+                        _s = _s.replace(year=_yr - 1)
+                    if _s > _dt.date.today():
+                        _s, _e = _s.replace(year=_s.year - 1), _e.replace(year=_e.year - 1)
+                    _ws, _we = _s.isoformat(), _e.isoformat()
+                except ValueError:
+                    pass
             if _ws and _we:
                 date_str = _ws if _ws == _we else f"{_ws}_to_{_we}"
             html = render_template("dashboard.html", **ctx)
