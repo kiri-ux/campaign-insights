@@ -56,19 +56,47 @@ def _call_claude(prompt, api_key, model, max_tokens=4000):
     return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 
+# Major legitimate FAST/AVOD platforms: never AI-quality-blocked, no matter what
+# the model says (deterministic CTR-anomaly flags still apply — a click anomaly
+# on a legit platform is still an anomaly). Matched as substrings of the
+# lowercased placement name / app id.
+_LEGIT_FAST_TOKENS = (
+    "xumo", "fawesome", "pluto", "tubi", "plex", "roku channel", "samsung tv plus",
+    "lg channels", "watchfree", "watch free", "vizio", "freevee", "sling", "telly", "philo",
+    "directv", "fubo", "crackle", "local now", "scripps", "stirr",
+)
+
+
+def _is_legit_fast(name):
+    n = str(name).lower()
+    return any(t in n for t in _LEGIT_FAST_TOKENS)
+
+
 def _classify_batch(rows, kind, api_key, model):
-    listing = "\n".join(f'{i + 1}. {r["name"]}' for i, r in enumerate(rows))
+    listing = "\n".join(
+        f'{i + 1}. {r["name"]}' + (f'  [products: {r["products"]}]' if r.get("products") else "")
+        for i, r in enumerate(rows))
     prompt = (
         f"You audit programmatic ad {kind} placements for a digital advertising agency. "
         f"These ran across many local/regional advertisers (auto dealers, home services, "
         f"healthcare, retail, events, nonprofits).\n\n"
-        f"Flag ONLY placements that are low quality and should be added to a block list: "
-        f"made-for-advertising (MFA) / ad-arbitrage sites, content farms, clickbait, "
-        f"scraped or auto-generated content, piracy/illegal, adult, gambling, and junk "
-        f"utility / photo-editor / casual-game apps, or anything not brand-safe or "
-        f"unlikely to drive real business outcomes.\n"
-        f"Do NOT flag mainstream reputable news, weather, sports, streaming services, or "
-        f"clearly legitimate local business/organization sites. When unsure, do not flag.\n\n"
+        f"Flag ONLY placements with a genuine QUALITY or FRAUD problem worth blocking "
+        f"account-wide, for every client: made-for-advertising (MFA) / ad-arbitrage sites, "
+        f"content farms, scraped or auto-generated content, clickbait networks, piracy/illegal, "
+        f"adult, gambling, and low-effort junk apps (fake utilities, ad-stuffed "
+        f"flashlight/cleaner/wallpaper clones with no real product).\n\n"
+        f"CRITICAL — relevance is NOT quality. Content that is niche, lowbrow, or irrelevant "
+        f"to some advertisers is a client-level targeting decision, never an account-wide "
+        f"block. Do NOT flag:\n"
+        f"- FAST/AVOD streaming services (Xumo, Tubi, Pluto, fawesome, Plex, The Roku Channel, "
+        f"Samsung TV Plus, LG Channels, WatchFree, Telly, etc.) — being ad-supported is the "
+        f"normal model, especially for CTV placements\n"
+        f"- established social/UGC platforms (e.g. Tumblr) or real publishers, including "
+        f"tabloid/celebrity/gossip outlets\n"
+        f"- legitimate niche content or apps with real user bases: horoscopes/astrology, "
+        f"reading/novel apps, recipes, games from real studios, utilities that do what they say\n"
+        f"- mainstream news, weather, sports, or local business/organization sites\n"
+        f"When unsure, do not flag.\n\n"
         f"Return ONLY a JSON array (no prose). For each placement to BLOCK include "
         f'{{"n": <line number>, "reason": "<under 12 words>", "category": "<2-4 words>"}}. '
         f"Omit placements that are acceptable.\n\n"
@@ -84,6 +112,8 @@ def _classify_batch(rows, kind, api_key, model):
     for v in verdicts:
         try:
             r = rows[int(v["n"]) - 1]
+            if _is_legit_fast(r["name"]) or _is_legit_fast(r.get("app_id", "")):
+                continue  # deterministic guardrail against over-blocking FAST/AVOD
             impr = r.get("impressions", 0) or 0
             clk = r.get("clicks", 0) or 0
             out.append({"name": r["name"], "app_id": r.get("app_id", r["name"]),
