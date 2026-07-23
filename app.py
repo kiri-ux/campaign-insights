@@ -698,14 +698,16 @@ def _blocklist_check_path(date_str):
 
 
 def _blocklist_check_xlsx_bytes():
-    """One-tab workbook mirroring the dashboard's 'Master blocklist check' grid
-    (same columns & full row set as the blocklist_check.csv download)."""
-    df = _CACHE.get("blocklist_check.csv")
+    """One-tab workbook mirroring the dashboard's 'Clients serving blocked sites'
+    grid — per client & strategy (Strategy Name / Strategy ID), with dates added
+    / last served, buyer, and post-block delivery. Same data as the watchlist
+    Excel's 'Clients on blocked sites' tab."""
+    df = _CACHE.get("wl_blocked_site_clients")
     if df is None or not len(df):
         return None
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
-        df.to_excel(xl, sheet_name="Blocklist check", index=False)
+        df.to_excel(xl, sheet_name="Clients serving blocked sites"[:31], index=False)
     buf.seek(0)
     return buf.getvalue()
 
@@ -1034,7 +1036,7 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
                     sheet_url = google_sheet.upload_as_sheet(xlsx, f"Insights watchlists — {date_str}")
                 if bl_xlsx:
                     bl_sheet_url = google_sheet.upload_as_sheet(
-                        bl_xlsx, f"Blocklist check — still serving — {date_str}")
+                        bl_xlsx, f"Clients serving blocked sites — {date_str}")
         except Exception as e:
             app.logger.warning("Google Sheet upload failed: %s", e)
 
@@ -1050,10 +1052,10 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None):
             attach, attach_name = None, None
 
         if bl_sheet_url:
-            bl_line = (f'<p><strong>Blocklist check — still serving (Google Sheet):</strong> '
+            bl_line = (f'<p><strong>Clients serving blocked sites (Google Sheet):</strong> '
                        f'<a href="{bl_sheet_url}">{bl_sheet_url}</a></p>')
         elif bl_xlsx:
-            bl_line = "<p><strong>Blocklist check — still serving:</strong> attached.</p>"
+            bl_line = "<p><strong>Clients serving blocked sites:</strong> attached.</p>"
             extra.append((bl_xlsx, f"blocklist-check-{date_str}.xlsx"))
         else:
             bl_line = ""

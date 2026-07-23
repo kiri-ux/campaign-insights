@@ -34,6 +34,11 @@ def send_email(subject, html_body, attachment=None, attachment_name="watchlists.
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
+    # Stable custom header so IT can add an Exchange/Gmail mail-flow rule
+    # ("header X-Adtini-Insights exists -> never junk") that survives filter
+    # heuristics — reporting 'not junk' alone doesn't stick for SES mail
+    # sent as the recipient's own address.
+    msg["X-Adtini-Insights"] = "weekly"
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(html_body, "html"))
     msg.attach(alt)
