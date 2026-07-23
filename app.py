@@ -751,6 +751,7 @@ def _blocklist_check_xlsx_bytes():
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         df.to_excel(xl, sheet_name="Clients serving blocked sites"[:31], index=False)
+        _autosize_columns(xl)
     buf.seek(0)
     return buf.getvalue()
 
@@ -1208,20 +1209,42 @@ def download(name):
     abort(404)
 
 
+def _autosize_columns(xl):
+    """Fit each column of every sheet to its longest value (capped) so neither
+    the Excel download nor the converted Google Sheet opens with clipped text —
+    Sheets inherits column widths from the xlsx it converts."""
+    for ws in xl.book.worksheets:
+        for col in ws.columns:
+            width = 0
+            letter = None
+            for cell in col:
+                letter = letter or cell.column_letter
+                v = cell.value
+                if v is not None:
+                    width = max(width, len(str(v)))
+            if letter:
+                ws.column_dimensions[letter].width = min(max(width + 2, 8), 50)
+
+
 def _watchlists_xlsx_bytes():
-    """Build the 3-tab watchlists workbook from cache; return bytes or None."""
+    """Build the watchlists workbook from cache; return bytes or None. The
+    clients-on-blocked-sites data ships as its own 'serving block list' sheet,
+    so it is not duplicated here."""
     sheets = [("Partner watchlist", _CACHE.get("wl_partner")),
               ("Client watchlist", _CACHE.get("wl_client")),
               ("Strategy watchlist", _CACHE.get("wl_strategy")),
-              ("Low-CTR sites", _CACHE.get("wl_low_ctr_sites")),
-              ("Clients on blocked sites", _CACHE.get("wl_blocked_site_clients"))]
+              ("Low-CTR sites", _CACHE.get("wl_low_ctr_sites"))]
     if all(df is None or not len(df) for _, df in sheets):
         return None
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         for name, df in sheets:
+            if df is not None and len(df):
+                # 'flagged' is always TRUE on the filtered partner tab — noise.
+                df = df.drop(columns=["flagged"], errors="ignore")
             (df if df is not None and len(df) else pd.DataFrame({"(none)": []})).to_excel(
                 xl, sheet_name=name[:31], index=False)
+        _autosize_columns(xl)
     buf.seek(0)
     return buf.getvalue()
 

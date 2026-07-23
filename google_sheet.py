@@ -40,6 +40,11 @@ def _apply_checkbox_columns(creds, spreadsheet_id, header_names):
     requests = []
     for t, vr in zip(tabs, headers.get("valueRanges", [])):
         row = (vr.get("values") or [[]])[0]
+        # auto-fit every column to its content on this tab
+        if row:
+            requests.append({"autoResizeDimensions": {"dimensions": {
+                "sheetId": t["sheetId"], "dimension": "COLUMNS",
+                "startIndex": 0, "endIndex": len(row)}}})
         for j, h in enumerate(row):
             if str(h).strip().lower() in wanted:
                 requests.append({"repeatCell": {
@@ -81,8 +86,9 @@ def upload_as_sheet(xlsx_bytes, title):
     # returned even if this decoration fails.
     try:
         _apply_checkbox_columns(creds, f["id"], ("buyer_review",))
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Sheet decoration failed for %s: %s", title, e)
 
     share_email = os.environ.get("GSHEET_SHARE_EMAIL", "").strip()
     if share_email:
