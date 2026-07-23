@@ -538,9 +538,10 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             _BAD_CLIENT = {"nan", "none", "", "(not in export)"}
 
             def _site_list(series):
+                # Full list (no truncation) — the dashboard shows it in a collapsible
+                # drawer, so a long list no longer blows up the row height.
                 names = sorted({str(s).strip() for s in series if str(s).strip()})
-                shown = ", ".join(names[:12])
-                return shown + (f"  +{len(names) - 12} more" if len(names) > 12 else "")
+                return ", ".join(names)
 
             cob = (a2.groupby(["bu", "client"])
                    .agg(products=("product", _products), impressions=("impressions", "sum"),

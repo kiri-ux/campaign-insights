@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Insights — Results</title>
+<title>BARCK+ Insights — Results</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -66,10 +66,15 @@
   .tabbtn:hover{color:var(--atlas);}
   .tabbtn.active{color:var(--atlas);border-bottom-color:var(--velocity);}
   .tabbtn .ct{font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);margin-left:6px;}
+  /* Expandable "blocked sites" drawer */
+  td > details{max-width:360px;}
+  td > details > summary{cursor:pointer;color:var(--velocity);font-weight:600;font-size:12px;white-space:nowrap;}
+  td > details[open] > summary{margin-bottom:4px;}
+  td > details .sitelist{white-space:normal;font-size:12px;color:var(--ink);line-height:1.5;}
 </style>
 </head>
 <body>
-<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">Placement &amp; Impact Insights</span></div>
+<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span></div>
 {% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
 <div class="wrap">
@@ -87,24 +92,26 @@
   {% endif %}
 
   <a class="back" href="/">&larr; New analysis</a>
-  <h1>Placement &amp; Impact Insights</h1>
+  <h1>BARCK+ Insights</h1>
 
   {% for e in errors %}<div class="err">{{ e }}</div>{% endfor %}
 
-  <!-- Tab switcher: High-CTR (possible invalid traffic) vs Low-CTR (waste & blocking) -->
+  <!-- Tabs: All Placements · High-CTR (possible invalid traffic) · Low-CTR (waste & blocking) -->
   <div class="tabbar">
-    <button class="tabbtn active" data-tab="high" type="button">High CTR insights</button>
+    <button class="tabbtn active" data-tab="all" type="button">All Placements</button>
+    <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
     <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
     {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
     <a class="dl" href="/download_watchlists.xlsx" style="margin-left:auto">Download all watchlists (Excel)</a>
     {% endif %}
   </div>
 
+  <!-- ==================== ALL PLACEMENTS TAB ==================== -->
+  <div class="tabpane" id="tab-all">
   {% if audit %}
     {% set a = audit.summary %}
     {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
 
-    <!-- SHARED (both tabs): all-delivery placements grid -->
     <h2>Placements <span class="sub">(all delivery — click a column to sort; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = on the recommended-block list)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
     <table id="topgrid"><thead><tr>
       <th>Placement</th><th>Type</th><th>Products</th>
@@ -121,8 +128,34 @@
     <p class="note">Showing top 100 by spend; download the CSV for the full set. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list (Low CTR tab).</p>
   {% endif %}
 
+  {% if blocklist_check %}
+    <h2>Master blocklist check <span class="sub">(placements on your block sheet still appearing in this report)</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
+    <div class="cards">
+      <div class="kpi"><div class="n">{{ blocklist_check.matched }}</div><div class="l">Blocked placements seen in report</div></div>
+      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count }}</div><div class="l">&#9888; Serving AFTER their block date</div></div>
+      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
+    </div>
+    <p class="note">Cross-checked against your master blocklist sheet, <strong>per product</strong>: a <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> its block date <em>on a product it's actually blocked on</em> &mdash; a real leak worth verifying in the DSP. A placement on the CTV list that only served on Display is not flagged. The <strong>Block list(s)</strong> column shows which tabs it's on.</p>
+    <table><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if blocked_site_clients %}
+    <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
+    <p class="note">One row per client. Click <strong>“N sites”</strong> to expand the blocklisted placements that client served; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
+    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Products</th><th>Blocked sites</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
+    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.products) }}</td><td style="text-align:left"><details><summary>{{ r.n_sites }} site{{ 's' if r.n_sites != '1' else '' }}</summary><div class="sitelist">{{ r.sites }}</div></details></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
+  {% if not (audit or blocklist_check or blocked_site_clients) %}
+    <p class="note">No placement data for this window.</p>
+  {% endif %}
+  </div><!-- /tab-all -->
+
   <!-- ==================== HIGH CTR TAB ==================== -->
-  <div class="tabpane" id="tab-high">
+  <div class="tabpane" id="tab-high" style="display:none">
   {% if partner or clients or (insights and insights.strategy_flags) %}
     <h2>High-CTR watchlists <span class="sub">(partners, clients &amp; strategies with abnormally HIGH CTR — possible invalid traffic — and what the recommendations would do to each)</span></h2>
   {% else %}
@@ -167,29 +200,8 @@
 
   <!-- ==================== LOW CTR TAB ==================== -->
   <div class="tabpane" id="tab-low" style="display:none">
-  {% if not (blocklist_check or blocked_site_clients or low_ctr_sites or block_impact or block_impact_strategy or ai) %}
+  {% if not (low_ctr_sites or block_impact or block_impact_strategy or ai) %}
     <p class="note">No low-CTR / blocking insights for this window.</p>
-  {% endif %}
-
-  {% if blocklist_check %}
-    <h2>Master blocklist check <span class="sub">(placements on your block sheet still appearing in this report)</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ blocklist_check.matched }}</div><div class="l">Blocked placements seen in report</div></div>
-      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count }}</div><div class="l">&#9888; Serving AFTER their block date</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
-    </div>
-    <p class="note">Cross-checked against your master blocklist sheet, <strong>per product</strong>: a <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> its block date <em>on a product it's actually blocked on</em> &mdash; a real leak worth verifying in the DSP. A placement on the CTV list that only served on Display is not flagged. The <strong>Block list(s)</strong> column shows which tabs it's on.</p>
-    <table><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if blocked_site_clients %}
-    <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
-    <p class="note">One row per client. <strong>Blocked sites</strong> lists the blocklisted placements that client served; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.</p>
-    <table><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Products</th><th>Blocked sites</th><th>#</th><th>Impr</th><th>CTR</th><th>Spend</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.products) }}</td><td style="white-space:normal">{{ r.sites }}</td><td class="num">{{ r.n_sites }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>{% endfor %}
-    </table>
   {% endif %}
 
   {% if low_ctr_sites %}
@@ -250,7 +262,7 @@
 
 </div>
 <script>
-  // Tab switching (High CTR / Low CTR)
+  // Tab switching (All Placements / High CTR / Low CTR)
   document.querySelectorAll('.tabbtn').forEach(function(b){
     b.addEventListener('click',function(){
       document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.remove('active');});
