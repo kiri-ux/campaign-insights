@@ -52,16 +52,15 @@
 
   {% if has_source %}
   <div class="card">
-    <label>Latest data <span class="tag">automated</span></label>
+    <label>Latest data <span class="tag">sent weekly on Mondays</span></label>
     <div class="hint">Pulls the newest export and builds the dashboard from {% if default_pull_days %}the <strong>last {{ default_pull_days }} days of delivery</strong> in it (exports can span a month — for a different window use the date-range pull below){% else %}everything in it{% endif %}.</div>
-    <button type="button" id="pullbtn" onclick="pullNow()">Pull latest{% if default_pull_days %} — last {{ default_pull_days }} days{% endif %}</button>
+    <button type="button" id="pullbtn" onclick="pullNow()">Pull last{% if default_pull_days %} {{ default_pull_days }} days{% else %}est{% endif %}</button>
     {% if has_email %}<button type="button" id="emailbtn" onclick="emailNow()" style="background:#177245;margin-left:8px">Email latest report</button>{% endif %}
     <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);">
       <div class="hint">Or select a custom date range to pull longer combined delivery. This helps smaller placements clear the 10K-impression CTR thresholds.</div>
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <input type="date" id="rgstart"> <span class="hint">to</span> <input type="date" id="rgend">
         <button type="button" id="rangebtn" onclick="pullRange()">Pull date range</button>
-        <span class="hint">These are <strong>delivery dates inside the exports</strong> — not file drop dates. Rows outside the range are filtered out even when a file spans wider.</span>
       </div>
       <div id="s3dates" class="hint" style="margin-top:8px">Checking what data is available in S3…</div>
     </div>
