@@ -19,6 +19,9 @@
   .brandbar .mark span{color:var(--velocity);}
   .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
   .brandbar .ver{font-size:11px;color:var(--muted);opacity:.7;font-weight:500;letter-spacing:.02em;}
+  .syncalert{display:none;align-items:center;gap:8px;font-size:11px;font-weight:600;color:#b3402a;background:#ffe9e4;border:1px solid #f3c4b8;border-radius:7px;padding:3px 8px;margin-left:10px;}
+  .syncalert button{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-body);}
+  .syncalert button:disabled{opacity:.6;cursor:default;}
   .wrap{max-width:min(1680px,96vw);margin:0 auto;padding-top:14px;}
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
   h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
@@ -94,7 +97,7 @@
 </style>
 </head>
 <body>
-<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span><span class="ver" style="margin-left:auto;">build {{ build_version }}</span></div>
+<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span><span class="ver" style="margin-left:auto;">build {{ build_version }}</span><span class="syncalert" id="syncAlert">&#9888; Out of date — current build is <span id="syncCur"></span><button type="button" id="syncBtn">Sync</button></span></div>
 {% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
 <div class="wrap">
@@ -479,6 +482,35 @@
       tbl._repaginate=function(){ page=0; render(); };
       render();
     });
+  })();
+
+  // Build-freshness check: this page was rendered by the baked-in build below;
+  // ask the server what's live now. If they differ (new deploy since this report
+  // was generated), show the out-of-date alert with a one-click re-sync that
+  // re-pulls + re-analyzes and jumps to the fresh report.
+  (function(){
+    var baked = {{ build_version|tojson }};
+    fetch('/version').then(function(r){return r.json();}).then(function(v){
+      if(v && v.build && v.build !== baked){
+        var el=document.getElementById('syncAlert');
+        document.getElementById('syncCur').textContent=v.build;
+        el.style.display='inline-flex';
+      }
+    }).catch(function(){ /* offline copy or endpoint unavailable — stay quiet */ });
+    var btn=document.getElementById('syncBtn');
+    if(btn) btn.onclick=function(){
+      btn.disabled=true; btn.textContent='Syncing\u2026';
+      fetch('/ui/pull',{method:'POST'}).then(function(r){return r.json();}).then(function(res){
+        if(res && res.ok && res.view_url){ window.location.href=res.view_url; }
+        else{
+          alert((res && (res.error || res.message)) || 'Sync failed.');
+          btn.disabled=false; btn.textContent='Sync';
+        }
+      }).catch(function(e){
+        alert('Sync failed: '+e);
+        btn.disabled=false; btn.textContent='Sync';
+      });
+    };
   })();
 </script>
 </body>
