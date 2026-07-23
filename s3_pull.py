@@ -89,6 +89,32 @@ def list_range(start_iso, end_iso, grace_days=3):
     return out[0], out[1], capped
 
 
+def list_available_dates():
+    """Inventory of the prefix by file-date: {date: {'sites': n, 'apps': n}}.
+    Lets the UI show what's pullable before anyone hits the button."""
+    s3, bucket = _client_and_cfg()
+    prefix = os.environ.get("S3_PREFIX", "").strip()
+    suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
+    site_match = os.environ.get("S3_SITES_MATCH", "site").strip().lower()
+    app_match = os.environ.get("S3_APPS_MATCH", "app").strip().lower()
+    dates = {}
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/") or not key.lower().endswith(suffix):
+                continue
+            base = key.rsplit("/", 1)[-1].lower()
+            is_site = site_match in base
+            is_app = (not is_site) and app_match in base
+            if not (is_site or is_app):
+                continue
+            fdate = _date_from_key(key, obj.get("LastModified"))
+            d = dates.setdefault(fdate, {"sites": 0, "apps": 0})
+            d["sites" if is_site else "apps"] += 1
+    return dates
+
+
 def get_bytes(key):
     """Download one object's bytes (used file-by-file to keep peak memory low)."""
     s3, bucket = _client_and_cfg()

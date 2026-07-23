@@ -67,10 +67,21 @@ def _fmt(df, pct_cols=(), money_cols=(), int_cols=()):
     for c in int_cols:
         if c in d: d[c] = d[c].map(lambda x: f"{x:,.0f}")
     for c in money_cols:
-        if c in d: d[c] = d[c].map(lambda x: f"${x:,.0f}")
+        if c in d:
+            _f = (lambda x: f"${x:,.2f}") if "cpm" in str(c).lower() else (lambda x: f"${x:,.0f}")
+            d[c] = d[c].map(_f)
     for c in pct_cols:
         if c in d: d[c] = d[c].map(lambda x: "" if pd.isna(x) else f"{x:.2%}")
     return d
+
+
+def _add_cpm(df, impr_col="impressions", spend_col="spend"):
+    """Attach a CPM column (spend/impr*1000) wherever both inputs exist."""
+    if df is not None and len(df) and impr_col in df.columns and spend_col in df.columns:
+        i = pd.to_numeric(df[impr_col], errors="coerce")
+        sp = pd.to_numeric(df[spend_col], errors="coerce").fillna(0)
+        df["cpm"] = (sp / i * 1000).where(i > 0, 0).fillna(0)
+    return df
 
 
 @app.route("/")
@@ -142,15 +153,17 @@ def _analyze_path(path=None, frames=None):
                                 money_cols=["internal_cost"], int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
                 "strategy": _fmt(r["by_strategy"], pct_cols=["ctr"], money_cols=["internal_cost", "cost_per_conv"],
                                  int_cols=["impressions", "clicks", "conversions"]).to_dict("records"),
-                "strategy_flags": _fmt(sf.head(30), pct_cols=["ctr", "type_ctr"], money_cols=["internal_cost"],
+                "strategy_flags": _fmt(_add_cpm(sf, spend_col="internal_cost").head(30),
+                                        pct_cols=["ctr", "type_ctr"], money_cols=["internal_cost", "cpm"],
                                        int_cols=["impressions", "clicks", "conversions"]).to_dict("records") if len(sf) else [],
             }
             perf_bu = r["by_business_unit"]  # kept for the combined Partner grid
             cflag = r.get("client_flags", pd.DataFrame())
             if len(cflag):
                 _CACHE["client_flags.csv"] = cflag
+                _add_cpm(cflag, spend_col="internal_cost")
                 crows = _fmt(cflag.head(50), pct_cols=["ctr", "product_ctr"],
-                             money_cols=["internal_cost"],
+                             money_cols=["internal_cost", "cpm"],
                              int_cols=["impressions", "clicks"]).to_dict("records")
                 for row in crows:
                     row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
@@ -189,8 +202,9 @@ def _analyze_path(path=None, frames=None):
                 _asb = a.get("auto_site_blocks", pd.DataFrame())
                 if _asb is not None and len(_asb) and "name" in _asb:
                     acct_block_sites = {_norm_site(n) for n in _asb["name"].tolist()}
+                _add_cpm(lcs)
                 lrows = _fmt(lcs.head(100), pct_cols=["ctr", "product_ctr", "conv_rate"],
-                             money_cols=["spend"],
+                             money_cols=["spend", "cpm"],
                              int_cols=["impressions", "clicks", "conversions"]).to_dict("records")
                 for row in lrows:
                     row["buyer"] = buyer_for(row.get("business_unit", ""), bmap)
@@ -215,6 +229,11 @@ def _analyze_path(path=None, frames=None):
             else:  # insights failed — fall back to leaked-only
                 pm = leaked.assign(impressions=0, clicks=0, ctr=0, conversions=0,
                                    internal_cost=0, cost_per_conv=float("nan"), flagged=False)
+            # Watchlist = only partners meeting the tiered CTR-vs-volume flag
+            # (>=10K impr & CTR >2.5%, or >=30K & >1%). Unflagged
+            # partners drop off the grid, the CSV, and the watchlist Excel tab.
+            if "flagged" in pm:
+                pm = pm[pm["flagged"].astype(bool)].reset_index(drop=True)
             _CACHE["partner_summary.csv"] = pm
             if "impressions" in pm:
                 pm["cpm"] = (pm["internal_cost"] / pm["impressions"] * 1000).where(pm["impressions"] > 0, 0).fillna(0)
@@ -232,8 +251,9 @@ def _analyze_path(path=None, frames=None):
             # Master-blocklist leak check
             bc = a.get("blocklist_check")
             if bc:
+                _add_cpm(bc["rows"])
                 _CACHE["blocklist_check.csv"] = bc["rows"]
-                brows = _fmt(bc["rows"].head(100), money_cols=["spend", "post_spend"],
+                brows = _fmt(bc["rows"].head(100), money_cols=["spend", "post_spend", "cpm"],
                              int_cols=["impressions", "post_impr"]).to_dict("records")
                 ctx["blocklist_check"] = {
                     "matched": bc["matched"], "leaking_count": bc["leaking_count"],
@@ -246,11 +266,12 @@ def _analyze_path(path=None, frames=None):
             if bsc_df is not None and len(bsc_df):
                 # sites_list is a Python list (for the full-width drawer); drop it from
                 # the flat CSV/Excel outputs, which keep the joined `sites` string.
+                _add_cpm(bsc_df)
                 bsc_flat = bsc_df.drop(columns=["sites_list"], errors="ignore")
                 _CACHE["clients_on_blocked_sites.csv"] = bsc_flat
                 leak_flags = (bsc_df["post_impr"] > 0).tolist()
                 brows2 = _fmt(bsc_df.head(200), pct_cols=["ctr"],
-                              money_cols=["spend", "post_spend"],
+                              money_cols=["spend", "post_spend", "cpm"],
                               int_cols=["impressions", "clicks", "post_impr",
                                         "n_sites", "n_site", "n_app"]).to_dict("records")
                 for row, lf in zip(brows2, leak_flags):
@@ -314,6 +335,8 @@ def _analyze_path(path=None, frames=None):
                     _df["flag"] = cat.apply(_flag)
                     _df["is_low_ctr_block"] = cat.apply(lambda c: "Low CTR / no conv" in str(c))
 
+            _add_cpm(rec_site)
+            _add_cpm(rec_app)
             _CACHE["ai_recommended_sites.csv"] = rec_site
             _CACHE["ai_recommended_apps.csv"] = rec_app
             app_vals = rec_app["app_id"].tolist() if "app_id" in rec_app else rec_app.get("name", pd.Series([])).tolist()
@@ -322,9 +345,11 @@ def _analyze_path(path=None, frames=None):
                 "error": rec.get("error"),
                 "has_app_id": a.get("has_app_id", False),
                 "site_count": len(rec_site), "app_count": len(rec_app),
-                "sites": _fmt(rec_site.head(50), pct_cols=["ctr"], money_cols=["spend"],
+                "total_impr": f"{int(pd.to_numeric(rec_site.get('impressions'), errors='coerce').fillna(0).sum() + pd.to_numeric(rec_app.get('impressions'), errors='coerce').fillna(0).sum()):,}",
+                "total_clicks": f"{int(pd.to_numeric(rec_site.get('clicks'), errors='coerce').fillna(0).sum() + pd.to_numeric(rec_app.get('clicks'), errors='coerce').fillna(0).sum()):,}",
+                "sites": _fmt(rec_site.head(50), pct_cols=["ctr"], money_cols=["spend", "cpm"],
                               int_cols=_int).to_dict("records"),
-                "apps": _fmt(rec_app.head(50), pct_cols=["ctr"], money_cols=["spend"],
+                "apps": _fmt(rec_app.head(50), pct_cols=["ctr"], money_cols=["spend", "cpm"],
                              int_cols=_int).to_dict("records"),
                 "site_filter": to_adlib_filter(rec_site["name"].tolist(), "site") if len(rec_site) else "",
                 "app_filter": to_adlib_filter(app_vals, "app") if len(rec_app) else "",
@@ -352,7 +377,7 @@ def _analyze_path(path=None, frames=None):
                 # substring match so "Quality + High CTR" rows still appear on the
                 # High CTR tab (equality would drop every multi-flagged row).
                 sub = comb[comb["flag"].astype(str).str.contains(mask_flag, regex=False)]
-                return _fmt(sub.head(100), pct_cols=["ctr"], money_cols=["spend"],
+                return _fmt(sub.head(100), pct_cols=["ctr"], money_cols=["spend", "cpm"],
                             int_cols=_int).to_dict("records")
             ctx["rec_high"] = _comb_rows("High CTR")
             ctx["rec_low"] = _comb_rows("Low CTR")
@@ -689,6 +714,22 @@ def pull():
         return jsonify({"ok": False, "error": "Unauthorized (bad or missing key)."}), 401
     result, status = _run_pull(send_email=True)
     return jsonify(result), status
+
+
+@app.route("/ui/s3dates")
+def ui_s3dates():
+    """Inventory of pullable data in S3, for the home page: which dates have
+    exports, and whether each date has the complete site+app pair."""
+    if not os.environ.get("S3_BUCKET", "").strip():
+        return jsonify({"ok": False, "error": "S3 source not configured."}), 200
+    try:
+        from s3_pull import list_available_dates
+        inv = list_available_dates()
+        days = [{"date": d, "complete": bool(v["sites"] and v["apps"])}
+                for d, v in sorted(inv.items())]
+        return jsonify({"ok": True, "days": days}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{e}"}), 200
 
 
 @app.route("/ui/pull", methods=["POST"])

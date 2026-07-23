@@ -62,6 +62,7 @@
         <input type="date" id="rgstart"> <span class="hint">to</span> <input type="date" id="rgend">
         <button type="button" id="rangebtn" onclick="pullRange()">Pull date range</button>
       </div>
+      <div id="s3dates" class="hint" style="margin-top:8px">Checking what data is available in S3…</div>
     </div>
     <div id="pullmsg" class="hint" style="margin-top:12px"></div>
   </div>
@@ -126,6 +127,31 @@
       }).catch(function(e){ m.style.color='#b00'; m.textContent=''+e; })
         .finally(function(){ _done(b); if(eb) eb.disabled=false; if(rb) rb.disabled=false; });
     }
+    // On load: show which dates are sitting in S3 (and mark incomplete pairs),
+    // and constrain the range pickers to the available window.
+    (function(){
+      var el=document.getElementById('s3dates'); if(!el) return;
+      fetch('/ui/s3dates').then(_asJson).then(function(d){
+        if(!d.ok || !d.days || !d.days.length){
+          el.textContent = d.ok ? 'No exports found in S3 yet.' : '';
+          return;
+        }
+        var comp=d.days.filter(function(x){return x.complete;}).length;
+        var first=d.days[0].date, last=d.days[d.days.length-1].date;
+        var rs=document.getElementById('rgstart'), re=document.getElementById('rgend');
+        if(rs){ rs.min=first; rs.max=last; }
+        if(re){ re.min=first; re.max=last; }
+        var days=d.days, more='';
+        if(days.length>30){ more='<span class="hint">… and '+(days.length-30)+' earlier day(s)</span> '; days=days.slice(-30); }
+        var chips=days.map(function(x){
+          return '<span style="display:inline-block;background:'+(x.complete?'#eef4fc':'#ffe9e4')+
+                 ';border-radius:5px;padding:1px 7px;margin:2px 3px 0 0;font-size:11px" title="'+
+                 (x.complete?'site + app files present':'missing the site or app file')+'">'+
+                 x.date+(x.complete?'':' ⚠ partial')+'</span>';
+        }).join('');
+        el.innerHTML='<strong>Data in S3:</strong> '+comp+' day(s) with complete site+app pairs, '+first+' → '+last+'<br>'+more+chips;
+      }).catch(function(){ el.textContent=''; });
+    })();
     function pullRange(){
       var b=document.getElementById('rangebtn'), m=document.getElementById('pullmsg');
       var s=document.getElementById('rgstart').value, e=document.getElementById('rgend').value;

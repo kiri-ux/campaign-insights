@@ -129,7 +129,7 @@ def _merge_flagged(frames):
         primary["category"] = primary.apply(_cat, axis=1)
         primary["reason"] = primary.apply(_rsn, axis=1)
         merged = primary
-    return merged.sort_values("spend", ascending=False).reset_index(drop=True)
+    return merged.sort_values("impressions", ascending=False).reset_index(drop=True)
 
 
 def merge_site_blocks(ai_sites, auto_low_sites, auto_high_sites=None):
