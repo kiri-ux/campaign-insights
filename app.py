@@ -1209,21 +1209,52 @@ def download(name):
     abort(404)
 
 
+# Header-driven number formats, applied to every tab of every export workbook.
+# Sheets inherits these from the converted xlsx, so both the Excel download and
+# the Google Sheets render integers / currency / percentages consistently.
+_PCT_TOKENS = ("ctr", "rate", "pct")            # substring match, checked first
+_CUR_TOKENS = ("spend", "cost", "cpm")          # substring match
+_INT_HEADERS = {"impressions", "clicks", "conversions", "view_throughs",
+                "blocked_impr", "blocked_placements", "post_impr",
+                "n_sites", "n_site", "n_app"}   # exact match
+
+
+def _number_format_for(header):
+    h = str(header).strip().lower()
+    if any(t in h for t in _PCT_TOKENS):
+        return "0.00%"
+    if any(t in h for t in _CUR_TOKENS):
+        return '"$"#,##0.00'
+    if h in _INT_HEADERS:
+        return "#,##0"
+    return None
+
+
 def _autosize_columns(xl):
-    """Fit each column of every sheet to its longest value (capped) so neither
-    the Excel download nor the converted Google Sheet opens with clipped text —
-    Sheets inherits column widths from the xlsx it converts."""
+    """Style every sheet: fit each column to its longest value (capped) and
+    apply integer / currency / percentage number formats by header name."""
     for ws in xl.book.worksheets:
         for col in ws.columns:
             width = 0
             letter = None
+            header = None
             for cell in col:
-                letter = letter or cell.column_letter
+                if letter is None:
+                    letter = cell.column_letter
+                    header = cell.value
                 v = cell.value
                 if v is not None:
                     width = max(width, len(str(v)))
             if letter:
                 ws.column_dimensions[letter].width = min(max(width + 2, 8), 50)
+            fmt = _number_format_for(header) if header is not None else None
+            if fmt:
+                first = True
+                for cell in col:
+                    if first:
+                        first = False
+                        continue
+                    cell.number_format = fmt
 
 
 def _watchlists_xlsx_bytes():
