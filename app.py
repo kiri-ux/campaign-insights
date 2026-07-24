@@ -552,7 +552,10 @@ def _analyze_path(path=None, frames=None):
                 date_range = asum["window_end"]
             else:
                 date_range = "—"
-            rec_spend = float(dpp[dpp["match_key"].isin(rec_keys)]["spend"].sum())
+            rec_rows = dpp[dpp["match_key"].isin(rec_keys)]
+            rec_spend = float(rec_rows["spend"].sum())
+            rec_impr = float(rec_rows["impressions"].sum())
+            _tot = float(ins.get("total_impressions", 0) or 0)
             ctx["topcards"] = {
                 "date_range": date_range,
                 "impressions": ins.get("total_impressions", 0),
@@ -561,6 +564,8 @@ def _analyze_path(path=None, frames=None):
                 "placements": int(dpp["match_key"].nunique()),
                 "rec_placements": int(len(rec_site) + len(rec_app)),
                 "rec_spend": rec_spend,
+                "rec_impr": rec_impr,
+                "rec_impr_pct": (rec_impr / _tot) if _tot > 0 else 0,
             }
 
             _CACHE["top_placements.csv"] = a["top_placements"]

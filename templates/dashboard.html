@@ -97,6 +97,7 @@
   .flag.lo{background:#e3edfb;color:#1a4f9c;}
   .flag.q{background:#ece8f6;color:#5b3fa3;}
   .pager{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:2px 0 8px;font-size:13px;color:var(--muted);}
+  .pager.pgleft{justify-content:flex-start;margin:8px 0 2px;}
   .pager button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--velocity);font-family:var(--font-body);}
   .pager button:disabled{color:var(--muted);cursor:default;opacity:.5;}
   tr.lowctrblock{background:#eef4fc;}
@@ -118,6 +119,7 @@
       <div class="kpi"><div class="n">${{ '{:,.0f}'.format(t.internal_cost) }}</div><div class="l">Internal cost (book)</div></div>
       <div class="kpi"><div class="n">{{ '{:,.0f}'.format(t.placements) }}</div><div class="l">Placements</div></div>
       <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(t.rec_placements) }}</div><div class="l">Recommended-block placements</div></div>
+      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(t.rec_impr or 0) }}<span style="font-size:14px;font-weight:600;color:#b3402a;"> · {{ '{:.2f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">Impressions on recommended blocks (share of all impr)</div></div>
       <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(t.rec_spend) }}</div><div class="l">Spend on recommended-block placements</div></div>
     </div>
   {% endif %}
@@ -215,12 +217,12 @@
        <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
-    <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
+    <div class="tblwrap"><table class="lalign paginate pgbottom"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
     {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" checked></td><td>{{ r.name }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     {% if ai.apps %}
     <h2 style="font-size:14px">Recommended app blocks</h2>
-    <div class="tblwrap"><table class="lalign paginate"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
+    <div class="tblwrap"><table class="lalign paginate pgbottom"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
     {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
     </table></div>{% endif %}
     <div class="copybox">
@@ -492,7 +494,12 @@
       var label=document.createElement('span');
       bar.appendChild(prev); bar.appendChild(label); bar.appendChild(next);
       var anchor = tbl.parentNode.classList && tbl.parentNode.classList.contains('tblwrap') ? tbl.parentNode : tbl;
-      anchor.parentNode.insertBefore(bar, anchor);
+      if(tbl.classList.contains('pgbottom')){
+        bar.classList.add('pgleft');
+        anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      } else {
+        anchor.parentNode.insertBefore(bar, anchor);
+      }
       function render(){
         var U=units(), pages=Math.max(1,Math.ceil(U.length/PAGE));
         if(page>=pages) page=pages-1; if(page<0) page=0;
