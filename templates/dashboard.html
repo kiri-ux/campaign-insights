@@ -5,15 +5,20 @@
 <title>BARCK+ Insights — Results</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   /* Vici / adtini palette */
-  :root{--atlas:#0E2A47;--velocity:#1E6FE0;--gold:#C9A227;--parchment:#F5F1E6;
-        --ink:#0E2A47;--muted:#5f6b7a;--line:#e6e0d0;--brand:#1E6FE0;--bg:#F5F1E6;
-        --warn:#B42318;--warnbg:#fbeeea;--card:#ffffff;
-        --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
+  :root{--atlas:#002D58;--velocity:#0066B3;--gold:#F1B434;--parchment:#FDFBF7;
+        --ink:#16283B;--muted:#5B6B7C;--line:#D9DFE6;--brand:#0066B3;--bg:#FDFBF7;--card:#FFFFFF;
+        --ok:#1F7A4D;--ok-bg:#E7F4ED;--warnc:#9A6A00;--warnc-bg:#FBF1D9;--info-bg:#E8F1F8;--warn:#B42318;--warnbg:#fbeeea;
+        --font-head:'Barlow Condensed',Arial,sans-serif;--font-body:'Barlow',Arial,sans-serif;}
+  header.brand{background:var(--atlas);color:#fff;padding:16px 24px;border-bottom:4px solid var(--gold);position:sticky;top:0;z-index:95;}
+  header.brand .hrow{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:16px;}
+  header.brand h1{margin:0;font-family:var(--font-head);font-weight:700;font-size:24px;letter-spacing:.04em;text-transform:uppercase;color:#fff;}
+  header.brand h1 span{font-family:var(--font-body);text-transform:none;letter-spacing:0;color:#7E93A8;font-size:11px;font-weight:400;}
+  header.brand .ver{font-size:11px;color:#7E93A8;font-weight:400;letter-spacing:.02em;margin-left:auto;font-family:var(--font-body);}
   *{box-sizing:border-box}
-  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 20px 40px;}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 0 40px;}
   .brandbar{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
   .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
   .brandbar .mark span{color:var(--velocity);}
@@ -22,12 +27,13 @@
   .syncalert{display:none;align-items:center;gap:8px;font-size:11px;font-weight:600;color:#b3402a;background:#ffe9e4;border:1px solid #f3c4b8;border-radius:7px;padding:3px 8px;margin-left:10px;}
   .syncalert button{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-body);}
   .syncalert button:disabled{opacity:.6;cursor:default;}
-  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding-top:14px;}
+  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding:14px 12px 0;}
   a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
-  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);}
-  h2{font-family:var(--font-head);font-size:16px;margin:28px 0 10px;color:var(--atlas);}
-  h3{font-family:var(--font-head);font-size:15px;color:var(--atlas);}
-  .tabhead{font-size:21px;}
+  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
+  h2{font-family:var(--font-head);font-size:17px;margin:28px 0 10px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+  h3{font-family:var(--font-head);font-size:15.5px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+  .tabhead{font-size:22px;}
+  h1 .sub,h2 .sub,h3 .sub{font-family:var(--font-body);text-transform:none;letter-spacing:0;}
   h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;}
   .cards{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
   .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
@@ -38,7 +44,7 @@
   table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
   th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
   th:first-child,td:first-child{text-align:left;}
-  th{background:#faf7ef;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
+  th{background:#F3F6F9;color:var(--atlas);font-family:var(--font-head);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
   tr:last-child td{border-bottom:0;}
   .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
   .pillgroup{margin-left:auto;display:flex;gap:8px;align-items:center;}
@@ -74,9 +80,9 @@
   .fbtn.active{background:var(--velocity);color:#fff;border-color:var(--velocity);}
   /* CTR insight tabs */
   .tabbar{display:flex;align-items:center;gap:4px;border-bottom:2px solid var(--line);margin:10px 0 6px;flex-wrap:wrap;}
-  .tabbtn{background:none;border:0;border-bottom:3px solid transparent;padding:10px 18px;font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--muted);cursor:pointer;margin-bottom:-2px;}
+  .tabbtn{background:none;border:0;border-bottom:3px solid transparent;padding:10px 18px;font-family:var(--font-head);font-weight:600;font-size:16px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer;margin-bottom:-2px;}
   .tabbtn:hover{color:var(--atlas);}
-  .tabbtn.active{color:var(--atlas);border-bottom-color:var(--velocity);}
+  .tabbtn.active{color:var(--atlas);border-bottom-color:var(--gold);}
   .tabbtn .ct{font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);margin-left:6px;}
   /* Expandable "blocked sites" drawer */
   td > details{max-width:360px;}
@@ -106,7 +112,7 @@
 </style>
 </head>
 <body>
-<div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="dot"></span><span style="color:var(--muted);font-size:13px;">BARCK+ Insights</span><span class="ver" style="margin-left:auto;">build {{ build_version }}</span><span class="syncalert" id="syncAlert">&#9888; Out of date — current build is <span id="syncCur"></span><button type="button" id="syncBtn">Sync</button></span></div>
+<header class="brand"><div class="hrow"><h1>adtini · BARCK+ Insights</h1><span class="ver">build {{ build_version }}</span><span class="syncalert" id="syncAlert">&#9888; Out of date — current build is <span id="syncCur"></span><button type="button" id="syncBtn">Sync</button></span></div></header>
 {% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
 <div class="wrap">

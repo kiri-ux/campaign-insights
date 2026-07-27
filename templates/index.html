@@ -5,21 +5,27 @@
 <title>BARCK+ Insights</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{--atlas:#0E2A47;--velocity:#1E6FE0;--gold:#C9A227;--parchment:#F5F1E6;
-        --ink:#0E2A47;--muted:#5f6b7a;--line:#e6e0d0;--brand:#1E6FE0;--bg:#F5F1E6;--card:#ffffff;
-        --font-head:'Poppins',Arial,sans-serif;--font-body:'Inter',Arial,sans-serif;}
+  :root{--atlas:#002D58;--velocity:#0066B3;--gold:#F1B434;--parchment:#FDFBF7;
+        --ink:#16283B;--muted:#5B6B7C;--line:#D9DFE6;--brand:#0066B3;--bg:#FDFBF7;--card:#FFFFFF;
+        --ok:#1F7A4D;--ok-bg:#E7F4ED;--warnc:#9A6A00;--warnc-bg:#FBF1D9;--info-bg:#E8F1F8;
+        --font-head:'Barlow Condensed',Arial,sans-serif;--font-body:'Barlow',Arial,sans-serif;}
+  header.brand{background:var(--atlas);color:#fff;padding:16px 24px;border-bottom:4px solid var(--gold);position:sticky;top:0;z-index:95;}
+  header.brand .hrow{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:16px;}
+  header.brand h1{margin:0;font-family:var(--font-head);font-weight:700;font-size:24px;letter-spacing:.04em;text-transform:uppercase;color:#fff;}
+  header.brand h1 span{font-family:var(--font-body);text-transform:none;letter-spacing:0;color:#7E93A8;font-size:11px;font-weight:400;}
   *{box-sizing:border-box}
-  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:40px 20px;}
-  .wrap{max-width:720px;margin:0 auto;}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0;}
+  .wrap{max-width:720px;margin:0 auto;padding:28px 20px 80px;}
   .brandbar{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:2px solid var(--gold);margin-bottom:20px;}
   .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:22px;color:var(--atlas);}
   .brandbar .mark span{color:var(--velocity);}
-  h1{font-family:var(--font-head);font-size:24px;margin:0 0 6px;color:var(--atlas);}
+  h1{font-family:var(--font-head);font-size:22px;margin:0 0 6px;color:var(--atlas);text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
   p.sub{color:var(--muted);margin:0 0 28px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
-  label{font-weight:600;display:block;margin-bottom:6px;font-size:14px;color:var(--atlas);}
+  label{font-family:var(--font-head);font-weight:600;display:block;margin-bottom:6px;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--atlas);}
+  label .tag{font-family:var(--font-body);text-transform:none;letter-spacing:0;}
   .hint{color:var(--muted);font-size:13px;margin:2px 0 12px;}
   .hint a{color:var(--velocity);font-weight:600;text-decoration:none;border-bottom:1px solid rgba(30,111,224,.35);}
   .hint a:hover{border-bottom-color:var(--velocity);}
@@ -29,7 +35,8 @@
     background:linear-gradient(135deg,var(--velocity),#3f8bff);color:#fff;font-weight:700;font-size:13px;
     font-family:var(--font-head);cursor:pointer;box-shadow:0 2px 6px rgba(30,111,224,.35);transition:transform .1s,box-shadow .15s;}
   input[type=file]::file-selector-button:hover{background:linear-gradient(135deg,#1a63cc,var(--velocity));box-shadow:0 3px 10px rgba(30,111,224,.45);transform:translateY(-1px);}
-  button{background:var(--velocity);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:600;font-family:var(--font-head);}
+  button{background:var(--velocity);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;cursor:pointer;font-weight:600;font-family:var(--font-body);}
+  button:hover:not(:disabled){background:#005696;}
   button:disabled{opacity:.6;cursor:not-allowed;}
   .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:#e9f1fd;color:var(--velocity);margin-left:8px;}
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:8px;}
@@ -46,8 +53,8 @@
 </style>
 </head>
 <body>
+<header class="brand"><div class="hrow"><h1>adtini · BARCK+ Insights <span>— build {{ build_version }}</span></h1></div></header>
 <div class="wrap">
-  <div class="brandbar"><span class="mark">vici<span>·</span>adtini</span><span class="ver">build {{ build_version }}</span></div>
   <h1>BARCK+ Insights</h1>
 
   {% if has_source %}
