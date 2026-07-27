@@ -7,6 +7,7 @@ import io
 import os
 import gc
 import re
+import datetime
 import json
 import tempfile
 import threading
@@ -633,6 +634,38 @@ def _save_report(html, date_str=None):
     return date_str
 
 
+def _selections_path(date_str):
+    return os.path.join(REPORTS_DIR, f"selections-{os.path.basename(date_str)}.json")
+
+
+@app.route("/reports/<date>/selections", methods=["GET", "POST"])
+def report_selections(date):
+    """Persist the block-review checkbox state per report, so one team member's
+    review (unchecking placements to exclude) is what the next person sees when
+    they open the dashboard to do the RZ copy-blocks or the sheet push."""
+    path = _selections_path(date)
+    if request.method == "GET":
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            return jsonify({"ok": True, "excluded": data.get("excluded", []),
+                            "updated_at": data.get("updated_at")}), 200
+        except (OSError, ValueError):
+            return jsonify({"ok": True, "excluded": [], "updated_at": None}), 200
+    body = request.get_json(silent=True) or {}
+    excluded = body.get("excluded")
+    if not isinstance(excluded, list) or len(excluded) > 5000:
+        return jsonify({"ok": False, "error": "Bad payload."}), 400
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"excluded": [str(x)[:300] for x in excluded],
+                       "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f)
+        return jsonify({"ok": True, "count": len(excluded)}), 200
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"{e}"}), 500
+
+
 def _migrate_report_names():
     """One-time cleanup: reports saved before range-naming were named by export
     DROP date even though each covers a multi-day delivery window. Their real
@@ -1059,6 +1092,7 @@ def _run_pull(send_email=False, start=None, end=None):
             except Exception as e:
                 app.logger.warning("Sheet creation at report time failed: %s", e)
             ctx["sheet_links"] = sheet_links or None
+            ctx["report_id"] = date_str  # lets the dashboard load/save its block review
             html = render_template("dashboard.html", **ctx)
             saved = _save_report(html, date_str)
             _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches

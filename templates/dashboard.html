@@ -220,7 +220,7 @@
       <div class="kpi"><div class="n">{{ ai.total_clicks }}</div><div class="l">Clicks on rec blocks</div></div>
     </div>
     <p class="note"><span class="flag hi">High CTR</span> and <span class="flag lo">Low CTR</span> blocks require <strong>≥10,000 pooled impressions</strong>; <span class="flag q">Quality</span> blocks have <strong>no impression minimum</strong>. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
-       <button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
+       <span id="reviewstate" class="note" style="margin-right:10px"></span><button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>
     <div class="tblwrap"><table class="lalign paginate pgbottom"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
@@ -417,6 +417,45 @@
   }
   document.querySelectorAll('.blkchk').forEach(function(cb){cb.addEventListener('change',rebuildBlocks);});
   if(document.querySelector('.blkchk')) rebuildBlocks();
+
+  // ---- Persistent block review ------------------------------------------
+  // One person reviews (unchecks exclusions); a different person later does
+  // the RZ copy blocks / sheet push. Checkbox state saves to the server per
+  // report and is re-applied for whoever opens this dashboard next.
+  (function(){
+    var rid = {{ (report_id or none)|tojson }};
+    var el = document.getElementById('reviewstate');
+    if(!rid || !document.querySelector('.blkchk')) return;
+    function key(cb){ return cb.dataset.kind + '|' + cb.dataset.val; }
+    function note(t, ok){ if(el){ el.textContent = t; el.style.color = ok ? '#177245' : 'var(--muted)'; } }
+    var saveT = null;
+    function save(){
+      var excluded = Array.prototype.filter.call(document.querySelectorAll('.blkchk'),
+        function(cb){ return !cb.checked; }).map(key);
+      note('Saving review…', false);
+      fetch('/reports/' + encodeURIComponent(rid) + '/selections', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({excluded: excluded})
+      }).then(function(r){ return r.json(); }).then(function(d){
+        note(d && d.ok ? ('Review saved ✓ ' + (d.count||0) + ' excluded') : 'Review save failed — toggle any box to retry', !!(d && d.ok));
+      }).catch(function(){ note('Review save failed — offline?', false); });
+    }
+    document.querySelectorAll('.blkchk').forEach(function(cb){
+      cb.addEventListener('change', function(){ clearTimeout(saveT); saveT = setTimeout(save, 600); });
+    });
+    fetch('/reports/' + encodeURIComponent(rid) + '/selections')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!(d && d.ok && d.excluded && d.excluded.length)) return;
+        var set = {};
+        d.excluded.forEach(function(k){ set[k] = true; });
+        var hits = 0;
+        document.querySelectorAll('.blkchk').forEach(function(cb){
+          if(set[key(cb)]){ cb.checked = false; hits++; }
+        });
+        if(hits){ rebuildBlocks(); note('Loaded saved review — ' + hits + ' excluded', true); }
+      }).catch(function(){});
+  })();
   function downloadSelected(){
     var rows=[['type','name','block_value','checked']];
     document.querySelectorAll('.blkchk').forEach(function(cb){
