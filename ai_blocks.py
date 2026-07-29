@@ -73,9 +73,15 @@ def _is_legit_fast(name):
 
 
 def _classify_batch(rows, kind, api_key, model):
-    listing = "\n".join(
-        f'{i + 1}. {r["name"]}' + (f'  [products: {r["products"]}]' if r.get("products") else "")
-        for i, r in enumerate(rows))
+    def _line(i, r):
+        line = f'{i + 1}. {r["name"]}'
+        aid = str(r.get("app_id", "") or "")
+        if kind == "app" and aid and aid != r["name"]:
+            line += f'  [id: {aid}]'  # bundle ids carry strong quality signal
+        if r.get("products"):
+            line += f'  [products: {r["products"]}]'
+        return line
+    listing = "\n".join(_line(i, r) for i, r in enumerate(rows))
     prompt = (
         f"You audit programmatic ad {kind} placements for a digital advertising agency. "
         f"These ran across many local/regional advertisers (auto dealers, home services, "
