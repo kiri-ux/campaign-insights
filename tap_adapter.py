@@ -141,6 +141,45 @@ def _read_xlsx_slim(bio):
         wb.close()
 
 
+_COMPOSITE = re.compile(r"^(.*?)\s*\(([^()]+)\)\s*$")
+
+
+def _split_name_id(v):
+    """'QR & Barcode Scanner: Home - Android (qrcode.barcodescanner.reader)'
+    -> ('QR & Barcode Scanner: Home - Android', 'qrcode.barcodescanner.reader').
+    Values without an id-looking trailing parenthetical return (v, v)."""
+    v = str(v).strip()
+    m = _COMPOSITE.match(v)
+    if m:
+        nid = m.group(2).strip()
+        if "." in nid or re.fullmatch(r"\d{6,}", nid):
+            return (m.group(1).strip() or nid), nid
+    return v, v
+
+
+def clean_app_identity(df):
+    """AdLib sometimes ships composite App IDs ('Name - Android (bundle.id)').
+    Split them: pure id into App ID, name part into App Name / Final App Name
+    where those held the same composite (or were blank). No-op otherwise."""
+    if df is None or not len(df) or "App ID" not in df.columns:
+        return df
+    raw = df["App ID"].astype(str)
+    pairs = raw.map(_split_name_id)
+    ids = pairs.map(lambda t: t[1])
+    changed = ids != raw
+    if not changed.any():
+        return df
+    df = df.copy()
+    names = pairs.map(lambda t: t[0])
+    for col in ("App Name", "Final App Name"):
+        if col in df.columns:
+            cur = df[col].astype(str)
+            replace = changed & (cur.eq(raw) | cur.isin(["", "nan", "None", "NA"]))
+            df[col] = cur.where(~replace, names)
+    df["App ID"] = ids
+    return df
+
+
 def read_flat(data, filename=""):
     """Read one flat export (xlsx or csv bytes) into a DataFrame with normalized
     headers, pruned to the columns the engines use, and memory-downcast. Both
@@ -155,7 +194,7 @@ def read_flat(data, filename=""):
             df = pd.read_csv(bio, low_memory=False)
     else:
         df = _read_xlsx_slim(bio)
-    return _prune_and_downcast(_normalize_headers(df))
+    return clean_app_identity(_prune_and_downcast(_normalize_headers(df)))
 
 
 _MEASURE_COLS = set(_MEASURES) | {"CTR", "CPM", "Total Spend"}
@@ -198,27 +237,32 @@ def _looks_like_app(v):
     return labels[-1] not in _TLDS                    # real TLD -> site
 
 
+
+
 def split_ttddv(df, dsp_label="TTD/DV360"):
     """Split the TTD/DV360 combined export (single App/URL column) into
     site-shaped and app-shaped frames tagged with a DSP column, so they merge
-    straight into the regular site/app analysis."""
+    straight into the regular site/app analysis. Composite 'Name (bundle.id)'
+    values are parsed so App Name and App ID land in their own columns."""
     empty = pd.DataFrame()
     if df is None or not len(df) or "App/URL" not in df.columns:
         return empty, empty
     df = df.copy()
     df["DSP"] = dsp_label
-    vals = df["App/URL"].astype(str)
-    isapp = vals.map(_looks_like_app)
+    pairs = df["App/URL"].map(_split_name_id)
+    names = pairs.map(lambda t: t[0])
+    ids = pairs.map(lambda t: t[1])
+    isapp = ids.map(_looks_like_app)
     sites = df[~isapp].copy()
     apps = df[isapp].copy()
     if len(sites):
-        sites["Site Domain"] = sites["App/URL"]
-        sites["Final Site Domain Name"] = sites["App/URL"]
+        sites["Site Domain"] = ids[~isapp]
+        sites["Final Site Domain Name"] = ids[~isapp]
         sites = sites.drop(columns=["App/URL"])
     if len(apps):
-        apps["App Name"] = apps["App/URL"]
-        apps["Final App Name"] = apps["App/URL"]
-        apps["App ID"] = apps["App/URL"]
+        apps["App Name"] = names[isapp]
+        apps["Final App Name"] = names[isapp]
+        apps["App ID"] = ids[isapp]
         apps = apps.drop(columns=["App/URL"])
     return sites, apps
 

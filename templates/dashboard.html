@@ -377,18 +377,37 @@
   var TAB_ORDER=['All Products','CTV','Audio','Social Mirror'];
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // Recommended-block checkboxes: rebuild copy formats live from checked rows
+  // Copy-block value cleaning: sites go out as bare URLs, apps as the pure app
+  // ID — AdLib's App ID field sometimes carries "Name - Android (bundle.id)",
+  // so extract the trailing parenthetical when it looks like an id. The sheet
+  // PUSH keeps the raw value untouched (blocklist-check matches on it).
+  function cleanSiteVal(v){ return String(v||'').trim(); }
+  function cleanAppVal(v){
+    v = String(v||'').trim();
+    var m = v.match(/\(([^()]+)\)\s*$/);
+    if(m){
+      var id = m[1].trim();
+      if(id.indexOf('.') >= 0 || /^\d{6,}$/.test(id)) return id;
+    }
+    return v;
+  }
+  function uniq(a){ var seen={}; return a.filter(function(x){ if(seen[x]) return false; seen[x]=true; return true; }); }
   function rebuildBlocks(){
     var sites=[], apps=[], perTab={};
     TAB_ORDER.forEach(function(t){perTab[t]={sites:[],apps:[]};});
     document.querySelectorAll('.blkchk').forEach(function(cb){
       if(!cb.checked) return;
-      var kind=cb.dataset.kind, val=cb.dataset.val;
+      var kind=cb.dataset.kind;
+      var val=(kind==='site'?cleanSiteVal:cleanAppVal)(cb.dataset.val);
+      if(!val) return;
       (kind==='site'?sites:apps).push(val);
       routeTabs(cb.dataset.products, cb.dataset.flag).forEach(function(tab){
         if(!perTab[tab]) perTab[tab]={sites:[],apps:[]};
         perTab[tab][kind==='site'?'sites':'apps'].push(val);
       });
     });
+    sites=uniq(sites); apps=uniq(apps);
+    TAB_ORDER.forEach(function(t){ if(perTab[t]){ perTab[t].sites=uniq(perTab[t].sites); perTab[t].apps=uniq(perTab[t].apps); } });
     var rz=function(field,vals){return vals.map(function(v){return 'OR {'+field+'}="'+v+'"';}).join(' ');};
     var set=function(id,val){var t=document.getElementById(id); if(t) t.value=val;};
     set('ai_rz_site', rz('Site Domain',sites));
@@ -404,11 +423,11 @@
         html+='<div style="font-weight:600;margin-bottom:4px">'+tab+'</div>';
         if(d.sites.length){
           html+='<div class="copyhead"><span>Sites ('+d.sites.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_s\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(', '+d.sites.join(', '))+'</textarea>';
+          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(d.sites.join(', '))+'</textarea>';
         }
         if(d.apps.length){
           html+='<div class="copyhead"><span>Apps ('+d.apps.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_a\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(', '+d.apps.join(', '))+'</textarea>';
+          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(d.apps.join(', '))+'</textarea>';
         }
         html+='</div>';
       });
