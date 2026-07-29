@@ -98,6 +98,13 @@ def _pick_client(cols):
     return None
 
 
+def _ttddv_series(df):
+    """Row-level bool: delivery attributed to TTD/DV360 (DSP-tagged rows)."""
+    if "dsp" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["dsp"].astype(str).str.upper().str.contains("TTD|DV360", regex=True, na=False)
+
+
 def _find(cols, *tokens_any, exclude=()):
     """Return first column whose lowercased name contains ALL tokens in any group,
     skipping any column that contains an `exclude` token (e.g. 'pool' so that
@@ -249,7 +256,7 @@ def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0007, conv_rate_keep=0.00
     auto_app_blocks so it merges straight into the site block list.
     """
     cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
-            "conversions", "category", "reason"]
+            "conversions", "ttddv", "category", "reason"]
     if allp is None or not len(allp):
         return pd.DataFrame(columns=cols)
     site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
@@ -258,10 +265,12 @@ def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0007, conv_rate_keep=0.00
     site = site[~site["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
     if site.empty:
         return pd.DataFrame(columns=cols)
+    site = site.assign(_ttddv=_ttddv_series(site))
     g = (site.groupby("placement")
          .agg(products=("product", lambda s: ", ".join(sorted({str(p) for p in s if str(p).strip()}))),
               impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-              conversions=("conversions", "sum"), spend=("spend", "sum"))
+              conversions=("conversions", "sum"), spend=("spend", "sum"),
+              ttddv=("_ttddv", "max"))
          .reset_index().rename(columns={"placement": "name"}))
     g = g[~g["name"].astype(str).str.strip().str.lower().isin({"na", "nan", "none", ""})]
     # Don't re-recommend a site already flagged "Block" or already on the master
@@ -292,7 +301,7 @@ def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=
     the ratio meaningless. Same schema as auto_app_blocks so it merges into the list.
     """
     cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
-            "conversions", "category", "reason"]
+            "conversions", "ttddv", "category", "reason"]
     if allp is None or not len(allp):
         return pd.DataFrame(columns=cols)
     site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
@@ -301,9 +310,11 @@ def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=
     site = site[~site["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
     if site.empty:
         return pd.DataFrame(columns=cols)
+    site = site.assign(_ttddv=_ttddv_series(site))
     g = (site.groupby(["placement", "product"])
          .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-              conversions=("conversions", "sum"), spend=("spend", "sum"))
+              conversions=("conversions", "sum"), spend=("spend", "sum"),
+              ttddv=("_ttddv", "max"))
          .reset_index())
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
     norms = (g.groupby("product").apply(
@@ -454,11 +465,14 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     def _candidates(kind):
         sub = cand[cand["placement_type"] == kind]
         if sub.empty:
-            return pd.DataFrame(columns=["name", "app_id", "products", "impressions", "clicks", "spend"])
+            return pd.DataFrame(columns=["name", "app_id", "products", "impressions",
+                                         "clicks", "spend", "ttddv"])
+        sub = sub.assign(_ttddv=_ttddv_series(sub))
         d = (sub.groupby("placement")
              .agg(app_id=("app_id", "first"), products=("product", _products),
                   impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                  conversions=("conversions", "sum"), spend=("spend", "sum"))
+                  conversions=("conversions", "sum"), spend=("spend", "sum"),
+                  ttddv=("_ttddv", "max"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
         # Also drop anything already covered by the external blocklist (what you've
@@ -494,7 +508,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             row["ctr"] = (row["clicks"] / row["impressions"]) if row["impressions"] else 0
             auto_rows.append(row)
     auto_app_blocks = pd.DataFrame(auto_rows, columns=[
-        "name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"])
+        "name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
+        "ttddv", "category", "reason"])
 
     # Combined placements grid: ALL delivery (blocked + non-blocked). Apps use the
     # display name (App ID when the name is NA). Carries last-served + blocked flag.

@@ -25,7 +25,7 @@ MAX_CANDIDATES = int(os.environ.get("AI_MAX_CANDIDATES", "200"))
 BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "50"))
 MAX_WORKERS = int(os.environ.get("AI_MAX_WORKERS", "6"))
 FIELD = {"site": "Site Domain", "app": "App ID"}
-_COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "category", "reason"]
+_COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "ttddv", "category", "reason"]
 
 
 def to_adlib_filter(names, kind):
@@ -84,7 +84,9 @@ def _classify_batch(rows, kind, api_key, model):
         f"account-wide, for every client: made-for-advertising (MFA) / ad-arbitrage sites, "
         f"content farms, scraped or auto-generated content, clickbait networks, piracy/illegal, "
         f"adult, gambling, and low-effort junk apps (fake utilities, ad-stuffed "
-        f"flashlight/cleaner/wallpaper clones with no real product).\n\n"
+        f"flashlight/cleaner/wallpaper clones with no real product), and reward / "
+        f"move-to-earn / paid-to-engage apps — block these, but categorize them as "
+        f"'Incentivized traffic' (users are paid to engage; that is not fraud/scam).\n\n"
         f"CRITICAL — relevance is NOT quality. Content that is niche, lowbrow, or irrelevant "
         f"to some advertisers is a client-level targeting decision, never an account-wide "
         f"block. Do NOT flag:\n"
@@ -117,7 +119,8 @@ def _classify_batch(rows, kind, api_key, model):
             impr = r.get("impressions", 0) or 0
             clk = r.get("clicks", 0) or 0
             out.append({"name": r["name"], "app_id": r.get("app_id", r["name"]),
-                        "products": r.get("products", ""), "impressions": impr, "clicks": clk,
+                        "products": r.get("products", ""), "ttddv": bool(r.get("ttddv", False)),
+                        "impressions": impr, "clicks": clk,
                         "ctr": (clk / impr) if impr else 0, "spend": r["spend"],
                         "category": v.get("category", ""), "reason": v.get("reason", "")})
         except Exception:
