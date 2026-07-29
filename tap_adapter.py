@@ -14,6 +14,7 @@ Unit come straight from the export. 'Internal Cost' is mapped from 'Billable
 Spend' (the cost field present in the data views).
 """
 import io
+import re
 import tempfile
 import pandas as pd
 
@@ -29,7 +30,7 @@ _COLMAP = {
     "product_2": "Product 2",
     "strategy_type": "Strategy Type",
     "strategy_name": "Strategy Name",
-    "campaign_id": "Campaign ID",
+    "campaign_id": "Campaign ID", "app_url": "App/URL", "dsp": "DSP",
     "site_domain": "Site Domain",
     "final_site_domain_name": "Final Site Domain Name",
     "app_name": "App Name",
@@ -75,7 +76,7 @@ def _normalize_headers(df):
 _KEEP = ["Date", "Client Business Unit", "Client", "Product 2", "Strategy Type",
          "Strategy Name", "Campaign ID", "Site Domain", "Final Site Domain Name",
          "App Name", "Final App Name", "App ID", "Impressions", "Clicks", "CTR",
-         "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend"]
+         "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend", "App/URL", "DSP"]
 _FLOAT32 = ["CTR", "CPM"]              # display-only metrics; recomputed downstream
 _CATEGORY = ["Client Business Unit", "Client", "Product 2", "Strategy Type", "Campaign ID"]
 
@@ -174,6 +175,52 @@ def combine_flats(dfs):
     if dims:
         combined = combined.drop_duplicates(subset=dims, keep="last")
     return combined.reset_index(drop=True)
+
+
+# Real TLDs a placement domain plausibly ends with; used to split the TTD/DV360
+# combined export's single App/URL column into site rows vs app rows.
+_TLDS = {"com","net","org","co","io","tv","us","uk","ca","de","fr","es","it","nl",
+         "se","jp","au","in","br","mx","fm","gg","me","app","edu","gov","info","biz","news"}
+_REV_DNS = {"com","net","org","co","io","tv","jp","de","uk","us","air","me","app","tw","kr"}
+
+
+def _looks_like_app(v):
+    v = str(v).strip().lower()
+    if not v or v in ("nan", "none"):
+        return True
+    if re.fullmatch(r"(id)?\d{6,}", v):
+        return True                                   # iOS store ids
+    if "." not in v:
+        return True                                   # bare app names
+    labels = v.split(".")
+    if len(labels) >= 3 and labels[0] in _REV_DNS:
+        return True                                   # reverse-DNS bundle ids
+    return labels[-1] not in _TLDS                    # real TLD -> site
+
+
+def split_ttddv(df, dsp_label="TTD/DV360"):
+    """Split the TTD/DV360 combined export (single App/URL column) into
+    site-shaped and app-shaped frames tagged with a DSP column, so they merge
+    straight into the regular site/app analysis."""
+    empty = pd.DataFrame()
+    if df is None or not len(df) or "App/URL" not in df.columns:
+        return empty, empty
+    df = df.copy()
+    df["DSP"] = dsp_label
+    vals = df["App/URL"].astype(str)
+    isapp = vals.map(_looks_like_app)
+    sites = df[~isapp].copy()
+    apps = df[isapp].copy()
+    if len(sites):
+        sites["Site Domain"] = sites["App/URL"]
+        sites["Final Site Domain Name"] = sites["App/URL"]
+        sites = sites.drop(columns=["App/URL"])
+    if len(apps):
+        apps["App Name"] = apps["App/URL"]
+        apps["Final App Name"] = apps["App/URL"]
+        apps["App ID"] = apps["App/URL"]
+        apps = apps.drop(columns=["App/URL"])
+    return sites, apps
 
 
 def filter_date_range(df, start_iso, end_iso):

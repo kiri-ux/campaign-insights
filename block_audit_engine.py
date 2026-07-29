@@ -52,7 +52,7 @@ NEED_TOKENS = [("final",), ("site", "domain"), ("app", "name"), ("app", "id"),
                ("bundle",), ("impression",), ("click",), ("conversion",), ("conv",),
                ("billable", "spend"), ("spend",), ("cost",), ("date",),
                ("business", "unit"), ("client",), ("product",), ("strategy",),
-               ("campaign",)]
+               ("campaign",), ("dsp",)]
 
 SHEET_CONFIG = {
     "Site Overview": {"kind": "site"},
@@ -132,6 +132,7 @@ def _detect(df, kind):
         "app_id": _find(cols, ("app", "id"), ("app", "bundle"), ("bundle",)),
         "campaign": _find(cols, ("campaign", "name"), exclude=("pool",)),
         "campaign_id": _find(cols, ("campaign", "id"), ("campaign", "#"), ("campaign", "number"), exclude=("pool",)),
+        "dsp": _find(cols, ("dsp",)),
     }
 
 
@@ -160,6 +161,7 @@ def _normalize(df, c):
     out["strategy_name"] = df[c["strategy_name"]].astype(str) if c.get("strategy_name") else out["strategy"]
     out["campaign"] = df[c["campaign"]].astype(str) if c.get("campaign") else "(not in export)"
     # IDs come out of Excel as floats ("12345.0") — normalize to clean strings.
+    out["dsp"] = df[c["dsp"]].astype(str) if c.get("dsp") else ""
     out["campaign_id"] = (df[c["campaign_id"]].astype(str).str.strip()
                           .str.replace(r"\.0$", "", regex=True)
                           if c.get("campaign_id") else "")
@@ -615,6 +617,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             # .where() leaves NaN for the other type, which nunique ignores.
             a2["_site_key"] = a2["match_key"].where(a2["placement_type"] == "site")
             a2["_app_key"] = a2["match_key"].where(a2["placement_type"] == "app")
+            a2["_ttddv"] = a2["dsp"].astype(str).str.upper().str.contains("TTD|DV360", regex=True, na=False) \
+                if "dsp" in a2.columns else False
             a2["_bd"] = pd.to_datetime(a2["blocked_date"], errors="coerce")
             # The engine encodes a BLANK date cell as a 1970 sentinel ("blocked
             # long ago") so leak math counts all delivery as post-block. Keep
@@ -628,6 +632,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
                         n_sites=("match_key", "nunique"),
                         n_site=("_site_key", "nunique"), n_app=("_app_key", "nunique"),
                         date_added=("_bd", "min"), last_dt=("served_date", "max"),
+                        ttddv=("_ttddv", "max"),
                         sites_list=("display_name", _site_list))
                    .reset_index().rename(columns={"bu": "business_unit", "client": "Client",
                                                   "strategy_name": "Strategy Name",
@@ -636,9 +641,10 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             cob["ctr"] = np.where(cob["impressions"] > 0, cob["clicks"] / cob["impressions"], 0)
             cob["sites"] = cob["sites_list"].apply(lambda lst: ", ".join(lst))
             # Earliest block date across the matched placements + most recent serve.
+            cob["TTD/DV360"] = np.where(cob["ttddv"].astype(bool), "TTD/DV360", "")
             cob["Date added"] = pd.to_datetime(cob["date_added"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
             cob["Last served"] = pd.to_datetime(cob["last_dt"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
-            cob = cob[["business_unit", "Client", "Strategy Name", "Strategy ID", "products",
+            cob = cob[["business_unit", "Client", "Strategy Name", "Strategy ID", "TTD/DV360", "products",
                        "sites", "sites_list", "n_sites", "n_site", "n_app",
                        "Date added", "Last served",
                        "impressions", "clicks", "ctr",

@@ -964,9 +964,10 @@ def _run_pull(send_email=False, start=None, end=None):
         try:
             if os.environ.get("S3_BUCKET", "").strip():
                 from s3_pull import fetch_two, list_range, get_bytes
-                from tap_adapter import read_flat, build_frames, combine_flats, filter_date_range
+                from tap_adapter import (read_flat, build_frames, combine_flats,
+                                         filter_date_range, split_ttddv)
                 if start and end:
-                    smetas, ametas, capped = list_range(start, end)
+                    smetas, ametas, tmetas, capped = list_range(start, end)
                     if not (smetas and ametas):
                         have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
@@ -978,6 +979,15 @@ def _run_pull(send_email=False, start=None, end=None):
                             acc.append(read_flat(b, m["name"]))
                             b = None
                             gc.collect()
+                    for m in tmetas:  # TTD/DV360 combined files split into both sides
+                        b = get_bytes(m["key"])
+                        _ts, _ta = split_ttddv(read_flat(b, m["name"]))
+                        if len(_ts):
+                            sdfs.append(_ts)
+                        if len(_ta):
+                            adfs.append(_ta)
+                        b = None
+                        gc.collect()
                     sites = filter_date_range(combine_flats(sdfs), start, end)
                     apps = filter_date_range(combine_flats(adfs), start, end)
                     sdfs = adfs = None
@@ -989,10 +999,12 @@ def _run_pull(send_email=False, start=None, end=None):
                     sites = apps = None
                     gc.collect()
                     date_str = f"{start}_to_{end}"
-                    source_file = (f"{len(smetas)} site + {len(ametas)} app files pooled ({start} → {end})"
+                    source_file = (f"{len(smetas)} site + {len(ametas)} app"
+                                   + (f" + {len(tmetas)} TTD/DV360" if tmetas else "")
+                                   + f" files pooled ({start} → {end})"
                                    + (" — oldest files trimmed by S3_RANGE_MAX_FILES cap" if capped else ""))
                 else:
-                    sname, sbytes, aname, abytes, date_str = fetch_two()
+                    sname, sbytes, aname, abytes, tname, tbytes, date_str = fetch_two()
                     if not (sbytes and abytes):
                         have = ", ".join(x for x in [sname and "sites", aname and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
@@ -1000,6 +1012,13 @@ def _run_pull(send_email=False, start=None, end=None):
                     sdf = read_flat(sbytes, sname)
                     adf = read_flat(abytes, aname)
                     sbytes = abytes = None
+                    if tbytes:  # optional TTD/DV360 combined export merges in, DSP-tagged
+                        _ts, _ta = split_ttddv(read_flat(tbytes, tname))
+                        if len(_ts):
+                            sdf = pd.concat([sdf, _ts], ignore_index=True, sort=False)
+                        if len(_ta):
+                            adf = pd.concat([adf, _ta], ignore_index=True, sort=False)
+                        tbytes = None
                     gc.collect()
                     # Default pull = the last DEFAULT_PULL_DAYS days of DELIVERY in
                     # the newest export (7 unless overridden; 0 = whole file). The
@@ -1022,7 +1041,8 @@ def _run_pull(send_email=False, start=None, end=None):
                     frames = build_frames(sdf, adf)
                     sdf = adf = None
                     gc.collect()
-                    source_file = f"{sname} + {aname}" + (f" (last {trim_days} delivery days)" if trim_days > 0 else "")
+                    source_file = f"{sname} + {aname}" + (f" + {tname}" if tname else "") \
+                        + (f" (last {trim_days} delivery days)" if trim_days > 0 else "")
             else:
                 if os.environ.get("GRAPH_CLIENT_ID", "").strip():
                     from graph_pull import fetch_latest_xlsx

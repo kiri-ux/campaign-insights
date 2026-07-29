@@ -58,11 +58,10 @@ def list_range(start_iso, end_iso, grace_days=None):
     s3, bucket = _client_and_cfg()
     prefix = os.environ.get("S3_PREFIX", "").strip()
     suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
-    site_match = os.environ.get("S3_SITES_MATCH", "site").strip().lower()
-    app_match = os.environ.get("S3_APPS_MATCH", "app").strip().lower()
     cap = int(os.environ.get("S3_RANGE_MAX_FILES", "16"))
 
-    sites, apps = [], []
+    sites, apps, ttddv = [], [], []
+    buckets = {"site": sites, "app": apps, "ttddv": ttddv}
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -73,16 +72,14 @@ def list_range(start_iso, end_iso, grace_days=None):
             if not (start <= fdate <= end):
                 continue
             base = key.rsplit("/", 1)[-1]
-            meta = {"name": base, "key": key, "date": fdate.isoformat(),
-                    "_lm": obj["LastModified"]}
-            if site_match in base.lower():
-                sites.append(meta)
-            elif app_match in base.lower():
-                apps.append(meta)
+            kind = _classify(base.lower())
+            if kind:
+                buckets[kind].append({"name": base, "key": key, "date": fdate.isoformat(),
+                                      "_lm": obj["LastModified"]})
 
     capped = False
     out = []
-    for lst in (sites, apps):
+    for lst in (sites, apps, ttddv):
         lst.sort(key=lambda m: (m["date"], m["_lm"]))  # oldest first
         if len(lst) > cap:
             lst = lst[-cap:]  # keep the newest `cap` files
@@ -90,7 +87,7 @@ def list_range(start_iso, end_iso, grace_days=None):
         for m in lst:
             m.pop("_lm", None)
         out.append(lst)
-    return out[0], out[1], capped
+    return out[0], out[1], out[2], capped
 
 
 def list_available_dates():
@@ -99,8 +96,6 @@ def list_available_dates():
     s3, bucket = _client_and_cfg()
     prefix = os.environ.get("S3_PREFIX", "").strip()
     suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
-    site_match = os.environ.get("S3_SITES_MATCH", "site").strip().lower()
-    app_match = os.environ.get("S3_APPS_MATCH", "app").strip().lower()
     dates = {}
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -108,14 +103,12 @@ def list_available_dates():
             key = obj["Key"]
             if key.endswith("/") or not key.lower().endswith(suffix):
                 continue
-            base = key.rsplit("/", 1)[-1].lower()
-            is_site = site_match in base
-            is_app = (not is_site) and app_match in base
-            if not (is_site or is_app):
+            kind = _classify(key.rsplit("/", 1)[-1].lower())
+            if not kind:
                 continue
             fdate = _date_from_key(key, obj.get("LastModified"))
-            d = dates.setdefault(fdate, {"sites": 0, "apps": 0})
-            d["sites" if is_site else "apps"] += 1
+            d = dates.setdefault(fdate, {"sites": 0, "apps": 0, "ttddv": 0})
+            d[{"site": "sites", "app": "apps", "ttddv": "ttddv"}[kind]] += 1
     return dates
 
 
@@ -125,37 +118,53 @@ def get_bytes(key):
     return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
 
 
+def _matchers():
+    return (os.environ.get("S3_TTDDV_MATCH", "ttddv").strip().lower(),
+            os.environ.get("S3_SITES_MATCH", "site").strip().lower(),
+            os.environ.get("S3_APPS_MATCH", "app").strip().lower())
+
+
+def _classify(base):
+    """'ttddv' | 'site' | 'app' | None for a lowercased filename. TTD/DV360
+    combined exports are checked FIRST because their name ('ttddv-siteapp-…')
+    also contains the site/app substrings."""
+    t, si, ap = _matchers()
+    if t and t in base:
+        return "ttddv"
+    if si in base:
+        return "site"
+    if ap in base:
+        return "app"
+    return None
+
+
 def fetch_two():
-    """For the two-flat-file export: return (sites_name, sites_bytes, apps_name,
-    apps_bytes, date_str). Classifies objects by a filename substring
-    (S3_SITES_MATCH default 'site', S3_APPS_MATCH default 'app'); newest of each.
+    """Return (sites_name, sites_bytes, apps_name, apps_bytes, ttddv_name,
+    ttddv_bytes, date_str) — the newest of each export type. TTD/DV360 combined
+    exports (S3_TTDDV_MATCH default 'ttddv') are optional and classified before
+    site/app since their filename contains both substrings.
     Missing side comes back as (name=None, bytes=None)."""
     import os
     import boto3
     bucket = os.environ.get("S3_BUCKET", "").strip()
     prefix = os.environ.get("S3_PREFIX", "").strip()
     suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
-    site_match = os.environ.get("S3_SITES_MATCH", "site").strip().lower()
-    app_match = os.environ.get("S3_APPS_MATCH", "app").strip().lower()
     if not bucket:
         raise RuntimeError("S3_BUCKET not set")
     region = os.environ.get("AWS_REGION", "").strip() or None
     s3 = boto3.client("s3", region_name=region)
 
-    newest_site = newest_app = None
+    newest = {"site": None, "app": None, "ttddv": None}
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
             key = obj["Key"]
             if key.endswith("/") or not key.lower().endswith(suffix):
                 continue
-            base = key.rsplit("/", 1)[-1].lower()
-            if site_match in base:
-                if newest_site is None or obj["LastModified"] > newest_site["LastModified"]:
-                    newest_site = obj
-            elif app_match in base:
-                if newest_app is None or obj["LastModified"] > newest_app["LastModified"]:
-                    newest_app = obj
+            kind = _classify(key.rsplit("/", 1)[-1].lower())
+            if kind and (newest[kind] is None or obj["LastModified"] > newest[kind]["LastModified"]):
+                newest[kind] = obj
+    newest_site, newest_app, newest_ttddv = newest["site"], newest["app"], newest["ttddv"]
 
     def _get(o):
         if not o:
@@ -166,8 +175,9 @@ def fetch_two():
 
     sname, sbytes, sdate = _get(newest_site)
     aname, abytes, adate = _get(newest_app)
+    tname, tbytes, _tdate = _get(newest_ttddv)
     date_str = sdate or adate
-    return sname, sbytes, aname, abytes, date_str
+    return sname, sbytes, aname, abytes, tname, tbytes, date_str
 
 
 def fetch_latest_xlsx():
