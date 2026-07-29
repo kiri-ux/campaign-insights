@@ -14,6 +14,7 @@ Unit come straight from the export. 'Internal Cost' is mapped from 'Billable
 Spend' (the cost field present in the data views).
 """
 import io
+import os
 import re
 import tempfile
 import pandas as pd
@@ -31,6 +32,9 @@ _COLMAP = {
     "strategy_type": "Strategy Type",
     "strategy_name": "Strategy Name",
     "campaign_id": "Campaign ID", "app_url": "App/URL", "dsp": "DSP",
+    "site_app": "Site/App", "inventory_type": "Inventory Type",
+    "environment": "Environment", "ad_environment": "Environment",
+    "channel_type": "Channel Type",
     "site_domain": "Site Domain",
     "final_site_domain_name": "Final Site Domain Name",
     "app_name": "App Name",
@@ -76,7 +80,7 @@ def _normalize_headers(df):
 _KEEP = ["Date", "Client Business Unit", "Client", "Product 2", "Strategy Type",
          "Strategy Name", "Campaign ID", "Site Domain", "Final Site Domain Name",
          "App Name", "Final App Name", "App ID", "Impressions", "Clicks", "CTR",
-         "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend", "App/URL", "DSP"]
+         "Post Click Conversions", "Post View Conversions", "CPM", "Billable Spend", "App/URL", "DSP", "Site/App", "Inventory Type", "Environment", "Channel Type"]
 _FLOAT32 = ["CTR", "CPM"]              # display-only metrics; recomputed downstream
 _CATEGORY = ["Client Business Unit", "Client", "Product 2", "Strategy Type", "Campaign ID"]
 
@@ -239,6 +243,36 @@ def _looks_like_app(v):
 
 
 
+# App inventory that masquerades as a domain (e.g. the AOL Desktop App serves
+# under cdn.desktop.aol.com). Extend via TTDDV_FORCE_APP / TTDDV_FORCE_SITE
+# (comma-separated, matched case-insensitively on the id).
+_KNOWN_APP_DOMAINS = {"cdn.desktop.aol.com"}
+_TYPE_COLS = ("Site/App", "Inventory Type", "Environment", "Channel Type")
+
+
+def _forced(name_set_env, builtin=frozenset()):
+    vals = {v.strip().lower() for v in os.environ.get(name_set_env, "").split(",") if v.strip()}
+    return vals | set(builtin)
+
+
+def _classify_ttddv_rows(df, ids):
+    """Per-row app/site decision: explicit type column wins, then the forced
+    override lists, then shape heuristics."""
+    forced_app = _forced("TTDDV_FORCE_APP", _KNOWN_APP_DOMAINS)
+    forced_site = _forced("TTDDV_FORCE_SITE")
+    ids_l = ids.astype(str).str.lower()
+    isapp = ids_l.map(_looks_like_app)          # shape baseline
+    tcol = next((c for c in _TYPE_COLS if c in df.columns), None)
+    if tcol:
+        t = df[tcol].astype(str).str.lower()
+        explicit_app = t.str.contains("app", na=False)
+        explicit_site = t.str.contains("site|web", regex=True, na=False) & ~explicit_app
+        isapp = isapp.where(~(explicit_app | explicit_site), explicit_app)
+    isapp = isapp.where(~ids_l.isin(forced_site), False)
+    isapp = isapp.where(~ids_l.isin(forced_app), True)
+    return isapp
+
+
 def split_ttddv(df, dsp_label="TTD/DV360"):
     """Split the TTD/DV360 combined export (single App/URL column) into
     site-shaped and app-shaped frames tagged with a DSP column, so they merge
@@ -252,18 +286,18 @@ def split_ttddv(df, dsp_label="TTD/DV360"):
     pairs = df["App/URL"].map(_split_name_id)
     names = pairs.map(lambda t: t[0])
     ids = pairs.map(lambda t: t[1])
-    isapp = ids.map(_looks_like_app)
+    isapp = _classify_ttddv_rows(df, ids)
     sites = df[~isapp].copy()
     apps = df[isapp].copy()
     if len(sites):
         sites["Site Domain"] = ids[~isapp]
         sites["Final Site Domain Name"] = ids[~isapp]
-        sites = sites.drop(columns=["App/URL"])
+        sites = sites.drop(columns=["App/URL", *[c for c in _TYPE_COLS if c in sites.columns]])
     if len(apps):
         apps["App Name"] = names[isapp]
         apps["Final App Name"] = names[isapp]
         apps["App ID"] = ids[isapp]
-        apps = apps.drop(columns=["App/URL"])
+        apps = apps.drop(columns=["App/URL", *[c for c in _TYPE_COLS if c in apps.columns]])
     return sites, apps
 
 
