@@ -48,6 +48,8 @@
   .dllink:hover{border-bottom-color:var(--velocity);}
   .brandbar{display:flex;align-items:baseline;justify-content:space-between;}
   .ver{font-size:11px;color:var(--muted);opacity:.7;font-weight:500;letter-spacing:.02em;}
+  .restylebtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--velocity);font-size:11px;padding:2px 8px;cursor:pointer;margin-left:8px;font-family:var(--font-body);}
+  .restylebtn:hover{border-color:var(--velocity);}
   .delbtn{background:none;border:0;color:#b00;font-size:13px;font-weight:700;cursor:pointer;padding:2px 6px;border-radius:6px;opacity:.55;font-family:var(--font-body);}
   .delbtn:hover{opacity:1;background:#fdecea;}
 </style>
@@ -80,12 +82,22 @@
     <label>Recent dashboards</label>
     <div class="hint">Named by the delivery date range each covers — re-pulling the same range replaces its report.</div>
     <ul id="dashlist" style="margin:6px 0 0;padding-left:18px;line-height:2">
-      {% for d in reports %}<li data-date="{{ d }}"><a class="dllink" href="/reports/{{ d }}">{{ d|report_name }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %} <button type="button" class="delbtn" title="Delete this dashboard" onclick="delDash('{{ d }}', this)">✕</button></li>{% endfor %}
+      {% for d in reports %}<li data-date="{{ d }}"><a class="dllink" href="/reports/{{ d }}">{{ d|report_name }}</a>{% if loop.first %} <span class="tag">latest</span>{% endif %} <button type="button" class="restylebtn" title="Re-apply the current styling/features to this report's original data (numbers unchanged)" onclick="restyleDash('{{ d }}', this)">↻ restyle</button> <button type="button" class="delbtn" title="Delete this dashboard" onclick="delDash('{{ d }}', this)">✕</button></li>{% endfor %}
     </ul>
   </div>
   {% endif %}
 
   <script>
+    function restyleDash(d, btn){
+      btn.disabled = true; btn.textContent = '\u21bb restyling\u2026';
+      fetch('/reports/' + encodeURIComponent(d) + '/rerender', {method:'POST'})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if(j && j.ok){ btn.textContent = '\u2713 restyled'; setTimeout(function(){ window.open('/reports/' + encodeURIComponent(d), '_blank'); btn.textContent='\u21bb restyle'; btn.disabled=false; }, 300); }
+          else { alert((j && j.error) || 'Restyle failed'); btn.textContent='\u21bb restyle'; btn.disabled=false; }
+        })
+        .catch(function(){ alert('Restyle failed'); btn.textContent='\u21bb restyle'; btn.disabled=false; });
+    }
     function _busy(btn, label){ btn.disabled=true; btn.dataset.old=btn.innerHTML; btn.innerHTML='<span class="spin"></span>'+label; }
     function _done(btn){ btn.disabled=false; if(btn.dataset.old) btn.innerHTML=btn.dataset.old; }
     function _asJson(r){

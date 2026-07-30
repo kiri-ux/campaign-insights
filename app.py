@@ -750,6 +750,34 @@ def _watchlists_path(date_str):
     return os.path.join(REPORTS_DIR, f"watchlists-{date_str}.xlsx")
 
 
+_REPORT_ID_RE = r"\d{4}-\d{2}-\d{2}(_to_\d{4}-\d{2}-\d{2})?"
+
+
+def _ctx_path(date_str):
+    return os.path.join(REPORTS_DIR, f"ctx-{os.path.basename(date_str)}.pkl")
+
+
+def _save_ctx(date_str, ctx):
+    """Freeze the fully-computed render context so the report can later be
+    re-rendered through a NEWER template without re-pulling data ('restyle')."""
+    try:
+        import pickle
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(_ctx_path(date_str), "wb") as f:
+            pickle.dump(ctx, f, protocol=4)
+    except Exception as e:
+        app.logger.warning("ctx snapshot failed for %s: %s", date_str, e)
+
+
+def _load_ctx(date_str):
+    try:
+        import pickle
+        with open(_ctx_path(date_str), "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
 def _sheet_links_path(date_str):
     return os.path.join(REPORTS_DIR, f"sheet-links-{date_str}.json")
 
@@ -1122,6 +1150,7 @@ def _run_pull(send_email=False, start=None, end=None):
             _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
             _save_blocklist_check(saved, bl_xlsx)
             _save_sheet_links(saved, sheet_links)
+            _save_ctx(saved, ctx)
             base = request.host_url.rstrip("/")
             view_url = f"{base}/reports/{saved}"
             result = {"ok": True, "date": saved, "file": source_file,
@@ -1232,14 +1261,43 @@ def _serve_report(date):
     return send_file(path, mimetype="text/html")
 
 
+@app.route("/reports/<date>/rerender", methods=["POST"])
+def reports_rerender(date):
+    """Re-render a saved report's FROZEN data through the current template:
+    formatting/feature updates apply, the numbers stay exactly as pulled."""
+    import re
+    if not re.fullmatch(_REPORT_ID_RE, date or ""):
+        return jsonify({"ok": False, "error": "Bad report id."}), 400
+    ctx = _load_ctx(date)
+    if ctx is None:
+        return jsonify({"ok": False, "error": "No data snapshot for this report "
+                        "(saved before snapshots existed) — re-pull to refresh it."}), 404
+    ctx["report_id"] = date
+    try:
+        html = render_template("dashboard.html", **ctx)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Render failed: {e}"}), 500
+    path = os.path.join(REPORTS_DIR, f"insights-{date}.html")
+    try:
+        st = os.stat(path)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        os.utime(path, (st.st_atime, st.st_mtime))  # keep 'latest' ordering intact
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"{e}"}), 500
+    return jsonify({"ok": True}), 200
+
+
 @app.route("/reports/<date>/delete", methods=["POST"])
 def reports_delete(date):
-    """Delete a saved dashboard (and its saved watchlists) by date."""
+    """Delete a saved dashboard and every file that rides with it."""
     import re
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date or ""):
+    if not re.fullmatch(_REPORT_ID_RE, date or ""):
         return jsonify({"ok": False, "error": "Bad date."}), 400
     removed = []
-    for p in (os.path.join(REPORTS_DIR, f"insights-{date}.html"), _watchlists_path(date)):
+    for p in (os.path.join(REPORTS_DIR, f"insights-{date}.html"), _watchlists_path(date),
+              _blocklist_check_path(date), _sheet_links_path(date),
+              _selections_path(date), _ctx_path(date)):
         try:
             os.unlink(p)
             removed.append(os.path.basename(p))
