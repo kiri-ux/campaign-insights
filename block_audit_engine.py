@@ -472,14 +472,24 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         sub = cand[cand["placement_type"] == kind]
         if sub.empty:
             return pd.DataFrame(columns=["name", "app_id", "products", "impressions",
-                                         "clicks", "spend", "ttddv"])
+                                         "clicks", "spend", "ttddv", "raw_value"])
         sub = sub.assign(_ttddv=_ttddv_series(sub))
-        d = (sub.groupby("placement")
-             .agg(app_id=("app_id", "first"), products=("product", _products),
+        # Apps group by APP ID — junk families ship many distinct apps under the
+        # same display name ('Contacts - Android'), and grouping by name would
+        # collapse them into one row with an arbitrary id. Sites keep the domain.
+        if kind == "app":
+            _aid = sub["app_id"].astype(str).str.strip()
+            sub = sub.assign(_key=np.where(_aid.str.lower().isin(["", "na", "nan", "none"]),
+                                           sub["placement"].astype(str), _aid))
+        else:
+            sub = sub.assign(_key=sub["placement"].astype(str))
+        d = (sub.groupby("_key")
+             .agg(name=("placement", "first"), app_id=("app_id", "first"),
+                  products=("product", _products),
                   impressions=("impressions", "sum"), clicks=("clicks", "sum"),
                   conversions=("conversions", "sum"), spend=("spend", "sum"),
                   ttddv=("_ttddv", "max"), raw_value=("raw_value", "max"))
-             .reset_index().rename(columns={"placement": "name"}))
+             .reset_index(drop=True))
         d = d[~d["name"].isin(already.get(kind, set()))]
         # Also drop anything already covered by the external blocklist (what you've
         # pushed). AdLib enforcement lags in the data, so a freshly-blocked site can
