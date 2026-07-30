@@ -403,7 +403,8 @@
       var kind=cb.dataset.kind;
       var val=(kind==='site'?cleanSiteVal:cleanAppVal)(cb.dataset.val);
       if(!val) return;
-      var raw=(cb.dataset.raw||'').trim() || String(cb.dataset.val||'').trim() || val;
+      var raw=(cb.dataset.raw||'').trim();
+      if(!raw || raw.toLowerCase()==='nan' || raw.toLowerCase()==='none'){ raw = String(cb.dataset.val||'').trim() || val; }
       (kind==='site'?sites:apps).push(val);
       (kind==='site'?rzSites:rzApps).push(raw);
       routeTabs(cb.dataset.products, cb.dataset.flag).forEach(function(tab){

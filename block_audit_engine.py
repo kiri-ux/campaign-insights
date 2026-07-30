@@ -170,7 +170,11 @@ def _normalize(df, c):
     out["campaign"] = df[c["campaign"]].astype(str) if c.get("campaign") else "(not in export)"
     # IDs come out of Excel as floats ("12345.0") — normalize to clean strings.
     out["dsp"] = df[c["dsp"]].astype(str) if c.get("dsp") else ""
-    out["raw_value"] = df[c["raw_value"]].astype(str) if c.get("raw_value") else ""
+    # NaN from concat of frames with/without the column must become "", never
+    # the literal string "nan" (it would poison the RZ copy blocks).
+    out["raw_value"] = (df[c["raw_value"]].astype(str)
+                        .replace({"nan": "", "None": "", "NaT": "", "<NA>": ""})
+                        if c.get("raw_value") else "")
     out["campaign_id"] = (df[c["campaign_id"]].astype(str).str.strip()
                           .str.replace(r"\.0$", "", regex=True)
                           if c.get("campaign_id") else "")

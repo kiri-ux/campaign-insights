@@ -171,10 +171,10 @@ def clean_app_identity(df):
     pairs = raw.map(_split_name_id)
     ids = pairs.map(lambda t: t[1])
     changed = ids != raw
-    if not changed.any():
-        return df
     df = df.copy()
     df["Raw Value"] = raw  # exact source string — Reporting Zone matches on it
+    if not changed.any():
+        return df
     names = pairs.map(lambda t: t[0])
     for col in ("App Name", "Final App Name"):
         if col in df.columns:
