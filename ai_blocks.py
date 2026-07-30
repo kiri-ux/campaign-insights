@@ -25,7 +25,7 @@ MAX_CANDIDATES = int(os.environ.get("AI_MAX_CANDIDATES", "200"))
 BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "50"))
 MAX_WORKERS = int(os.environ.get("AI_MAX_WORKERS", "6"))
 FIELD = {"site": "Site Domain", "app": "App ID"}
-_COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "ttddv", "category", "reason"]
+_COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "ttddv", "raw_value", "category", "reason"]
 
 
 def to_adlib_filter(names, kind):
@@ -126,6 +126,7 @@ def _classify_batch(rows, kind, api_key, model):
             clk = r.get("clicks", 0) or 0
             out.append({"name": r["name"], "app_id": r.get("app_id", r["name"]),
                         "products": r.get("products", ""), "ttddv": bool(r.get("ttddv", False)),
+                        "raw_value": str(r.get("raw_value", "") or ""),
                         "impressions": impr, "clicks": clk,
                         "ctr": (clk / impr) if impr else 0, "spend": r["spend"],
                         "category": v.get("category", ""), "reason": v.get("reason", "")})

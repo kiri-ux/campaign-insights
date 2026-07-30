@@ -140,6 +140,7 @@ def _detect(df, kind):
         "campaign": _find(cols, ("campaign", "name"), exclude=("pool",)),
         "campaign_id": _find(cols, ("campaign", "id"), ("campaign", "#"), ("campaign", "number"), exclude=("pool",)),
         "dsp": _find(cols, ("dsp",)),
+        "raw_value": _find(cols, ("raw", "value")),
     }
 
 
@@ -169,6 +170,7 @@ def _normalize(df, c):
     out["campaign"] = df[c["campaign"]].astype(str) if c.get("campaign") else "(not in export)"
     # IDs come out of Excel as floats ("12345.0") — normalize to clean strings.
     out["dsp"] = df[c["dsp"]].astype(str) if c.get("dsp") else ""
+    out["raw_value"] = df[c["raw_value"]].astype(str) if c.get("raw_value") else ""
     out["campaign_id"] = (df[c["campaign_id"]].astype(str).str.strip()
                           .str.replace(r"\.0$", "", regex=True)
                           if c.get("campaign_id") else "")
@@ -256,7 +258,7 @@ def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0007, conv_rate_keep=0.00
     auto_app_blocks so it merges straight into the site block list.
     """
     cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
-            "conversions", "ttddv", "category", "reason"]
+            "conversions", "ttddv", "raw_value", "category", "reason"]
     if allp is None or not len(allp):
         return pd.DataFrame(columns=cols)
     site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
@@ -270,7 +272,7 @@ def auto_site_blocks(allp, min_impr=10000, ctr_floor=0.0007, conv_rate_keep=0.00
          .agg(products=("product", lambda s: ", ".join(sorted({str(p) for p in s if str(p).strip()}))),
               impressions=("impressions", "sum"), clicks=("clicks", "sum"),
               conversions=("conversions", "sum"), spend=("spend", "sum"),
-              ttddv=("_ttddv", "max"))
+              ttddv=("_ttddv", "max"), raw_value=("raw_value", "max"))
          .reset_index().rename(columns={"placement": "name"}))
     g = g[~g["name"].astype(str).str.strip().str.lower().isin({"na", "nan", "none", ""})]
     # Don't re-recommend a site already flagged "Block" or already on the master
@@ -301,7 +303,7 @@ def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=
     the ratio meaningless. Same schema as auto_app_blocks so it merges into the list.
     """
     cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
-            "conversions", "ttddv", "category", "reason"]
+            "conversions", "ttddv", "raw_value", "category", "reason"]
     if allp is None or not len(allp):
         return pd.DataFrame(columns=cols)
     site = allp[(allp["placement_type"] == "site") & (allp["impressions"] > 0)].copy()
@@ -314,7 +316,7 @@ def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=
     g = (site.groupby(["placement", "product"])
          .agg(impressions=("impressions", "sum"), clicks=("clicks", "sum"),
               conversions=("conversions", "sum"), spend=("spend", "sum"),
-              ttddv=("_ttddv", "max"))
+              ttddv=("_ttddv", "max"), raw_value=("raw_value", "max"))
          .reset_index())
     g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
     norms = (g.groupby("product").apply(
@@ -472,7 +474,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
              .agg(app_id=("app_id", "first"), products=("product", _products),
                   impressions=("impressions", "sum"), clicks=("clicks", "sum"),
                   conversions=("conversions", "sum"), spend=("spend", "sum"),
-                  ttddv=("_ttddv", "max"))
+                  ttddv=("_ttddv", "max"), raw_value=("raw_value", "max"))
              .reset_index().rename(columns={"placement": "name"}))
         d = d[~d["name"].isin(already.get(kind, set()))]
         # Also drop anything already covered by the external blocklist (what you've
@@ -509,7 +511,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             auto_rows.append(row)
     auto_app_blocks = pd.DataFrame(auto_rows, columns=[
         "name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
-        "ttddv", "category", "reason"])
+        "ttddv", "raw_value", "category", "reason"])
 
     # Combined placements grid: ALL delivery (blocked + non-blocked). Apps use the
     # display name (App ID when the name is NA). Carries last-served + blocked flag.

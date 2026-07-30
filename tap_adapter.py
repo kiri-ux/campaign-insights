@@ -174,6 +174,7 @@ def clean_app_identity(df):
     if not changed.any():
         return df
     df = df.copy()
+    df["Raw Value"] = raw  # exact source string — Reporting Zone matches on it
     names = pairs.map(lambda t: t[0])
     for col in ("App Name", "Final App Name"):
         if col in df.columns:
@@ -290,10 +291,12 @@ def split_ttddv(df, dsp_label="TTD/DV360"):
     sites = df[~isapp].copy()
     apps = df[isapp].copy()
     if len(sites):
+        sites["Raw Value"] = sites["App/URL"].astype(str)
         sites["Site Domain"] = ids[~isapp]
         sites["Final Site Domain Name"] = ids[~isapp]
         sites = sites.drop(columns=["App/URL", *[c for c in _TYPE_COLS if c in sites.columns]])
     if len(apps):
+        apps["Raw Value"] = apps["App/URL"].astype(str)
         apps["App Name"] = names[isapp]
         apps["Final App Name"] = names[isapp]
         apps["App ID"] = ids[isapp]
