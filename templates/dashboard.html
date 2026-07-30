@@ -185,6 +185,14 @@
     </table>
   {% endif %}
 
+  {% if sheet_audit %}
+    <h2>Block sheet audit <span class="sub">(sheet entries that can't match delivery — fix these on the Google Sheet)</span> <a class="dl" href="/download/sheet_audit.csv">CSV</a></h2>
+    <p class="note">These rows on your block sheet are malformed or misfiled, so they silently do nothing: composite values pushed before value-cleaning, values whose normalized form matches delivery while the raw doesn't, and app inventory filed in domain form. Apply the suggested fix directly on the sheet — the audit disappears once the entries are corrected.</p>
+    <table class="lalign paginate"><tr><th>Sheet value</th><th>On list(s)</th><th>Issue</th><th>Suggested fix</th></tr>
+    {% for r in sheet_audit %}<tr><td style="overflow-wrap:anywhere">{{ r.value }}</td><td>{{ r.tabs }}</td><td><span class="flag q">{{ r.issue }}</span></td><td>{{ r.suggestion }}</td></tr>{% endfor %}
+    </table>
+  {% endif %}
+
   {% if blocked_site_clients %}
     <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
     <p class="note">One row per client &amp; strategy. Click the count in <strong>Blocked</strong> to expand the blocklisted sites &amp; apps served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.{% if bsc_no_sid %} <strong style="color:#b3402a;">Strategy ID is blank for every row — no Campaign ID column was found in this export.</strong>{% endif %}</p>
@@ -219,7 +227,7 @@
       <div class="kpi"><div class="n">{{ ai.total_impr }}</div><div class="l">Impressions on rec blocks</div></div>
       <div class="kpi"><div class="n">{{ ai.total_clicks }}</div><div class="l">Clicks on rec blocks</div></div>
     </div>
-    <p class="note">{% if blocklist_check and blocklist_check.summary and blocklist_check.summary.matched %}<strong>{{ blocklist_check.summary.matched }} placements already on your block sheet are excluded from these recommendations</strong> — they're tracked in Master blocklist check instead. {% endif %}<span class="flag hi">High CTR</span> and <span class="flag lo">Low CTR</span> blocks require <strong>≥10,000 pooled impressions</strong>; <span class="flag q">Quality</span> blocks have <strong>no impression minimum</strong>. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
+    <p class="note">{% if blocklist_check and blocklist_check.matched %}<strong>{{ blocklist_check.matched }} placements already on your block sheet are excluded from these recommendations</strong> — they're tracked in Master blocklist check instead. {% endif %}<span class="flag hi">High CTR</span> and <span class="flag lo">Low CTR</span> blocks require <strong>≥10,000 pooled impressions</strong>; <span class="flag q">Quality</span> blocks have <strong>no impression minimum</strong>. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
        <span id="reviewstate" class="note" style="margin-right:10px"></span><button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
     {% if ai.sites %}
     <h2 style="font-size:14px">Recommended site blocks</h2>

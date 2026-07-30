@@ -564,6 +564,44 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     imp_df["match_key"] = np.where(imp_df["placement_type"] == "app",
                                    imp_df["app_id"].astype(str).str.strip().str.lower(),
                                    imp_df["placement"].astype(str).str.strip().str.lower())
+
+    # ---- Block sheet audit: find sheet entries that can't do their job -------
+    # After value-cleaning changes and the app-identity fix, some previously
+    # pushed rows are malformed: composite values ('Name (bundle.id)'), values
+    # whose normalized form matches delivery while the raw doesn't, and known
+    # app inventory filed as a site value. Surface them with a suggested fix.
+    _comp_re = re.compile(r"^(.*?)\s*\(([^()]+)\)\s*$")
+    _known_app_domains = {"cdn.desktop.aol.com"}
+    _site_keys = set(imp_df.loc[imp_df["placement_type"] == "site", "match_key"])
+    _app_keys = set(imp_df.loc[imp_df["placement_type"] == "app", "match_key"])
+    _all_keys = _site_keys | _app_keys
+    sheet_audit_rows = []
+    for _k, _e in (blocklist or {}).items():
+        _val = str(_e.get("value", _k)).strip()
+        _tabs = ", ".join(sorted(_e.get("tabs", []) or []))
+        _issue = _sugg = None
+        _m = _comp_re.match(_val)
+        if _m and ("." in _m.group(2) or re.fullmatch(r"\d{6,}", _m.group(2).strip())):
+            _clean = _m.group(2).strip()
+            _issue = "Composite value"
+            _sugg = f'Replace with "{_clean}"'
+            if _clean.lower() in _all_keys:
+                _sugg += " — the bare id has live delivery this period"
+        elif _k not in _all_keys:
+            _variants = {_k.replace(" ", ""), _k.lstrip(", "),
+                         _k[4:] if _k.startswith("www.") else _k}
+            _hit = next((v for v in _variants if v != _k and v in _all_keys), None)
+            if _hit:
+                _issue = "Value mismatch"
+                _sugg = f'Delivery matches "{_hit}" — update the value'
+        if _k in _known_app_domains and _k in _site_keys:
+            _issue = _issue or "App inventory in domain form"
+            _sugg = _sugg or "This is app inventory (AOL Desktop App) — verify it sits on app-type blocking"
+        if _issue:
+            sheet_audit_rows.append({"value": _val, "tabs": _tabs,
+                                     "issue": _issue, "suggestion": _sugg})
+    sheet_audit = pd.DataFrame(sheet_audit_rows,
+                               columns=["value", "tabs", "issue", "suggestion"])
     delivery_pp = (imp_df.groupby(["match_key", "placement_type", "product"])
                    .agg(impressions=("impressions", "sum"), spend=("spend", "sum"))
                    .reset_index())
@@ -724,6 +762,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
 
     return {
         "summary": summary,
+        "sheet_audit": sheet_audit,
         "offenders": offenders,
         "leak_by_bu": _rollup(leak, "bu"),
         "leak_by_client": _rollup(leak, "client"),

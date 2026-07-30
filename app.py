@@ -299,6 +299,10 @@ def _analyze_path(path=None, frames=None):
                     "matched": bc["matched"], "leaking_count": bc["leaking_count"],
                     "leaking_spend": bc["leaking_spend"], "rows": brows,
                 }
+            _sa = a.get("sheet_audit")
+            if _sa is not None and len(_sa):
+                _CACHE["sheet_audit.csv"] = _sa
+                ctx["sheet_audit"] = _sa.to_dict("records")
 
             # Separate grid: clients serving on blocklisted placements (verify their
             # block settings). Kept in `bsc_df` for the watchlist-xlsx cache below.
