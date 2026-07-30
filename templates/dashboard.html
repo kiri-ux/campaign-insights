@@ -185,14 +185,6 @@
     </table>
   {% endif %}
 
-  {% if sheet_audit %}
-    <h2>Block sheet audit <span class="sub">(sheet entries that can't match delivery — fix these on the Google Sheet)</span> <a class="dl" href="/download/sheet_audit.csv">CSV</a></h2>
-    <p class="note">These rows on your block sheet are malformed or misfiled, so they silently do nothing: composite values pushed before value-cleaning, values whose normalized form matches delivery while the raw doesn't, and app inventory filed in domain form. Apply the suggested fix directly on the sheet — the audit disappears once the entries are corrected.</p>
-    <table class="lalign paginate"><tr><th>Sheet value</th><th>On list(s)</th><th>Issue</th><th>Suggested fix</th></tr>
-    {% for r in sheet_audit %}<tr><td style="overflow-wrap:anywhere">{{ r.value }}</td><td>{{ r.tabs }}</td><td><span class="flag q">{{ r.issue }}</span></td><td>{{ r.suggestion }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
   {% if blocked_site_clients %}
     <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
     <p class="note">One row per client &amp; strategy. Click the count in <strong>Blocked</strong> to expand the blocklisted sites &amp; apps served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.{% if bsc_no_sid %} <strong style="color:#b3402a;">Strategy ID is blank for every row — no Campaign ID column was found in this export.</strong>{% endif %}</p>
@@ -257,6 +249,15 @@
 
   {% if not (audit or blocklist_check or blocked_site_clients or block_impact or block_impact_strategy or ai) %}
     <p class="note">No placement data for this window.</p>
+  {% endif %}
+  
+
+  {% if sheet_audit %}
+    <h2>Block sheet audit <span class="sub">(sheet entries that can't match delivery — fix these on the Google Sheet)</span> <a class="dl" href="/download/sheet_audit.csv">CSV</a></h2>
+    <p class="note">These rows on your block sheet are malformed or misfiled, so they silently do nothing: composite values pushed before value-cleaning, values whose normalized form matches delivery while the raw doesn't, and app inventory filed in domain form. Apply the suggested fix directly on the sheet — the audit disappears once the entries are corrected.</p>
+    <table class="lalign paginate"><tr><th>Sheet value</th><th>On list(s)</th><th>Issue</th><th>Suggested fix</th></tr>
+    {% for r in sheet_audit %}<tr><td style="overflow-wrap:anywhere">{{ r.value }}</td><td>{{ r.tabs }}</td><td><span class="flag q">{{ r.issue }}</span></td><td>{{ r.suggestion }}</td></tr>{% endfor %}
+    </table>
   {% endif %}
   </div><!-- /tab-all -->
 

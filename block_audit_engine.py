@@ -522,27 +522,40 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     def _fam_norm(n):
         return re.sub(r"\s*-\s*(android|ios|iphone|ipad)\s*$", "",
                       str(n).strip().lower()).strip()
+    _bundle_re = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+){2,}$")
+
+    def _dev_prefix(aid):
+        """Two-label developer prefix of a MOBILE bundle id ('com.easycalls' from
+        'com.easycalls.icontacts'), or None for non-bundle ids. CTV platform ids
+        (numeric, ASINs, hex) return None: the same channel app legitimately
+        carries different store ids per platform (Hulu on Roku/FireTV/etc.), so
+        those must never count toward a clone family."""
+        a = str(aid).strip().lower()
+        if not _bundle_re.match(a):
+            return None
+        return ".".join(a.split(".")[:2])
     try:
         from ai_blocks import _is_legit_fast as _fam_legit
     except Exception:
         _fam_legit = lambda n: False
     _fam_ids = {}
     if len(app_c):
-        _f = app_c.assign(_fn=app_c["name"].map(_fam_norm))
-        _f = _f[~_f["name"].map(_fam_legit)]
+        _f = app_c.assign(_fn=app_c["name"].map(_fam_norm),
+                          _pfx=app_c["app_id"].map(_dev_prefix))
+        _f = _f[~_f["name"].map(_fam_legit) & _f["_pfx"].notna()]
         for _fn, _g in _f.groupby("_fn"):
-            _n_ids = _g["app_id"].astype(str).nunique()
-            if _fn and _n_ids >= 3:
+            _n_dev = _g["_pfx"].nunique()
+            if _fn and _n_dev >= 3:  # >=3 DIFFERENT developers shipping one name
                 for _aid in _g["app_id"].astype(str):
-                    _fam_ids[_aid] = _n_ids
+                    _fam_ids[_aid] = _n_dev
 
     auto_rows = []
     for _, r in app_c.iterrows():
         cat, reason = classify_app_junk(r["name"])
         if not cat and str(r["app_id"]) in _fam_ids:
             cat = "Clone-family app"
-            reason = (f"{_fam_ids[str(r['app_id'])]} look-alike apps share this "
-                      f"name — clone-farm inventory")
+            reason = (f"{_fam_ids[str(r['app_id'])]} different developers ship "
+                      f"apps under this name — clone-farm inventory")
         if cat:
             row = r.to_dict()
             row["category"] = cat

@@ -150,26 +150,32 @@ def _merge_flagged(frames):
     metrics and gets a combined category ('MFA + High CTR') with the secondary
     reasons appended, so overlaps are visible instead of hidden."""
     merged = pd.concat(frames, ignore_index=True)
-    dup = merged.duplicated(subset=["name"], keep="first")
+    # De-dupe key: app_id when present (distinct apps legitimately share a
+    # display name — never collapse them), else name.
+    merged["_mk"] = merged.get("app_id", pd.Series("", index=merged.index)).astype(str)
+    merged.loc[merged["_mk"].isin(["", "nan", "None"]), "_mk"] = \
+        merged.loc[merged["_mk"].isin(["", "nan", "None"]), "name"].astype(str)
+    dup = merged.duplicated(subset=["_mk"], keep="first")
     if dup.any():
         primary = merged[~dup].copy()
         extras = merged[dup]
         add_cat, add_rsn = {}, {}
-        for name, g in extras.groupby("name"):
+        for name, g in extras.groupby("_mk"):
             add_cat[name] = list(dict.fromkeys(str(c) for c in g["category"]))
             add_rsn[name] = [f"{c}: {r}" for c, r in
                              zip(g["category"].astype(str), g["reason"].astype(str))]
         def _cat(row):
             base = str(row["category"])
-            extra = [c for c in add_cat.get(row["name"], []) if c and c != base]
+            extra = [c for c in add_cat.get(row["_mk"], []) if c and c != base]
             return " + ".join([base] + extra) if extra else base
         def _rsn(row):
-            ex = add_rsn.get(row["name"])
+            ex = add_rsn.get(row["_mk"])
             return f"{row['reason']} | Also: " + " · ".join(ex) if ex else row["reason"]
         primary["category"] = primary.apply(_cat, axis=1)
         primary["reason"] = primary.apply(_rsn, axis=1)
         merged = primary
-    return merged.sort_values("impressions", ascending=False).reset_index(drop=True)
+    return (merged.drop(columns=["_mk"], errors="ignore")
+            .sort_values("impressions", ascending=False).reset_index(drop=True))
 
 
 def merge_site_blocks(ai_sites, auto_low_sites, auto_high_sites=None):
