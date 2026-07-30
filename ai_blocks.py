@@ -201,6 +201,12 @@ def recommend_blocks(candidates, api_key=None, model=None,
 
     tasks = []  # (kind, rows)
     for kind, df in candidates.items():
+        # Review the BIGGEST placements: candidates arrive groupby-ordered
+        # (effectively alphabetical), so a plain head() would review "apps
+        # starting with a-c" and silently skip high-volume ones later in the
+        # alphabet. Sort by impressions before applying the cap.
+        if df is not None and len(df) and "impressions" in df.columns:
+            df = df.sort_values("impressions", ascending=False)
         rows = df.head(max_candidates).to_dict("records")
         for i in range(0, len(rows), batch_size):
             tasks.append((kind, rows[i:i + batch_size]))
