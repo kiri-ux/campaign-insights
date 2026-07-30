@@ -514,9 +514,35 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
 
     # Deterministic auto-block: gaming + junk + unresolved bundle apps (every run).
     app_c = candidates["app"]
+    # Clone-family detection: many DISTINCT app ids sharing one display name
+    # ("Contacts - Android" x14 bundles) is clone-farm inventory — a data
+    # pattern, not a judgment call, so flag it deterministically instead of
+    # hoping the AI infers it from one listing line at a time. Major FAST
+    # platforms are exempt (regional/platform variants legitimately share names).
+    def _fam_norm(n):
+        return re.sub(r"\s*-\s*(android|ios|iphone|ipad)\s*$", "",
+                      str(n).strip().lower()).strip()
+    try:
+        from ai_blocks import _is_legit_fast as _fam_legit
+    except Exception:
+        _fam_legit = lambda n: False
+    _fam_ids = {}
+    if len(app_c):
+        _f = app_c.assign(_fn=app_c["name"].map(_fam_norm))
+        _f = _f[~_f["name"].map(_fam_legit)]
+        for _fn, _g in _f.groupby("_fn"):
+            _n_ids = _g["app_id"].astype(str).nunique()
+            if _fn and _n_ids >= 3:
+                for _aid in _g["app_id"].astype(str):
+                    _fam_ids[_aid] = _n_ids
+
     auto_rows = []
     for _, r in app_c.iterrows():
         cat, reason = classify_app_junk(r["name"])
+        if not cat and str(r["app_id"]) in _fam_ids:
+            cat = "Clone-family app"
+            reason = (f"{_fam_ids[str(r['app_id'])]} look-alike apps share this "
+                      f"name — clone-farm inventory")
         if cat:
             row = r.to_dict()
             row["category"] = cat
