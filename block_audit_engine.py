@@ -658,8 +658,12 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
             a2["after_block"] = bd.notna() & sd.notna() & (sd > bd)
             a2["post_impr"] = np.where(a2["after_block"], a2["impressions"], 0)
             a2["post_spend"] = np.where(a2["after_block"], a2["spend"], 0)
+            _dn = a2["disp"].astype(str)
+            _ai = a2["app_id"].astype(str)
+            _same = _dn.str.strip().str.lower() == _ai.str.strip().str.lower()
             a2["display_name"] = np.where(a2["placement_type"] == "app",
-                                          a2["disp"].astype(str), a2["placement"].astype(str))
+                                          np.where(_same, _dn, _dn + " - " + _ai),
+                                          a2["placement"].astype(str))
             g = (a2.groupby("match_key")
                  .agg(name=("display_name", "first"), placement_type=("placement_type", "first"),
                       products=("product", _products), impressions=("impressions", "sum"),
