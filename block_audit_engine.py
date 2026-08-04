@@ -13,6 +13,7 @@ Business Unit (partner), Client, Product, and Strategy.
 import pandas as pd
 import numpy as np
 import re
+import os
 import datetime
 from openpyxl import load_workbook
 
@@ -538,6 +539,13 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         from ai_blocks import _is_legit_fast as _fam_legit
     except Exception:
         _fam_legit = lambda n: False
+    # Volume gates (env-tunable, no redeploy): a family only qualifies when its
+    # COMBINED impressions clear CLONE_FAMILY_MIN_IMPR — per-app thresholds are
+    # what clone farms are structured to slip under, so the family is the unit
+    # that must earn attention. Within a qualifying family, only members above
+    # CLONE_FAMILY_APP_MIN land on the list (keeps 1-impression rows off it).
+    _fam_min = float(os.environ.get("CLONE_FAMILY_MIN_IMPR", "2500"))
+    _app_min = float(os.environ.get("CLONE_FAMILY_APP_MIN", "100"))
     _fam_ids = {}
     if len(app_c):
         _f = app_c.assign(_fn=app_c["name"].map(_fam_norm),
@@ -545,17 +553,20 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         _f = _f[~_f["name"].map(_fam_legit) & _f["_pfx"].notna()]
         for _fn, _g in _f.groupby("_fn"):
             _n_dev = _g["_pfx"].nunique()
-            if _fn and _n_dev >= 3:  # >=3 DIFFERENT developers shipping one name
-                for _aid in _g["app_id"].astype(str):
-                    _fam_ids[_aid] = _n_dev
+            _fam_impr = float(_g["impressions"].sum())
+            if _fn and _n_dev >= 3 and _fam_impr >= _fam_min:
+                for _aid, _impr in zip(_g["app_id"].astype(str), _g["impressions"]):
+                    if float(_impr) >= _app_min:
+                        _fam_ids[_aid] = (_n_dev, _fam_impr)
 
     auto_rows = []
     for _, r in app_c.iterrows():
         cat, reason = classify_app_junk(r["name"])
         if not cat and str(r["app_id"]) in _fam_ids:
+            _nd, _fi = _fam_ids[str(r["app_id"])]
             cat = "Clone-family app"
-            reason = (f"{_fam_ids[str(r['app_id'])]} different developers ship "
-                      f"apps under this name — clone-farm inventory")
+            reason = (f"{_nd} different developers ship apps under this name "
+                      f"({_fi:,.0f} family impressions) — clone-farm inventory")
         if cat:
             row = r.to_dict()
             row["category"] = cat

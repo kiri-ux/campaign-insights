@@ -343,6 +343,21 @@ def _analyze_path(path=None, frames=None):
             if len(rec_site) and "impressions" in rec_site:
                 rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
             rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
+            # Volume floor on QUALITY recommendations (env QUALITY_MIN_IMPR,
+            # default 1000): tiny placements aren't worth review time — EXCEPT
+            # gaming inventory, which stays block-by-default at any volume, and
+            # CTR flags, which carry their own >=10K pooled requirement.
+            _qmin = float(os.environ.get("QUALITY_MIN_IMPR", "1000"))
+            def _qfloor(df):
+                if df is None or not len(df) or "impressions" not in df.columns:
+                    return df
+                _cat = df.get("category", pd.Series("", index=df.index)).astype(str)
+                keep = (pd.to_numeric(df["impressions"], errors="coerce").fillna(0) >= _qmin) \
+                    | _cat.str.contains("Gaming", case=False, na=False) \
+                    | _cat.str.contains("High CTR|Low CTR", case=False, na=False)
+                return df[keep]
+            rec_site = _qfloor(rec_site)
+            rec_app = _qfloor(rec_app)
             # Drop anything you've previously unchecked (logged to the Excluded tab),
             # so it stops being recommended on every upload.
             if excluded:

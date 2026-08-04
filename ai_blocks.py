@@ -104,6 +104,11 @@ def _classify_batch(rows, kind, api_key, model):
         f"- legitimate niche content or apps with real user bases: horoscopes/astrology, "
         f"reading/novel apps, recipes, games from real studios, utilities that do what they say\n"
         f"- mainstream news, weather, sports, or local business/organization sites\n"
+        f"- apps from major brands and publishers (Yahoo, ESPN, CBS, Peacock, etc.) — "
+        f"and note fantasy sports is NOT gambling\n"
+        f"- widely-used mainstream apps even where their licensing model is debated "
+        f"(e.g. well-known music streamers) — legal controversy is not an "
+        f"account-wide quality problem\n"
         f"When unsure, do not flag.\n\n"
         f"Return ONLY a JSON array (no prose). For each placement to BLOCK include "
         f'{{"n": <line number>, "reason": "<under 12 words>", "category": "<2-4 words>"}}. '
