@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative QA — BARCK+ Insights</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--atlas:#002D58;--velocity:#0066B3;--gold:#F1B434;--parchment:#FDFBF7;
+        --ink:#16283B;--muted:#5B6B7C;--line:#D9DFE6;--bg:#FDFBF7;--card:#FFFFFF;
+        --warn:#B42318;--warnbg:#fbeeea;
+        --font-head:'Barlow Condensed',Arial,sans-serif;--font-body:'Barlow',Arial,sans-serif;}
+  *{box-sizing:border-box}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 0 40px;}
+  header.brand{background:var(--atlas);color:#fff;padding:16px 24px;border-bottom:4px solid var(--gold);position:sticky;top:0;z-index:95;}
+  header.brand .hrow{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:baseline;gap:16px;}
+  header.brand h1{margin:0;font-family:var(--font-head);font-weight:700;font-size:24px;letter-spacing:.04em;text-transform:uppercase;color:#fff;}
+  header.brand .ver{font-size:11px;color:#7E93A8;margin-left:auto;}
+  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding:14px 12px 0;}
+  a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
+  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 4px;color:var(--atlas);text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
+  h2{font-family:var(--font-head);font-size:17px;margin:28px 0 10px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+  h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;text-transform:none;letter-spacing:0;}
+  .cards{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
+  .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .kpi .n{font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--atlas);}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px;}
+  .kpi.warn{background:var(--warnbg);border-color:#f3cfc9;}
+  .kpi.warn .n{color:var(--warn);}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left;}
+  th{background:#F3F6F9;color:var(--atlas);font-family:var(--font-head);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
+  tr:last-child td{border-bottom:0;}
+  .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
+  .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
+  .err{background:var(--warnbg);border:1px solid #f3cfc9;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
+  .flag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;}
+  .flag.hi{background:#ffe9e4;color:#b42318;}
+  .flag.lo{background:#fff1d6;color:#8a5a00;}
+  .flag.q{background:#ece8f6;color:#5b3fa3;}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin:1px 2px 1px 0;letter-spacing:.02em;}
+  .srcline{color:var(--muted);font-size:13px;margin:0 0 14px;}
+</style>
+</head>
+<body>
+<header class="brand"><div class="hrow"><h1>adtini · Creative QA</h1><span class="ver">build {{ build_version }}</span></div></header>
+{% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
+<div class="wrap">
+  <a class="back" href="/">&larr; Home</a>
+  <h1>Creative QA</h1>
+  <p class="srcline">{% if source %}Source: <strong>{{ source }}</strong>{% else %}Newest creative-insights export{% endif %}
+     &middot; <a class="dl" href="/creative" style="margin-left:0">re-run</a></p>
+
+  {% for e in errors %}{% if e %}<div class="err">{{ e }}</div>{% endif %}{% endfor %}
+  {% if message %}<p class="note">{{ message }}</p>{% endif %}
+
+  {% include "_creative_qa.html" %}
+</div>
+</body>
+</html>

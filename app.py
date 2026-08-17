@@ -17,6 +17,7 @@ import pandas as pd
 
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
+from creative_engine import audit_creatives, alert_subject
 from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks, merge_site_blocks
 from product_map import build_pmap
@@ -139,13 +140,24 @@ def version():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     wb = request.files.get("insights_workbook")
+    cf = request.files.get("creative_file")
     if not (wb and wb.filename):
-        return render_template("dashboard.html", pmap=PMAP, errors=["Upload the Insights workbook (.xlsx)."])
+        if cf and cf.filename:  # creative-only upload → the standalone QA page
+            return _analyze_creative_upload(cf)
+        return render_template("dashboard.html", pmap=PMAP,
+                               errors=["Upload the Insights workbook (.xlsx)."])
+    creative_df = None
+    if cf and cf.filename:
+        try:
+            from tap_adapter import read_creative_flat
+            creative_df = read_creative_flat(cf.read(), cf.filename)
+        except Exception:
+            creative_df = None
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     wb.save(tmp.name)
     tmp.close()
     try:
-        ctx = _analyze_path(tmp.name)
+        ctx = _analyze_path(tmp.name, creative_df=creative_df)
     finally:
         try:
             os.unlink(tmp.name)
@@ -155,9 +167,11 @@ def analyze():
     return render_template("dashboard.html", **ctx)
 
 
-def _analyze_path(path=None, frames=None):
+def _analyze_path(path=None, frames=None, creative_df=None):
     """Run the full analysis and return the template ctx. Pass either an .xlsx
-    `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read)."""
+    `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read).
+    `creative_df` is the optional creative-insights export (its own grain — it
+    feeds the Creative QA tab only and never touches the placement analysis)."""
     # Free the previous run's cached DataFrames before loading a new dataset —
     # every MB matters on a small instance, and disk-persisted CSVs still serve
     # downloads for saved reports while the new run repopulates the cache.
@@ -171,6 +185,7 @@ def _analyze_path(path=None, frames=None):
            "low_ctr_sites": None, "low_ctr_sites_total": 0, "low_ctr_sites_acct_blocked": 0,
            "blocked_site_clients": None, "rec_high": None, "rec_low": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
+           "creative": None,
            "errors": []}
     perf_bu = pd.DataFrame()
     cflag = pd.DataFrame()
@@ -615,6 +630,20 @@ def _analyze_path(path=None, frames=None):
                 }
         except Exception as e:
             ctx["errors"].append(f"Exchange analysis: {e}")
+
+        # Creative QA — vendor data-integrity check on the creative-insights
+        # export. Independent grain: a failure here must never take the
+        # placement dashboard down with it.
+        try:
+            if creative_df is not None and len(creative_df):
+                ctx["creative"] = _creative_ctx(creative_df)
+                if ctx["creative"] is None:
+                    ctx["errors"].append(
+                        "Creative QA: the creative file has no Creative Name column — "
+                        "check that the creative-insights export layout hasn't changed.")
+        except Exception as e:
+            ctx["errors"].append(f"Creative QA: {e}")
+
         # Persist every cached CSV to disk so /download links keep working after the
         # in-memory cache is cleared (next run) or the process restarts (e.g. saved
         # reports served later). The latest analysis's CSVs are always available.
@@ -623,6 +652,36 @@ def _analyze_path(path=None, frames=None):
         gc.collect()
 
     return ctx
+
+
+def _creative_ctx(creative_df):
+    """Run the creative audit on a frame and shape it for the template.
+    Returns None if the file isn't a creative export (no Creative Name column)."""
+    cr = audit_creatives(creative_df)
+    if not cr:
+        return None
+    _CACHE_CREATIVE["latest"] = {"cr": cr, "source": "pull"}
+    return _creative_ctx_from(cr)
+
+
+def _creative_xlsx_bytes(cr):
+    """One-sheet-per-table workbook of the creative findings — what gets attached
+    to the vendor alert email."""
+    if not cr:
+        return None
+    sheets = [("Blank creative campaigns", cr["blank_campaigns"]),
+              ("Blank creative rows", cr["blank_rows"].head(50000)),
+              ("By client", cr["by_client"])]
+    sheets += [(k[:31], v.head(20000)) for k, v in cr["tables"].items() if k != "blank_creative"]
+    sheets = [(n, d) for n, d in sheets if d is not None and len(d)]
+    if not sheets:
+        return None
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
+        for name, d in sheets:
+            d.to_excel(xl, sheet_name=name[:31], index=False)
+        _autosize_columns(xl)
+    return buf.getvalue()
 
 
 REPORTS_DIR = os.environ.get("REPORTS_DIR", os.path.join(tempfile.gettempdir(), "insights_reports"))
@@ -947,7 +1006,8 @@ def ui_s3dates():
     try:
         from s3_pull import list_available_dates
         inv = list_available_dates()
-        days = [{"date": d, "complete": bool(v["sites"] and v["apps"])}
+        days = [{"date": d, "complete": bool(v["sites"] and v["apps"]),
+                 "creatives": v.get("creatives", 0)}
                 for d, v in sorted(inv.items())]
         return jsonify({"ok": True, "days": days}), 200
     except Exception as e:
@@ -996,6 +1056,209 @@ def ui_email():
     return jsonify({"ok": True, "date": date, "view_url": view_url, "email": status}), 200
 
 
+def _load_creative_frame(start=None, end=None):
+    """Fetch the creative-insights export(s) from S3 and return (df, source_label).
+    With start/end, pools every creative file in the window; otherwise takes the
+    newest one and trims to DEFAULT_PULL_DAYS of delivery."""
+    from s3_pull import list_range, get_bytes, fetch_latest_creative
+    from tap_adapter import read_creative_flat, combine_creatives, filter_date_range
+    if start and end:
+        *_ignored, cmetas, _capped = list_range(start, end)
+        if not cmetas:
+            return None, None
+        dfs = []
+        for m in cmetas:
+            dfs.append(read_creative_flat(get_bytes(m["key"]), m["name"]))
+            gc.collect()
+        df = filter_date_range(combine_creatives(dfs), start, end)
+        return df, f"{len(cmetas)} creative file(s) pooled ({start} → {end})"
+    name, data, _d = fetch_latest_creative()
+    if not data:
+        return None, None
+    df = read_creative_flat(data, name)
+    data = None
+    gc.collect()
+    trim_days = int(os.environ.get("CREATIVE_PULL_DAYS", os.environ.get("DEFAULT_PULL_DAYS", "7")))
+    if trim_days > 0 and df is not None and len(df) and "Date" in df.columns:
+        maxd = pd.to_datetime(df["Date"], errors="coerce").max()
+        if pd.notna(maxd):
+            df = filter_date_range(df,
+                                   (maxd - pd.Timedelta(days=trim_days - 1)).date().isoformat(),
+                                   maxd.date().isoformat())
+    return df, name
+
+
+def _send_creative_alert(cr, source_label, view_url=None):
+    """Email the creative-name failures with the findings workbook attached.
+    No-op (returns a reason string) unless EMAIL_FROM/EMAIL_TO are configured."""
+    try:
+        import emailer
+        if not emailer.configured():
+            return "skipped (EMAIL_FROM/EMAIL_TO not set)"
+        s = cr["summary"]
+        label = (f"{s.get('window_start')} → {s.get('window_end')}"
+                 if s.get("window_start") else (source_label or ""))
+        rows = cr["blank_campaigns"].head(25)
+        def _tr(r):
+            tds = "".join(
+                f"<td style='padding:6px 10px;border-bottom:1px solid #e6e6e6'>{r.get(c, '')}</td>"
+                for c in ("client", "product", "campaign", "campaign_id", "coverage"))
+            return ("<tr>" + tds +
+                    f"<td style='padding:6px 10px;border-bottom:1px solid #e6e6e6;text-align:right'>"
+                    f"{int(r.get('impressions', 0)):,}</td>"
+                    f"<td style='padding:6px 10px;border-bottom:1px solid #e6e6e6;text-align:right'>"
+                    f"${float(r.get('spend', 0)):,.2f}</td></tr>")
+        body = f"""
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#12213a">
+          <h2 style="margin:0 0 4px">Creative QA — blank creative names</h2>
+          <p style="margin:0 0 14px;color:#5a6a7e">Source: {source_label or 'creative-insights export'} &middot; {label}</p>
+          <p><strong>{s['blank_rows']:,}</strong> row(s) across
+             <strong>{s['blank_campaigns']:,}</strong> campaign(s) came through with no creative name
+             ({s['blank_campaigns_delivering']:,} of them still delivering) —
+             <strong>{s['blank_impressions']:,}</strong> impressions and
+             <strong>${s['blank_spend']:,.2f}</strong> of spend can't be attributed to a creative.</p>
+          <table style="border-collapse:collapse;font-size:13px">
+            <tr style="background:#f4f6f9;text-align:left">
+              <th style="padding:6px 10px">Client</th><th style="padding:6px 10px">Product</th>
+              <th style="padding:6px 10px">Campaign</th><th style="padding:6px 10px">Campaign ID</th>
+              <th style="padding:6px 10px">Affected</th>
+              <th style="padding:6px 10px;text-align:right">Impressions</th>
+              <th style="padding:6px 10px;text-align:right">Spend</th></tr>
+            {''.join(_tr(r) for r in rows.to_dict('records'))}
+          </table>
+          {f'<p style="margin-top:14px">Showing 25 of {len(cr["blank_campaigns"]):,} — full list attached.</p>' if len(cr['blank_campaigns']) > 25 else ''}
+          {f'<p style="margin-top:14px"><a href="{view_url}">Open the dashboard</a></p>' if view_url else ''}
+        </div>"""
+        xlsx = _creative_xlsx_bytes(cr)
+        return emailer.send_email(alert_subject(s, label), body, attachment=xlsx,
+                                  attachment_name=f"creative QA_{_range_label(s.get('window_end') or 'latest')}.xlsx")
+    except Exception as e:
+        app.logger.warning("Creative alert email failed: %s", e)
+        return f"error: {e}"
+
+
+def _creative_check(start=None, end=None, send_email=None):
+    """Run the standalone creative QA check. Returns (result_dict, status).
+    send_email=None means 'email only if something is wrong' (the default for
+    the scheduled route)."""
+    if not os.environ.get("S3_BUCKET", "").strip():
+        return {"ok": False, "error": "S3 source not configured."}, 400
+    try:
+        df, source = _load_creative_frame(start, end)
+    except Exception as e:
+        return {"ok": False, "error": f"Source error: {e}"}, 502
+    if df is None or not len(df):
+        return {"ok": True, "skipped": True,
+                "message": "No creative-insights export found for that window."}, 200
+    cr = audit_creatives(df)
+    if not cr:
+        return {"ok": False, "error": "That file has no Creative Name column — "
+                                      "the creative-insights layout may have changed."}, 422
+    s = cr["summary"]
+    _CACHE_CREATIVE["latest"] = {"cr": cr, "source": source}
+    emailed = None
+    should = (s["blank_rows"] > 0) if send_email is None else bool(send_email)
+    if should:
+        emailed = _send_creative_alert(cr, source)
+    return {"ok": True, "source": source, "status": s["status"],
+            "window": [s.get("window_start"), s.get("window_end")],
+            "rows": s["rows"], "blank_rows": s["blank_rows"],
+            "blank_campaigns": s["blank_campaigns"],
+            "blank_campaigns_delivering": s["blank_campaigns_delivering"],
+            "blank_impressions": s["blank_impressions"],
+            "blank_spend": round(s["blank_spend"], 2),
+            "issues": s["issues"], "email": emailed}, 200
+
+
+_CACHE_CREATIVE = {}  # last standalone creative run, for the /creative page
+
+
+def _analyze_creative_upload(cf):
+    """Creative-insights file uploaded on its own — render the standalone QA page."""
+    from tap_adapter import read_creative_flat
+    try:
+        df = read_creative_flat(cf.read(), cf.filename)
+        cr = audit_creatives(df)
+    except Exception as e:
+        return render_template("creative.html", pmap=PMAP, creative=None,
+                               source=cf.filename, errors=[f"Could not read that file: {e}"])
+    if not cr:
+        return render_template(
+            "creative.html", pmap=PMAP, creative=None, source=cf.filename,
+            errors=["No Creative Name column in that file — is it the creative-insights export?"])
+    _CACHE_CREATIVE["latest"] = {"cr": cr, "source": cf.filename}
+    return render_template("creative.html", pmap=PMAP, creative=_creative_ctx_from(cr),
+                           source=cf.filename, errors=[])
+
+
+@app.route("/creative")
+def creative_page():
+    """Standalone Creative QA page — pulls the newest creative-insights export and
+    renders just the creative checks. Optional ?start=&end= to pool a window,
+    ?email=1 to force the alert even when clean."""
+    start = (request.args.get("start") or "").strip() or None
+    end = (request.args.get("end") or "").strip() or None
+    force_email = request.args.get("email") in ("1", "true", "yes")
+    result, status = _creative_check(start, end, send_email=True if force_email else False)
+    cached = _CACHE_CREATIVE.get("latest") or {}
+    cr = cached.get("cr")
+    ctx = {"pmap": PMAP, "creative": _creative_ctx_from(cr) if cr else None,
+           "source": cached.get("source"), "errors": [] if result.get("ok") else
+           [result.get("error") or result.get("message")],
+           "message": result.get("message")}
+    return render_template("creative.html", **ctx), (200 if status == 200 else status)
+
+
+@app.route("/creative/check", methods=["GET", "POST"])
+def creative_check_route():
+    """Scheduled/headless creative QA. Auth via ?key= matching INGEST_KEY.
+    Emails only when something is wrong, so it's safe to run daily.
+    ?email=always to email every run, ?email=never to never email."""
+    key = os.environ.get("INGEST_KEY", "").strip()
+    if key and request.args.get("key", "") != key:
+        return jsonify({"ok": False, "error": "Unauthorized (bad or missing key)."}), 401
+    mode = (request.args.get("email") or "").strip().lower()
+    send = True if mode == "always" else False if mode == "never" else None
+    start = (request.args.get("start") or "").strip() or None
+    end = (request.args.get("end") or "").strip() or None
+    result, status = _creative_check(start, end, send_email=send)
+    return jsonify(result), status
+
+
+def _creative_ctx_from(cr, persist=True):
+    """Template ctx from an already-run audit; caches the CSVs the tab links to."""
+    money, ints = ["spend"], ["blank_rows", "impressions", "clicks", "campaigns"]
+    _CACHE["creative_blank_campaigns.csv"] = cr["blank_campaigns"]
+    _CACHE["creative_blank_rows.csv"] = cr["blank_rows"]
+    if len(cr["by_client"]):
+        _CACHE["creative_blank_by_client.csv"] = cr["by_client"]
+    for key, tbl in cr["tables"].items():
+        if key != "blank_creative":
+            _CACHE[f"creative_{key}.csv"] = tbl
+    if persist:
+        _persist_download_csvs()
+    return {
+        "summary": cr["summary"], "checks": cr["checks"],
+        "campaigns": _fmt(cr["blank_campaigns"].head(300), money_cols=money,
+                          int_cols=ints).to_dict("records") if len(cr["blank_campaigns"]) else [],
+        "campaigns_total": int(len(cr["blank_campaigns"])),
+        "by_client": _fmt(cr["by_client"].head(50), money_cols=money,
+                          int_cols=ints).to_dict("records") if len(cr["by_client"]) else [],
+    }
+
+
+@app.route("/download_creative_qa.xlsx")
+def download_creative_qa():
+    cached = (_CACHE_CREATIVE.get("latest") or {}).get("cr")
+    data = _creative_xlsx_bytes(cached) if cached else None
+    if data is None:
+        abort(404)
+    return send_file(io.BytesIO(data),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=f"creative QA_{_CACHE.get('report_range', 'latest')}.xlsx")
+
+
 def _run_pull(send_email=False, start=None, end=None):
     """Pull latest data (S3 two files -> Graph -> IMAP), analyze, save a dated
     report, optionally email. When start/end (ISO dates) are given and S3 is the
@@ -1009,16 +1272,29 @@ def _run_pull(send_email=False, start=None, end=None):
         workbook_path = None
         cleanup = []
         try:
+            creative_df = None
             if os.environ.get("S3_BUCKET", "").strip():
-                from s3_pull import fetch_two, list_range, get_bytes
+                from s3_pull import fetch_two, list_range, get_bytes, fetch_latest_creative
                 from tap_adapter import (read_flat, build_frames, combine_flats,
-                                         filter_date_range, split_ttddv)
+                                         filter_date_range, split_ttddv,
+                                         read_creative_flat, combine_creatives)
                 if start and end:
-                    smetas, ametas, tmetas, capped = list_range(start, end)
+                    smetas, ametas, tmetas, cmetas, capped = list_range(start, end)
                     if not (smetas and ametas):
                         have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
                                 "message": f"No complete site+app file pairs dated {start} → {end} (found: {have})."}, 200
+                    # Creative QA rides along on the same window (own grain, own tab)
+                    cdfs = []
+                    for m in cmetas:
+                        b = get_bytes(m["key"])
+                        cdfs.append(read_creative_flat(b, m["name"]))
+                        b = None
+                        gc.collect()
+                    if cdfs:
+                        creative_df = filter_date_range(combine_creatives(cdfs), start, end)
+                        cdfs = None
+                        gc.collect()
                     sdfs, adfs = [], []
                     for metas, acc in ((smetas, sdfs), (ametas, adfs)):
                         for m in metas:
@@ -1048,6 +1324,7 @@ def _run_pull(send_email=False, start=None, end=None):
                     date_str = f"{start}_to_{end}"
                     source_file = (f"{len(smetas)} site + {len(ametas)} app"
                                    + (f" + {len(tmetas)} TTD/DV360" if tmetas else "")
+                                   + (f" + {len(cmetas)} creative" if cmetas else "")
                                    + f" files pooled ({start} → {end})"
                                    + (" — oldest files trimmed by S3_RANGE_MAX_FILES cap" if capped else ""))
                 else:
@@ -1088,7 +1365,16 @@ def _run_pull(send_email=False, start=None, end=None):
                     frames = build_frames(sdf, adf)
                     sdf = adf = None
                     gc.collect()
+                    # Newest creative export, trimmed to the same delivery window
+                    cname, cbytes, _cdate = fetch_latest_creative()
+                    if cbytes:
+                        creative_df = read_creative_flat(cbytes, cname)
+                        cbytes = None
+                        if trim_days > 0 and maxd is not None:
+                            creative_df = filter_date_range(creative_df, cut_s, cut_e)
+                        gc.collect()
                     source_file = f"{sname} + {aname}" + (f" + {tname}" if tname else "") \
+                        + (f" + {cname}" if cname else "") \
                         + (f" (last {trim_days} delivery days)" if trim_days > 0 else "")
             else:
                 if os.environ.get("GRAPH_CLIENT_ID", "").strip():
@@ -1113,8 +1399,8 @@ def _run_pull(send_email=False, start=None, end=None):
             return {"ok": False, "error": f"Source error: {e}"}, 502
 
         try:
-            ctx = _analyze_path(workbook_path, frames=frames)
-            frames = None
+            ctx = _analyze_path(workbook_path, frames=frames, creative_df=creative_df)
+            frames = creative_df = None
             # Name the report by the DELIVERY date range actually in the data,
             # not the export drop date — multiple same-day pulls of different
             # windows get distinct names, while re-pulling the same window
@@ -1170,6 +1456,21 @@ def _run_pull(send_email=False, start=None, end=None):
             view_url = f"{base}/reports/{saved}"
             result = {"ok": True, "date": saved, "file": source_file,
                       "view_url": view_url, "latest_url": f"{base}/reports/latest"}
+            if ctx.get("creative"):
+                _cs = ctx["creative"]["summary"]
+                result["creative"] = {"status": _cs["status"],
+                                      "blank_rows": _cs["blank_rows"],
+                                      "blank_campaigns": _cs["blank_campaigns"],
+                                      "blank_impressions": _cs["blank_impressions"]}
+                # Blank creative names are a vendor error we want to catch the day
+                # it happens — alert on the scheduled run without waiting for
+                # anyone to open the dashboard.
+                if send_email and _cs["blank_rows"] and \
+                        os.environ.get("CREATIVE_ALERT", "1").strip() not in ("0", "false", "no"):
+                    _cached = (_CACHE_CREATIVE.get("latest") or {}).get("cr")
+                    if _cached:
+                        result["creative"]["email"] = _send_creative_alert(
+                            _cached, source_file, view_url)
             if send_email:
                 result["email"] = _send_weekly_email(saved, view_url, xlsx, bl_xlsx, sheet_links)
             return result, 200

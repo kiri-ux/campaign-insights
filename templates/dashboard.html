@@ -140,6 +140,7 @@
     <button class="tabbtn active" data-tab="all" type="button">All Placements</button>
     <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
     <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
+    <button class="tabbtn" data-tab="creative" type="button">Creative QA{% if creative and creative.summary.blank_rows %}<span class="ct" style="background:#ffe9e4;color:#b42318;font-weight:700;padding:1px 7px;border-radius:99px">{{ creative.summary.blank_campaigns }} blank</span>{% endif %}</button>
     {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
     <span class="pillgroup">
       {% if sheet_links and sheet_links.watchlists %}<a class="pilllink pill-blue" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer Watchlists</a>{% endif %}
@@ -338,6 +339,13 @@
     </table></div>
   {% endif %}
   </div><!-- /tab-low -->
+
+  <!-- ==================== CREATIVE QA TAB ==================== -->
+  <div class="tabpane" id="tab-creative" style="display:none">
+    <h2 class="tabhead">Creative QA
+      <span class="sub">(vendor data check on the creative-insights export — is every delivering creative actually named?)</span></h2>
+    {% include "_creative_qa.html" %}
+  </div><!-- /tab-creative -->
 
 </div>
 <script>

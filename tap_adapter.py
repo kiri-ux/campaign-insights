@@ -67,10 +67,11 @@ _CANON_MAP = {_canon(k): v for k, v in _COLMAP.items()}
 _CANON_MAP.update({_canon(v): v for v in _COLMAP.values()})
 
 
-def _normalize_headers(df):
+def _normalize_headers(df, canon_map=None):
     """Rename export headers to the Title Case names the engines use, matching
     on canonical form so 'Campaign Id', 'campaign_id', 'CAMPAIGN ID' all work."""
-    ren = {c: _CANON_MAP[_canon(c)] for c in df.columns if _canon(c) in _CANON_MAP}
+    cmap = canon_map or _CANON_MAP
+    ren = {c: cmap[_canon(c)] for c in df.columns if _canon(c) in cmap}
     return df.rename(columns=ren) if ren else df
 
 
@@ -104,14 +105,38 @@ def _prune_and_downcast(df):
     return df
 
 
-def _wanted_engine_name(header):
+# --- creative-insights export ---------------------------------------------
+# Creative-grain export (S3 prefix 'creative-insights'): one row per date x
+# campaign x creative. Same dimensions as the site/app exports plus creative
+# identity and the campaign pool. Kept in its OWN map/keep list so creative
+# columns can never change what the site/app readers materialize.
+_CREATIVE_EXTRA = {
+    "creative_name": "Creative Name", "creative": "Creative Name",
+    "creative_title": "Creative Name", "ad_name": "Creative Name",
+    "creative_id": "Creative ID", "creative_size": "Creative Size",
+    "creative_type": "Creative Type",
+    "campaign_pool_name": "Campaign Pool Name",
+    "campaign_pool_id": "Campaign Pool ID",
+}
+_CREATIVE_COLMAP = dict(_COLMAP, **_CREATIVE_EXTRA)
+_CREATIVE_CANON = {_canon(k): v for k, v in _CREATIVE_COLMAP.items()}
+_CREATIVE_CANON.update({_canon(v): v for v in _CREATIVE_COLMAP.values()})
+_CREATIVE_KEEP = ["Date", "Client Business Unit", "Client", "Product 2",
+                  "Strategy Type", "Strategy Name", "Creative Name", "Creative ID",
+                  "Creative Size", "Creative Type", "Campaign Pool Name",
+                  "Campaign Pool ID", "Campaign ID", "Impressions", "Clicks", "CTR",
+                  "Post Click Conversions", "Post View Conversions", "CPM",
+                  "Billable Spend", "DSP"]
+
+
+def _wanted_engine_name(header, canon_map=None, keep=None):
     """Engine column name for a raw export header, or None if we don't use it."""
     cn = _canon(header)
-    name = _CANON_MAP.get(cn)
-    return name if name in _KEEP else None
+    name = (canon_map or _CANON_MAP).get(cn)
+    return name if name in (keep if keep is not None else _KEEP) else None
 
 
-def _read_xlsx_slim(bio):
+def _read_xlsx_slim(bio, canon_map=None, keep=None):
     """Stream the first worksheet in read_only mode, materializing ONLY the
     columns the engines use. pandas.read_excel builds every one of the export's
     ~30+ columns before we prune — on a 385k-row file that's the single biggest
@@ -128,7 +153,7 @@ def _read_xlsx_slim(bio):
         for i, h in enumerate(header):
             if h is None:
                 continue
-            name = _wanted_engine_name(h)
+            name = _wanted_engine_name(h, canon_map, keep)
             if name and name not in wanted.values():
                 wanted[i] = name
         if not wanted:
@@ -200,6 +225,67 @@ def read_flat(data, filename=""):
     else:
         df = _read_xlsx_slim(bio)
     return clean_app_identity(_prune_and_downcast(_normalize_headers(df)))
+
+
+def _prune_creative(df):
+    """Prune/downcast a creative export. Deliberately does NOT touch Creative
+    Name: blanks are the thing we're hunting, so they stay exactly as the vendor
+    sent them (NaN stays NaN, whitespace stays whitespace) and the column is
+    never categorized or filled."""
+    keep = [c for c in _CREATIVE_KEEP if c in df.columns]
+    df = df[keep].copy()
+    for c in ("Impressions", "Clicks", "Post Click Conversions", "Post View Conversions"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    if "Billable Spend" in df.columns:
+        df["Billable Spend"] = pd.to_numeric(df["Billable Spend"], errors="coerce").fillna(0.0)
+    for c in ("CTR", "CPM"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
+    for c in ("Client Business Unit", "Product 2", "Strategy Type", "Campaign ID",
+              "Campaign Pool ID"):
+        if c in df.columns:
+            df[c] = df[c].astype("category")
+    return df
+
+
+def read_creative_flat(data, filename=""):
+    """Read one creative-insights export (xlsx or csv bytes) into a DataFrame
+    with normalized headers. Blank creative names are preserved verbatim."""
+    bio = io.BytesIO(data)
+    if (filename or "").lower().endswith(".csv"):
+        try:
+            df = pd.read_csv(
+                bio, low_memory=False, keep_default_na=True,
+                usecols=lambda c: _wanted_engine_name(c, _CREATIVE_CANON, _CREATIVE_KEEP) is not None)
+        except ValueError:
+            df = None
+        if df is None or not len(df.columns):
+            # Unrecognized layout — a column-filtered read of a file we don't
+            # know yields an EMPTY frame, which downstream reads as "no data"
+            # instead of "wrong file". Re-read in full so the caller can say so.
+            bio.seek(0)
+            df = pd.read_csv(bio, low_memory=False)
+    else:
+        df = _read_xlsx_slim(bio, _CREATIVE_CANON, _CREATIVE_KEEP)
+    df = _normalize_headers(df, _CREATIVE_CANON)
+    if "Creative Name" not in df.columns:
+        return df  # let the caller report the layout problem
+    return _prune_creative(df)
+
+
+def combine_creatives(dfs):
+    """Concat several creative exports, de-duped on the dimension columns
+    (rolling windows restate rows) keeping the newest file's version."""
+    dfs = [d for d in dfs if d is not None and len(d)]
+    if not dfs:
+        return pd.DataFrame()
+    combined = pd.concat(dfs, ignore_index=True, sort=False)
+    dims = [c for c in combined.columns if c not in _MEASURE_COLS]
+    if dims:
+        # dropna=False semantics: blank creative names must survive de-dupe
+        combined = combined.drop_duplicates(subset=dims, keep="last")
+    return combined.reset_index(drop=True)
 
 
 _MEASURE_COLS = set(_MEASURES) | {"CTR", "CPM", "Total Spend"}

@@ -77,6 +77,19 @@
   </div>
   {% endif %}
 
+  <div class="card">
+    <label>Creative QA <span class="tag">vendor error check</span></label>
+    <div class="hint">Scans the newest <strong>creative-insights</strong> export for creatives that arrived with
+      <strong>no name</strong>, plus product / business-unit / impossible-metric checks. Runs on its own —
+      no need to rebuild the whole dashboard.</div>
+    {% if has_source %}<a href="/creative" style="text-decoration:none"><button type="button">Check newest creative export</button></a>{% endif %}
+    <form method="post" action="/analyze" enctype="multipart/form-data" style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+      <div class="hint" style="margin-bottom:8px">Or check a file directly:</div>
+      <input type="file" name="creative_file" accept=".csv,.xlsx" required>
+      <button type="submit" style="margin-top:10px">Check this file</button>
+    </form>
+  </div>
+
   {% if reports %}
   <div class="card">
     <label>Recent dashboards</label>

@@ -46,40 +46,34 @@ def list_range(start_iso, end_iso, grace_days=None):
     dropped AFTER the delivery they contain, so the grace (default 8 days,
     override with S3_RANGE_GRACE_DAYS) catches files dropped up to a week+ after
     the requested window that still carry in-range delivery — rows get filtered
-    to the exact range downstream. Returns (site_metas, app_metas, capped):
-    metas are [{'name','key','date'}] oldest-first (so later files win de-dupe);
-    capped=True if the S3_RANGE_MAX_FILES cap (default 16 per side) trimmed the
-    oldest files out."""
+    to the exact range downstream. Returns (site_metas, app_metas, ttddv_metas,
+    creative_metas, capped): metas are [{'name','key','date'}] oldest-first (so
+    later files win de-dupe); capped=True if the S3_RANGE_MAX_FILES cap (default
+    16 per side) trimmed the oldest files out."""
     import datetime as _dt
     if grace_days is None:
         grace_days = int(os.environ.get("S3_RANGE_GRACE_DAYS", "8"))
     start = _dt.date.fromisoformat(start_iso)
     end = _dt.date.fromisoformat(end_iso) + _dt.timedelta(days=grace_days)
     s3, bucket = _client_and_cfg()
-    prefix = os.environ.get("S3_PREFIX", "").strip()
-    suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
     cap = int(os.environ.get("S3_RANGE_MAX_FILES", "16"))
 
-    sites, apps, ttddv = [], [], []
-    buckets = {"site": sites, "app": apps, "ttddv": ttddv}
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if key.endswith("/") or not key.lower().endswith(suffix):
-                continue
-            fdate = _dt.date.fromisoformat(_date_from_key(key, obj.get("LastModified")))
-            if not (start <= fdate <= end):
-                continue
-            base = key.rsplit("/", 1)[-1]
-            kind = _classify(base.lower())
-            if kind:
-                buckets[kind].append({"name": base, "key": key, "date": fdate.isoformat(),
-                                      "_lm": obj["LastModified"]})
+    sites, apps, ttddv, creatives = [], [], [], []
+    buckets = {"site": sites, "app": apps, "ttddv": ttddv, "creative": creatives}
+    for obj in _iter_objects(s3, bucket):
+        key = obj["Key"]
+        kind = _kind_for_key(key)
+        if not kind:
+            continue
+        fdate = _dt.date.fromisoformat(_date_from_key(key, obj.get("LastModified")))
+        if not (start <= fdate <= end):
+            continue
+        buckets[kind].append({"name": key.rsplit("/", 1)[-1], "key": key,
+                              "date": fdate.isoformat(), "_lm": obj["LastModified"]})
 
     capped = False
     out = []
-    for lst in (sites, apps, ttddv):
+    for lst in (sites, apps, ttddv, creatives):
         lst.sort(key=lambda m: (m["date"], m["_lm"]))  # oldest first
         if len(lst) > cap:
             lst = lst[-cap:]  # keep the newest `cap` files
@@ -87,28 +81,23 @@ def list_range(start_iso, end_iso, grace_days=None):
         for m in lst:
             m.pop("_lm", None)
         out.append(lst)
-    return out[0], out[1], out[2], capped
+    return out[0], out[1], out[2], out[3], capped
 
 
 def list_available_dates():
-    """Inventory of the prefix by file-date: {date: {'sites': n, 'apps': n}}.
+    """Inventory of the prefix by file-date:
+    {date: {'sites': n, 'apps': n, 'ttddv': n, 'creatives': n}}.
     Lets the UI show what's pullable before anyone hits the button."""
     s3, bucket = _client_and_cfg()
-    prefix = os.environ.get("S3_PREFIX", "").strip()
-    suffix = os.environ.get("S3_SUFFIX", ".xlsx").strip().lower()
     dates = {}
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if key.endswith("/") or not key.lower().endswith(suffix):
-                continue
-            kind = _classify(key.rsplit("/", 1)[-1].lower())
-            if not kind:
-                continue
-            fdate = _date_from_key(key, obj.get("LastModified"))
-            d = dates.setdefault(fdate, {"sites": 0, "apps": 0, "ttddv": 0})
-            d[{"site": "sites", "app": "apps", "ttddv": "ttddv"}[kind]] += 1
+    label = {"site": "sites", "app": "apps", "ttddv": "ttddv", "creative": "creatives"}
+    for obj in _iter_objects(s3, bucket):
+        kind = _kind_for_key(obj["Key"])
+        if not kind:
+            continue
+        fdate = _date_from_key(obj["Key"], obj.get("LastModified"))
+        d = dates.setdefault(fdate, {"sites": 0, "apps": 0, "ttddv": 0, "creatives": 0})
+        d[label[kind]] += 1
     return dates
 
 
@@ -124,11 +113,28 @@ def _matchers():
             os.environ.get("S3_APPS_MATCH", "app").strip().lower())
 
 
+def _sep_strip(s):
+    """Filename with separators removed, so 'creative-insights',
+    'creative_insights' and 'creativeinsights' all compare equal."""
+    return s.replace("-", "").replace("_", "").replace(" ", "")
+
+
+def _creative_match():
+    """Substring marking a creative-insights export. Matched separator-insensitively,
+    so the default covers both 'creative-insights-…' and the vendor's actual drop
+    name 'creativeinsights_20260816_1728_0.csv'. Override: S3_CREATIVE_MATCH."""
+    return os.environ.get("S3_CREATIVE_MATCH", "creative-insights").strip().lower()
+
+
 def _classify(base):
-    """'ttddv' | 'site' | 'app' | None for a lowercased filename. TTD/DV360
-    combined exports are checked FIRST because their name ('ttddv-siteapp-…')
-    also contains the site/app substrings."""
+    """'creative' | 'ttddv' | 'site' | 'app' | None for a lowercased filename.
+    Creative exports are checked FIRST — they're a different grain entirely and
+    their name can contain other markers. TTD/DV360 combined exports come next
+    because their name ('ttddv-siteapp-…') also contains the site/app substrings."""
     t, si, ap = _matchers()
+    cr = _creative_match()
+    if cr and _sep_strip(cr) in _sep_strip(base):
+        return "creative"
     if t and t in base:
         return "ttddv"
     if si in base:
@@ -136,6 +142,50 @@ def _classify(base):
     if ap in base:
         return "app"
     return None
+
+
+def _suffixes(kind):
+    """Accepted extensions per kind. Site/app/ttddv follow S3_SUFFIX (default
+    .xlsx); the creative export arrives as CSV, so it accepts .csv and .xlsx
+    unless S3_CREATIVE_SUFFIX narrows it."""
+    raw = (os.environ.get("S3_CREATIVE_SUFFIX", ".csv,.xlsx") if kind == "creative"
+           else os.environ.get("S3_SUFFIX", ".xlsx"))
+    return tuple(s.strip().lower() for s in raw.split(",") if s.strip())
+
+
+def _kind_for_key(key):
+    """File kind for an S3 key, or None if it isn't one of ours (folder marker,
+    wrong extension for its kind, or an unrecognized name)."""
+    if key.endswith("/"):
+        return None
+    base = key.rsplit("/", 1)[-1].lower()
+    kind = _classify(base)
+    if not kind:
+        return None
+    return kind if base.endswith(_suffixes(kind)) else None
+
+
+def _prefixes():
+    """Prefixes to scan. S3_CREATIVE_PREFIX is optional — set it only if the
+    creative exports land in a different folder than the site/app ones."""
+    out = [os.environ.get("S3_PREFIX", "").strip()]
+    cp = os.environ.get("S3_CREATIVE_PREFIX", "").strip()
+    if cp and cp not in out:
+        out.append(cp)
+    return out
+
+
+def _iter_objects(s3, bucket):
+    """Yield every object under every configured prefix, de-duped by key."""
+    paginator = s3.get_paginator("list_objects_v2")
+    seen = set()
+    for prefix in _prefixes():
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                if obj["Key"] in seen:
+                    continue
+                seen.add(obj["Key"])
+                yield obj
 
 
 def fetch_two():
@@ -154,16 +204,11 @@ def fetch_two():
     region = os.environ.get("AWS_REGION", "").strip() or None
     s3 = boto3.client("s3", region_name=region)
 
-    newest = {"site": None, "app": None, "ttddv": None}
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if key.endswith("/") or not key.lower().endswith(suffix):
-                continue
-            kind = _classify(key.rsplit("/", 1)[-1].lower())
-            if kind and (newest[kind] is None or obj["LastModified"] > newest[kind]["LastModified"]):
-                newest[kind] = obj
+    newest = {"site": None, "app": None, "ttddv": None, "creative": None}
+    for obj in _iter_objects(s3, bucket):
+        kind = _kind_for_key(obj["Key"])
+        if kind and (newest[kind] is None or obj["LastModified"] > newest[kind]["LastModified"]):
+            newest[kind] = obj
     newest_site, newest_app, newest_ttddv = newest["site"], newest["app"], newest["ttddv"]
 
     def _get(o):
@@ -178,6 +223,24 @@ def fetch_two():
     tname, tbytes, _tdate = _get(newest_ttddv)
     date_str = sdate or adate
     return sname, sbytes, aname, abytes, tname, tbytes, date_str
+
+
+def fetch_latest_creative():
+    """Return (filename, bytes, date_str) for the newest creative-insights export,
+    or (None, None, None). Standalone from fetch_two so the creative QA check can
+    run on its own without pulling the (much larger) site/app files."""
+    s3, bucket = _client_and_cfg()
+    newest = None
+    for obj in _iter_objects(s3, bucket):
+        if _kind_for_key(obj["Key"]) != "creative":
+            continue
+        if newest is None or obj["LastModified"] > newest["LastModified"]:
+            newest = obj
+    if not newest:
+        return None, None, None
+    body = s3.get_object(Bucket=bucket, Key=newest["Key"])["Body"].read()
+    return (newest["Key"].rsplit("/", 1)[-1], body,
+            _date_from_key(newest["Key"], newest.get("LastModified")))
 
 
 def fetch_latest_xlsx():
@@ -199,6 +262,8 @@ def fetch_latest_xlsx():
             key = obj["Key"]
             if key.endswith("/") or not key.lower().endswith(suffix):
                 continue
+            if _classify(key.rsplit("/", 1)[-1].lower()) == "creative":
+                continue  # different grain — never the "insights workbook"
             if newest is None or obj["LastModified"] > newest["LastModified"]:
                 newest = obj
     if not newest:

@@ -1,0 +1,108 @@
+{# Creative QA block — shared by the dashboard tab and the standalone /creative page.
+   Expects `creative` (see app._creative_ctx_from) and optionally `source`. #}
+{% if creative %}
+  <style>
+    .cqwrap{white-space:normal;max-width:340px;word-break:break-word;text-align:left;}
+    table.cq td:nth-child(-n+3),table.cq th:nth-child(-n+3){text-align:left;}
+  </style>
+  {% set c = creative %}
+  {% set s = c.summary %}
+
+  <div class="cards">
+    <div class="kpi{% if s.status != 'clean' %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.blank_rows) }}</div>
+      <div class="l">Rows with no creative name</div>
+    </div>
+    <div class="kpi{% if s.blank_campaigns_delivering %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.blank_campaigns) }}<span style="font-size:14px;font-weight:600;color:#b3402a"> · {{ '{:,.0f}'.format(s.blank_campaigns_delivering) }} delivering</span></div>
+      <div class="l">Campaigns affected</div>
+    </div>
+    <div class="kpi{% if s.blank_impressions %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.blank_impressions) }}<span style="font-size:14px;font-weight:600;color:#b3402a"> · {{ '{:.2f}%'.format(s.blank_impr_pct*100) }}</span></div>
+      <div class="l">Unattributed impressions (share of file)</div>
+    </div>
+    <div class="kpi{% if s.blank_spend %} warn{% endif %}">
+      <div class="n">${{ '{:,.2f}'.format(s.blank_spend) }}</div>
+      <div class="l">Unattributed spend</div>
+    </div>
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.creatives) }}</div><div class="l">Named creatives in file</div></div>
+    <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
+  </div>
+
+  {% if not s.blank_rows %}
+    <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
+      ✔ Every row in this export has a creative name.{% if s.status != 'clean' %}
+      Other integrity checks did flag something — see the table below.{% endif %}</p>
+  {% elif s.blank_campaigns_delivering %}
+    <p class="note" style="background:#fdecea;border-left:3px solid #b42318;padding:10px 14px;border-radius:6px">
+      ⚠ <strong>{{ '{:,.0f}'.format(s.blank_campaigns_delivering) }} campaign(s) are delivering with no creative name.</strong>
+      Send the list below to the vendor — {{ '{:,.0f}'.format(s.blank_impressions) }} impressions
+      (${{ '{:,.2f}'.format(s.blank_spend) }}) can't be attributed to a creative.</p>
+  {% else %}
+    <p class="note" style="background:#fff6e5;border-left:3px solid #8a5a00;padding:10px 14px;border-radius:6px">
+      Blank creative names found, but none of the affected rows delivered impressions.</p>
+  {% endif %}
+
+  <h2>Campaigns missing creative names
+    <span class="sub">(what the vendor has to fix — sorted by impressions at risk)</span>
+    <a class="dl" href="/download/creative_blank_campaigns.csv">CSV</a>
+    <a class="dl" href="/download_creative_qa.xlsx">Excel</a></h2>
+  {% if c.campaigns %}
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Campaign</th><th>Campaign ID</th>
+    <th>Issue</th><th>Affected</th><th>Blank rows</th><th>Impressions</th>
+    <th>Clicks</th><th>Spend</th><th>First seen</th><th>Last seen</th>
+  </tr></thead><tbody>
+    {% for r in c.campaigns %}
+    <tr{% if r.impressions and r.impressions != '0' %} style="background:#fff6f4"{% endif %}>
+      <td>{{ r.client }}</td>
+      <td>{{ pills(r.product) if pills is defined else r.product }}</td>
+      <td class="cqwrap">{{ r.campaign }}</td>
+      <td>{{ r.campaign_id }}</td>
+      <td><span class="flag q">{{ r.issue }}</span></td>
+      <td>{{ r.coverage }}</td>
+      <td>{{ r.blank_rows }}</td>
+      <td>{{ r.impressions }}</td>
+      <td>{{ r.clicks }}</td>
+      <td>{{ r.spend }}</td>
+      <td>{{ r.first_seen }}</td>
+      <td>{{ r.last_seen }}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table>
+  {% if c.campaigns_total > c.campaigns|length %}
+    <p class="note">Showing {{ c.campaigns|length }} of {{ '{:,.0f}'.format(c.campaigns_total) }} — full list in the CSV.</p>
+  {% endif %}
+  {% else %}
+  <p class="note">Nothing to fix.</p>
+  {% endif %}
+
+  {% if c.by_client %}
+  <h2>By client <span class="sub">(who to tell)</span>
+    <a class="dl" href="/download/creative_blank_by_client.csv">CSV</a></h2>
+  <table class="cq"><thead><tr><th>Client</th><th>Campaigns</th><th>Blank rows</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in c.by_client %}
+    <tr><td>{{ r.client }}</td><td>{{ r.campaigns }}</td><td>{{ r.blank_rows }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  <h2>Other data-integrity checks <span class="sub">(same export — worth a look before the numbers get quoted)</span></h2>
+  <table class="cq"><thead><tr><th>Check</th><th>Severity</th><th>Rows</th><th>Impressions</th><th>Spend</th><th>What it means</th><th></th></tr></thead><tbody>
+    {% for ck in c.checks %}
+    <tr{% if ck.count and ck.severity == 'critical' %} style="background:#fff6f4"{% endif %}>
+      <td>{{ ck.label }}</td>
+      <td><span class="flag {{ 'hi' if ck.severity == 'critical' else 'lo' if ck.severity == 'warn' else 'q' }}">{{ ck.severity }}</span></td>
+      <td>{{ '{:,.0f}'.format(ck.count) }}</td>
+      <td>{{ '{:,.0f}'.format(ck.impressions) }}</td>
+      <td>${{ '{:,.2f}'.format(ck.spend) }}</td>
+      <td class="cqwrap">{{ ck.note }}</td>
+      <td>{% if ck.count and ck.key != 'blank_creative' %}<a class="dl" href="/download/creative_{{ ck.key }}.csv">CSV</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table>
+  <p class="note">Full row-level detail for the blank creatives: <a class="dl" href="/download/creative_blank_rows.csv">creative_blank_rows.csv</a></p>
+{% else %}
+  <p class="note">No creative-insights export in this run. Drop a <code>creative-insights…</code> file
+     in the S3 prefix (or upload one on the home page) and it will appear here.</p>
+{% endif %}
