@@ -78,10 +78,11 @@
   {% endif %}
 
   <div class="card">
-    <label>Creative QA <span class="tag">vendor error check</span></label>
-    <div class="hint">Scans the newest <strong>creative-insights</strong> export for creatives that arrived with
-      <strong>no name</strong>, plus product / business-unit / impossible-metric checks. Runs on its own —
-      no need to rebuild the whole dashboard.</div>
+    <label>Creative check <span class="tag">quick, no full rebuild</span></label>
+    <div class="hint">The full creative analysis — blank creative names, trafficking flags (Social Mirror
+      running display banner sizes), per-creative performance — lives in the <strong>Creative tab of every
+      dashboard</strong>. This runs the same checks on their own against the newest
+      <strong>creative-insights</strong> export when you just want a fast answer.</div>
     {% if has_source %}<a href="/creative" style="text-decoration:none"><button type="button">Check newest creative export</button></a>{% endif %}
     <form method="post" action="/analyze" enctype="multipart/form-data" style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
       <div class="hint" style="margin-bottom:8px">Or check a file directly:</div>

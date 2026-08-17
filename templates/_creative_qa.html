@@ -1,15 +1,24 @@
-{# Creative QA block — shared by the dashboard tab and the standalone /creative page.
+{# Creative block — QA, trafficking and performance. Shared by the dashboard's
+   Creative tab and the standalone /creative page so the two can never diverge.
    Expects `creative` (see app._creative_ctx_from) and optionally `source`. #}
 {% if creative %}
   <style>
     .cqwrap{white-space:normal;max-width:340px;word-break:break-word;text-align:left;}
     table.cq td:nth-child(-n+3),table.cq th:nth-child(-n+3){text-align:left;}
+    .cqjump{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px;}
+    .cqjump a{font-size:12px;font-weight:600;text-decoration:none;padding:4px 12px;border-radius:999px;
+              background:#eef4fc;color:#0066B3;border:1px solid #cfe0f5;}
+    .cqjump a:hover{background:#0066B3;color:#fff;}
+    .cqjump a.bad{background:#ffe9e4;color:#b42318;border-color:#f3c4b8;}
+    .cqsec{scroll-margin-top:90px;}
+    .cqlead{color:#5B6B7C;font-size:13px;margin:4px 0 10px;max-width:1100px;}
   </style>
   {% set c = creative %}
   {% set s = c.summary %}
+  {% set p = c.perf %}
 
   <div class="cards">
-    <div class="kpi{% if s.status != 'clean' %} warn{% endif %}">
+    <div class="kpi{% if s.blank_rows %} warn{% endif %}">
       <div class="n">{{ '{:,.0f}'.format(s.blank_rows) }}</div>
       <div class="l">Rows with no creative name</div>
     </div>
@@ -21,9 +30,9 @@
       <div class="n">{{ '{:,.0f}'.format(s.blank_impressions) }}<span style="font-size:14px;font-weight:600;color:#b3402a"> · {{ '{:.2f}%'.format(s.blank_impr_pct*100) }}</span></div>
       <div class="l">Unattributed impressions (share of file)</div>
     </div>
-    <div class="kpi{% if s.blank_spend %} warn{% endif %}">
-      <div class="n">${{ '{:,.2f}'.format(s.blank_spend) }}</div>
-      <div class="l">Unattributed spend</div>
+    <div class="kpi{% if s.sm_display_size_creatives %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.sm_display_size_creatives or 0) }}</div>
+      <div class="l">Social Mirror creatives named with a banner size</div>
     </div>
     <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.creatives) }}</div><div class="l">Named creatives in file</div></div>
     <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
@@ -32,7 +41,7 @@
   {% if not s.blank_rows %}
     <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
       ✔ Every row in this export has a creative name.{% if s.status != 'clean' %}
-      Other integrity checks did flag something — see the table below.{% endif %}</p>
+      Other checks did flag something — see below.{% endif %}</p>
   {% elif s.blank_campaigns_delivering %}
     <p class="note" style="background:#fdecea;border-left:3px solid #b42318;padding:10px 14px;border-radius:6px">
       ⚠ <strong>{{ '{:,.0f}'.format(s.blank_campaigns_delivering) }} campaign(s) are delivering with no creative name.</strong>
@@ -43,13 +52,35 @@
       Blank creative names found, but none of the affected rows delivered impressions.</p>
   {% endif %}
 
-  <h2>Campaigns missing creative names
+  <div class="cqjump">
+    <a class="{% if s.blank_rows %}bad{% endif %}" href="#cq-blank">Blank creative names{% if s.blank_campaigns %} ({{ s.blank_campaigns }}){% endif %}</a>
+    <a class="{% if s.sm_display_size_creatives %}bad{% endif %}" href="#cq-traffic">Trafficking flags{% if s.sm_display_size_creatives %} ({{ s.sm_display_size_creatives }}){% endif %}</a>
+    {% if p %}
+    <a href="#cq-winners">Outperformers ({{ p.totals.winners }})</a>
+    <a href="#cq-laggards">Underperformers ({{ p.totals.laggards }})</a>
+    <a href="#cq-waste">Wasted spend ({{ p.totals.no_clicks + p.totals.no_conversions }})</a>
+    <a href="#cq-fatigue">Fatigue ({{ p.totals.fatigue }})</a>
+    <a href="#cq-rotation">Rotation ({{ p.totals.single_creative }})</a>
+    <a href="#cq-top">Top creatives</a>
+    {% endif %}
+    <a href="#cq-integrity">Data integrity</a>
+    <a class="dl" href="/download_creative_qa.xlsx" style="padding:4px 0">Download everything (Excel)</a>
+  </div>
+
+  <!-- ============================ BLANK CREATIVES ============================ -->
+  <h2 id="cq-blank" class="cqsec">Blank creative names
     <span class="sub">(what the vendor has to fix — sorted by impressions at risk)</span>
-    <a class="dl" href="/download/creative_blank_campaigns.csv">CSV</a>
-    <a class="dl" href="/download_creative_qa.xlsx">Excel</a></h2>
+    <a class="dl" href="/download/creative_blank_campaigns.csv">CSV</a></h2>
+  {% if not s.has_creative_id %}
+    <p class="cqlead">⚠ <strong>This export carries no <code>creative_id</code> column</strong> — the only IDs
+      available are the campaign and campaign-pool IDs shown below, which is what a nameless creative can
+      actually be located by. Add <code>creative_id</code> to the TapClicks data view and it will appear here
+      automatically, no code change needed.</p>
+  {% endif %}
   {% if c.campaigns %}
   <table class="cq paginate"><thead><tr>
-    <th>Client</th><th>Product</th><th>Campaign</th><th>Campaign ID</th>
+    <th>Client</th><th>Product</th><th>Campaign</th><th>Campaign ID</th><th>Pool ID</th>
+    {% if s.has_creative_id %}<th>Creative ID</th>{% endif %}
     <th>Issue</th><th>Affected</th><th>Blank rows</th><th>Impressions</th>
     <th>Clicks</th><th>Spend</th><th>First seen</th><th>Last seen</th>
   </tr></thead><tbody>
@@ -59,6 +90,8 @@
       <td>{{ pills(r.product) if pills is defined else r.product }}</td>
       <td class="cqwrap">{{ r.campaign }}</td>
       <td>{{ r.campaign_id }}</td>
+      <td>{{ r.campaign_pool_id }}</td>
+      {% if s.has_creative_id %}<td>{{ r.creative_id }}</td>{% endif %}
       <td><span class="flag q">{{ r.issue }}</span></td>
       <td>{{ r.coverage }}</td>
       <td>{{ r.blank_rows }}</td>
@@ -73,13 +106,14 @@
   {% if c.campaigns_total > c.campaigns|length %}
     <p class="note">Showing {{ c.campaigns|length }} of {{ '{:,.0f}'.format(c.campaigns_total) }} — full list in the CSV.</p>
   {% endif %}
+  <p class="note">Row-level detail: <a class="dl" href="/download/creative_blank_rows.csv" style="margin-left:0">creative_blank_rows.csv</a></p>
   {% else %}
   <p class="note">Nothing to fix.</p>
   {% endif %}
 
   {% if c.by_client %}
-  <h2>By client <span class="sub">(who to tell)</span>
-    <a class="dl" href="/download/creative_blank_by_client.csv">CSV</a></h2>
+  <h3>By client <span class="sub">(who to tell)</span>
+    <a class="dl" href="/download/creative_blank_by_client.csv">CSV</a></h3>
   <table class="cq"><thead><tr><th>Client</th><th>Campaigns</th><th>Blank rows</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
     {% for r in c.by_client %}
     <tr><td>{{ r.client }}</td><td>{{ r.campaigns }}</td><td>{{ r.blank_rows }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
@@ -87,13 +121,188 @@
   </tbody></table>
   {% endif %}
 
-  <h2>Other data-integrity checks <span class="sub">(same export — worth a look before the numbers get quoted)</span></h2>
+  <!-- ============================== TRAFFICKING ============================== -->
+  <h2 id="cq-traffic" class="cqsec">Trafficking flags
+    <span class="sub">(the creative doesn't match the product it's running under)</span></h2>
+  <p class="cqlead">Social Mirror should be serving social-native assets. A creative whose name carries an
+    <strong>IAB display banner size</strong> (300x250, 728x90, 300x600…) is the signature of a display asset
+    trafficked onto a social line — worth confirming what actually served. Social-native sizes
+    (1080x1080, 1200x628…) are listed separately as naming noise, not errors.</p>
+
+  {% if c.grouped.sm_display_size %}
+  <h3>Social Mirror running display banner sizes
+    <span class="sub">({{ c.grouped_total.sm_display_size }} creative x campaign combinations)</span>
+    <a class="dl" href="/download/creative_sm_display_size_by_creative.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Creative</th><th>Size(s)</th><th>Campaign ID</th>
+    {% if s.has_creative_id %}<th>Creative ID</th>{% endif %}
+    <th>Days</th><th>Impressions</th><th>Clicks</th><th>Spend</th>
+  </tr></thead><tbody>
+    {% for r in c.grouped.sm_display_size %}
+    <tr style="background:#fff6f4">
+      <td>{{ r.client }}</td>
+      <td>{{ pills(r.product) if pills is defined else r.product }}</td>
+      <td class="cqwrap">{{ r.creative }}</td>
+      <td><span class="flag hi">{{ r.sizes }}</span></td>
+      <td>{{ r.campaign_id }}</td>
+      {% if s.has_creative_id %}<td>{{ r.creative_id }}</td>{% endif %}
+      <td>{{ r.days }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table>
+  {% else %}
+  <p class="note">✔ No Social Mirror creative is named with a display banner size.</p>
+  {% endif %}
+
+  {% if c.grouped.format_mismatch %}
+  <h3>Creative format doesn't match the product
+    <span class="sub">(a still image on a video/CTV line, or a video file on a display line)</span>
+    <a class="dl" href="/download/creative_format_mismatch_by_creative.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Product</th><th>Creative</th><th>Campaign ID</th><th>Days</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in c.grouped.format_mismatch %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td><td>{{ r.campaign_id }}</td>
+        <td>{{ r.days }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if c.grouped.sm_social_size %}
+  <h3 style="font-size:14px">Social Mirror with a social-native size in the name
+    <span class="sub">({{ c.grouped_total.sm_social_size }} — informational)</span>
+    <a class="dl" href="/download/creative_sm_social_size_by_creative.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Creative</th><th>Size(s)</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in c.grouped.sm_social_size %}
+    <tr><td>{{ r.client }}</td><td class="cqwrap">{{ r.creative }}</td><td>{{ r.sizes }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+{% if p %}
+  {% macro creative_table(rows, extra_head='', extra_keys=[]) %}
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Creative</th><th>Campaign ID</th>
+    <th>Impr</th><th>Clicks</th><th>CTR</th><th>Product norm</th><th>Conv</th><th>Spend</th><th>CPM</th>{{ extra_head|safe }}
+  </tr></thead><tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.client }}</td>
+      <td>{{ pills(r.product) if pills is defined else r.product }}</td>
+      <td class="cqwrap">{{ r.creative }}</td>
+      <td>{{ r.campaign_id }}</td>
+      <td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>
+      <td>{{ r.product_ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td>
+      {% for k in extra_keys %}<td class="{{ 'cqwrap' if k == 'read' else '' }}">{{ r[k] }}</td>{% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody></table>
+  {% endmacro %}
+
+  <!-- ============================== PERFORMANCE ============================== -->
+  <h2 id="cq-winners" class="cqsec">Creative performance
+    <span class="sub">(creative-grain — the placement dashboard can't see this)</span></h2>
+  <p class="cqlead">Every CTR judgement is made against that <strong>product's own pooled CTR</strong>
+    ({% for n in p.norms %}{{ n.product }} {{ '{:.3f}%'.format(n.ctr*100) }}{% if not loop.last %} · {% endif %}{% endfor %}),
+    at a floor of {{ '{:,}'.format(p.thresholds.min_impr) }} impressions.
+    <strong>CTV, Social Mirror CTV and Online Audio are excluded</strong> from click-based flags — a low CTR
+    is expected there, same policy as the Low-CTR tab.</p>
+
+  <h3>Outperformers <span class="sub">(CTR ≥ 3× the product norm — reuse these, but verify the extremes)</span>
+    <a class="dl" href="/download/creative_winners.csv">CSV</a></h3>
+  {% if p.winners %}{{ creative_table(p.winners, '<th>Read</th>', ['read']) }}
+  {% else %}<p class="note">None at the impression floor.</p>{% endif %}
+
+  <h3 id="cq-laggards" class="cqsec">Underperformers <span class="sub">(CTR ≤ ⅓ of the product norm, sorted by spend — swap or pause)</span>
+    <a class="dl" href="/download/creative_laggards.csv">CSV</a></h3>
+  {% if p.laggards %}{{ creative_table(p.laggards) }}
+    {% if p.totals.laggards > p.laggards|length %}<p class="note">Showing {{ p.laggards|length }} of {{ p.totals.laggards }} — full list in the CSV.</p>{% endif %}
+  {% else %}<p class="note">None at the impression floor.</p>{% endif %}
+
+  <h3 id="cq-waste" class="cqsec">Zero-click creatives
+    <span class="sub">(≥ {{ '{:,}'.format(p.thresholds.noclick_impr) }} impressions, not one click)</span>
+    <a class="dl" href="/download/creative_no_clicks.csv">CSV</a></h3>
+  {% if p.no_clicks %}{{ creative_table(p.no_clicks) }}
+  {% else %}<p class="note">✔ Every creative above the floor got at least one click.</p>{% endif %}
+
+  <h3>Spend with no conversions
+    <span class="sub">(≥ ${{ '{:,.0f}'.format(p.thresholds.noconv_spend) }} spent, zero post-click + post-view conversions —
+      only meaningful for clients who actually track conversions)</span>
+    <a class="dl" href="/download/creative_no_conversions.csv">CSV</a></h3>
+  {% if p.no_conversions %}{{ creative_table(p.no_conversions) }}
+    {% if p.totals.no_conversions > p.no_conversions|length %}<p class="note">Showing {{ p.no_conversions|length }} of {{ p.totals.no_conversions }} — full list in the CSV.</p>{% endif %}
+  {% else %}<p class="note">None.</p>{% endif %}
+
+  <h3 id="cq-fatigue" class="cqsec">Creative fatigue
+    <span class="sub">(CTR down ≥ {{ '{:.0f}%'.format(p.thresholds.fatigue_drop*100) }} in the second half of the window vs the first,
+      with ≥ {{ '{:,}'.format(p.thresholds.fatigue_impr) }} impressions in each half)</span>
+    <a class="dl" href="/download/creative_fatigue.csv">CSV</a></h3>
+  {% if p.fatigue %}
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Product</th><th>Creative</th><th>Campaign ID</th><th>Impressions</th><th>Spend</th><th>CTR early</th><th>CTR late</th><th>Decline</th></tr></thead><tbody>
+    {% for r in p.fatigue %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td><td>{{ r.campaign_id }}</td>
+        <td>{{ r.impressions }}</td><td>{{ r.spend }}</td>
+        <td>{{ r.ctr_early }}</td><td>{{ r.ctr_late }}</td><td><span class="flag lo">{{ r.drop }}</span></td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% else %}<p class="note">No creative shows a meaningful CTR decline across this window.</p>{% endif %}
+
+  <h3 id="cq-rotation" class="cqsec">No creative rotation
+    <span class="sub">(campaigns delivering ≥ {{ '{:,}'.format(p.thresholds.single_impr) }} impressions on a single creative —
+      no A/B, nothing to optimize toward)</span>
+    <a class="dl" href="/download/creative_single_creative.csv">CSV</a></h3>
+  {% if p.single_creative %}
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Product</th><th>Campaign</th><th>Campaign ID</th><th>Creatives</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Spend</th></tr></thead><tbody>
+    {% for r in p.single_creative %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.campaign }}</td><td>{{ r.campaign_id }}</td>
+        <td>{{ r.creatives }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% if p.totals.single_creative > p.single_creative|length %}<p class="note">Showing {{ p.single_creative|length }} of {{ p.totals.single_creative }} — full list in the CSV.</p>{% endif %}
+  {% else %}<p class="note">Every delivering campaign is rotating more than one creative.</p>{% endif %}
+
+  {% if p.dominant %}
+  <h3>One creative eating the campaign
+    <span class="sub">(≥ 3 creatives in the campaign, but one takes ≥ 80% of the impressions — rotation isn't really happening)</span>
+    <a class="dl" href="/download/creative_dominant.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Product</th><th>Creative</th><th>Campaign ID</th><th>Share</th><th>Creative impr</th><th>Campaign impr</th><th>CTR</th><th>Spend</th></tr></thead><tbody>
+    {% for r in p.dominant %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td><td>{{ r.campaign_id }}</td>
+        <td><span class="flag lo">{{ r.share }}</span></td><td>{{ r.impressions }}</td>
+        <td>{{ r.campaign_impressions }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if p.dupe_names %}
+  <h3>Same creative name under more than one client
+    <span class="sub">(shared assets, or a naming/attribution mix-up — worth an eyeball)</span>
+    <a class="dl" href="/download/creative_dupe_names.csv">CSV</a></h3>
+  <table class="cq"><thead><tr><th>Creative</th><th>Clients</th><th>Campaigns</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in p.dupe_names %}
+    <tr><td class="cqwrap">{{ r.creative }}</td><td>{{ r.clients }}</td><td>{{ r.campaigns }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  <h3 id="cq-top" class="cqsec">Top creatives by delivery
+    <span class="sub">({{ '{:,.0f}'.format(p.totals.roster) }} creative × campaign combinations in this window)</span>
+    <a class="dl" href="/download/creative_top.csv">CSV</a>
+    <a class="dl" href="/download/creative_roster.csv">full roster CSV</a></h3>
+  {{ creative_table(p.top, '<th>Days</th>', ['days']) }}
+{% endif %}
+
+  <!-- ============================ DATA INTEGRITY ============================= -->
+  <h2 id="cq-integrity" class="cqsec">Data integrity checks
+    <span class="sub">(same export — worth a look before these numbers get quoted)</span></h2>
   <table class="cq"><thead><tr><th>Check</th><th>Severity</th><th>Rows</th><th>Impressions</th><th>Spend</th><th>What it means</th><th></th></tr></thead><tbody>
     {% for ck in c.checks %}
     <tr{% if ck.count and ck.severity == 'critical' %} style="background:#fff6f4"{% endif %}>
       <td>{{ ck.label }}</td>
       <td><span class="flag {{ 'hi' if ck.severity == 'critical' else 'lo' if ck.severity == 'warn' else 'q' }}">{{ ck.severity }}</span></td>
-      <td>{{ '{:,.0f}'.format(ck.count) }}</td>
+      <td>{{ '{:,.0f}'.format(ck.count) }}{% if ck.creatives %} <span class="note" style="font-size:11px">({{ ck.creatives }} creatives)</span>{% endif %}</td>
       <td>{{ '{:,.0f}'.format(ck.impressions) }}</td>
       <td>${{ '{:,.2f}'.format(ck.spend) }}</td>
       <td class="cqwrap">{{ ck.note }}</td>
@@ -101,7 +310,6 @@
     </tr>
     {% endfor %}
   </tbody></table>
-  <p class="note">Full row-level detail for the blank creatives: <a class="dl" href="/download/creative_blank_rows.csv">creative_blank_rows.csv</a></p>
 {% else %}
   <p class="note">No creative-insights export in this run. Drop a <code>creative-insights…</code> file
      in the S3 prefix (or upload one on the home page) and it will appear here.</p>

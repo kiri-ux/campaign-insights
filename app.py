@@ -669,10 +669,24 @@ def _creative_xlsx_bytes(cr):
     to the vendor alert email."""
     if not cr:
         return None
+    perf = cr.get("performance") or {}
     sheets = [("Blank creative campaigns", cr["blank_campaigns"]),
               ("Blank creative rows", cr["blank_rows"].head(50000)),
-              ("By client", cr["by_client"])]
-    sheets += [(k[:31], v.head(20000)) for k, v in cr["tables"].items() if k != "blank_creative"]
+              ("Blank by client", cr["by_client"]),
+              ("SM display size", (cr.get("grouped") or {}).get("sm_display_size")),
+              ("Format mismatch", (cr.get("grouped") or {}).get("format_mismatch")),
+              ("Top creatives", perf.get("top")),
+              ("Outperformers", perf.get("winners")),
+              ("Underperformers", perf.get("laggards")),
+              ("Zero-click creatives", perf.get("no_clicks")),
+              ("Zero-conversion spend", perf.get("no_conversions")),
+              ("Creative fatigue", perf.get("fatigue")),
+              ("No rotation", perf.get("single_creative")),
+              ("Dominant creative", perf.get("dominant")),
+              ("Name reused by clients", perf.get("dupe_names"))]
+    sheets += [(k[:31], v.head(20000)) for k, v in cr["tables"].items()
+               if k not in ("blank_creative", "sm_display_size", "sm_social_size",
+                            "format_mismatch")]
     sheets = [(n, d) for n, d in sheets if d is not None and len(d)]
     if not sheets:
         return None
@@ -1088,8 +1102,32 @@ def _load_creative_frame(start=None, end=None):
     return df, name
 
 
+def _alert_extra_html(cr):
+    """Trafficking + performance headlines appended under the blank-creative table
+    in the alert email, so one message covers everything the Creative tab found."""
+    s = cr["summary"]
+    perf = (cr.get("performance") or {}).get("counts", {})
+    bits = []
+    if s.get("sm_display_size_creatives"):
+        g = (cr.get("grouped") or {}).get("sm_display_size")
+        impr = int(g["impressions"].sum()) if g is not None and len(g) else 0
+        bits.append(f"<li><strong>{s['sm_display_size_creatives']}</strong> Social Mirror creative(s) named "
+                    f"with a display banner size ({impr:,} impressions) — likely a display asset on a "
+                    f"social line</li>")
+    for key, label in (("no_clicks", "creative(s) delivering with zero clicks"),
+                       ("fatigue", "creative(s) with CTR down sharply across the window"),
+                       ("single_creative", "campaign(s) delivering on a single creative — no rotation"),
+                       ("laggards", "creative(s) at or below ⅓ of their product's CTR norm")):
+        if perf.get(key):
+            bits.append(f"<li><strong>{perf[key]}</strong> {label}</li>")
+    if not bits:
+        return ""
+    return ('<p style="margin-top:18px"><strong>Also in this report:</strong></p>'
+            '<ul style="font-size:13px;line-height:1.6">' + "".join(bits) + "</ul>")
+
+
 def _send_creative_alert(cr, source_label, view_url=None):
-    """Email the creative-name failures with the findings workbook attached.
+    """Email the creative findings with the workbook attached.
     No-op (returns a reason string) unless EMAIL_FROM/EMAIL_TO are configured."""
     try:
         import emailer
@@ -1127,6 +1165,7 @@ def _send_creative_alert(cr, source_label, view_url=None):
             {''.join(_tr(r) for r in rows.to_dict('records'))}
           </table>
           {f'<p style="margin-top:14px">Showing 25 of {len(cr["blank_campaigns"]):,} — full list attached.</p>' if len(cr['blank_campaigns']) > 25 else ''}
+          {_alert_extra_html(cr)}
           {f'<p style="margin-top:14px"><a href="{view_url}">Open the dashboard</a></p>' if view_url else ''}
         </div>"""
         xlsx = _creative_xlsx_bytes(cr)
@@ -1157,7 +1196,8 @@ def _creative_check(start=None, end=None, send_email=None):
     s = cr["summary"]
     _CACHE_CREATIVE["latest"] = {"cr": cr, "source": source}
     emailed = None
-    should = (s["blank_rows"] > 0) if send_email is None else bool(send_email)
+    should = (bool(s["blank_rows"] or s.get("critical_issues"))
+              if send_email is None else bool(send_email))
     if should:
         emailed = _send_creative_alert(cr, source)
     return {"ok": True, "source": source, "status": s["status"],
@@ -1167,7 +1207,10 @@ def _creative_check(start=None, end=None, send_email=None):
             "blank_campaigns_delivering": s["blank_campaigns_delivering"],
             "blank_impressions": s["blank_impressions"],
             "blank_spend": round(s["blank_spend"], 2),
-            "issues": s["issues"], "email": emailed}, 200
+            "sm_display_size_creatives": s.get("sm_display_size_creatives", 0),
+            "issues": s["issues"], "critical_issues": s.get("critical_issues", 0),
+            "performance": {k[5:]: v for k, v in s.items() if k.startswith("perf_")},
+            "email": emailed}, 200
 
 
 _CACHE_CREATIVE = {}  # last standalone creative run, for the /creative page
@@ -1225,9 +1268,22 @@ def creative_check_route():
     return jsonify(result), status
 
 
+_CR_MONEY = ["spend", "cpm", "cost_per_conv"]
+_CR_INTS = ["blank_rows", "impressions", "clicks", "campaigns", "conversions",
+            "days", "rows", "creatives", "clients", "campaign_impressions"]
+_CR_PCT = ["ctr", "product_ctr", "share", "drop", "ctr_early", "ctr_late"]
+
+
+def _cr_rows(df, n=200):
+    """Format a creative table for the template (money/int/percent columns)."""
+    if df is None or not len(df):
+        return []
+    return _fmt(df.head(n), pct_cols=_CR_PCT, money_cols=_CR_MONEY,
+                int_cols=_CR_INTS).to_dict("records")
+
+
 def _creative_ctx_from(cr, persist=True):
     """Template ctx from an already-run audit; caches the CSVs the tab links to."""
-    money, ints = ["spend"], ["blank_rows", "impressions", "clicks", "campaigns"]
     _CACHE["creative_blank_campaigns.csv"] = cr["blank_campaigns"]
     _CACHE["creative_blank_rows.csv"] = cr["blank_rows"]
     if len(cr["by_client"]):
@@ -1235,16 +1291,45 @@ def _creative_ctx_from(cr, persist=True):
     for key, tbl in cr["tables"].items():
         if key != "blank_creative":
             _CACHE[f"creative_{key}.csv"] = tbl
+    for key, tbl in (cr.get("grouped") or {}).items():
+        _CACHE[f"creative_{key}_by_creative.csv"] = tbl
+
+    perf = cr.get("performance") or {}
+    for key in ("roster", "top", "winners", "laggards", "no_clicks", "no_conversions",
+                "fatigue", "single_creative", "dominant", "dupe_names"):
+        tbl = perf.get(key)
+        if tbl is not None and len(tbl):
+            _CACHE[f"creative_{key}.csv"] = tbl
     if persist:
         _persist_download_csvs()
-    return {
+
+    ctx = {
         "summary": cr["summary"], "checks": cr["checks"],
-        "campaigns": _fmt(cr["blank_campaigns"].head(300), money_cols=money,
-                          int_cols=ints).to_dict("records") if len(cr["blank_campaigns"]) else [],
+        "campaigns": _cr_rows(cr["blank_campaigns"], 300),
         "campaigns_total": int(len(cr["blank_campaigns"])),
-        "by_client": _fmt(cr["by_client"].head(50), money_cols=money,
-                          int_cols=ints).to_dict("records") if len(cr["by_client"]) else [],
+        "by_client": _cr_rows(cr["by_client"], 50),
+        "grouped": {k: _cr_rows(v, 200) for k, v in (cr.get("grouped") or {}).items()},
+        "grouped_total": {k: int(len(v)) for k, v in (cr.get("grouped") or {}).items()},
+        "perf": None,
     }
+    if perf:
+        ctx["perf"] = {
+            "counts": perf["counts"], "thresholds": perf["thresholds"],
+            "norms": perf.get("norms_display") or [],
+            "top": _cr_rows(perf["top"], 100),
+            "winners": _cr_rows(perf["winners"], 50),
+            "laggards": _cr_rows(perf["laggards"], 50),
+            "no_clicks": _cr_rows(perf["no_clicks"], 50),
+            "no_conversions": _cr_rows(perf["no_conversions"], 50),
+            "fatigue": _cr_rows(perf["fatigue"], 50),
+            "single_creative": _cr_rows(perf["single_creative"], 60),
+            "dominant": _cr_rows(perf["dominant"], 40),
+            "dupe_names": _cr_rows(perf["dupe_names"], 40),
+            "totals": {k: int(len(perf[k])) for k in
+                       ("winners", "laggards", "no_clicks", "no_conversions", "fatigue",
+                        "single_creative", "dominant", "dupe_names", "roster")},
+        }
+    return ctx
 
 
 @app.route("/download_creative_qa.xlsx")
@@ -1461,11 +1546,13 @@ def _run_pull(send_email=False, start=None, end=None):
                 result["creative"] = {"status": _cs["status"],
                                       "blank_rows": _cs["blank_rows"],
                                       "blank_campaigns": _cs["blank_campaigns"],
-                                      "blank_impressions": _cs["blank_impressions"]}
+                                      "blank_impressions": _cs["blank_impressions"],
+                                      "sm_display_size_creatives": _cs.get("sm_display_size_creatives", 0),
+                                      "critical_issues": _cs.get("critical_issues", 0)}
                 # Blank creative names are a vendor error we want to catch the day
                 # it happens — alert on the scheduled run without waiting for
                 # anyone to open the dashboard.
-                if send_email and _cs["blank_rows"] and \
+                if send_email and (_cs["blank_rows"] or _cs.get("critical_issues")) and \
                         os.environ.get("CREATIVE_ALERT", "1").strip() not in ("0", "false", "no"):
                     _cached = (_CACHE_CREATIVE.get("latest") or {}).get("cr")
                     if _cached:
