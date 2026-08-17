@@ -670,11 +670,24 @@ def _creative_xlsx_bytes(cr):
     if not cr:
         return None
     perf = cr.get("performance") or {}
+    utm = cr.get("utms") or {}
+    st = cr.get("sizetype") or {}
     sheets = [("Blank creative campaigns", cr["blank_campaigns"]),
               ("Blank creative rows", cr["blank_rows"].head(50000)),
               ("Blank by client", cr["by_client"]),
+              ("Missing preview image", cr.get("missing_preview")),
               ("SM display size", (cr.get("grouped") or {}).get("sm_display_size")),
               ("Format mismatch", (cr.get("grouped") or {}).get("format_mismatch")),
+              ("UTM by creative", utm.get("per_creative")),
+              ("UTM missing", utm.get("untagged")),
+              ("UTM partial", utm.get("partial")),
+              ("UTM multiple URLs", utm.get("multi_url")),
+              ("UTM by client", utm.get("by_client")),
+              ("By creative size", st.get("by_size")),
+              ("By creative type", st.get("by_type")),
+              ("By product and size", st.get("by_product_size")),
+              ("Video completion", st.get("completion")),
+              ("Low completion rate", st.get("low_vcr")),
               ("Top creatives", perf.get("top")),
               ("Outperformers", perf.get("winners")),
               ("Underperformers", perf.get("laggards")),
@@ -1120,6 +1133,19 @@ def _alert_extra_html(cr):
                        ("laggards", "creative(s) at or below ⅓ of their product's CTR norm")):
         if perf.get(key):
             bits.append(f"<li><strong>{perf[key]}</strong> {label}</li>")
+    if s.get("missing_preview_creatives"):
+        bits.append(f"<li><strong>{s['missing_preview_creatives']}</strong> creative(s) with no preview "
+                    f"image URL — can't be visually QA'd (export attached)</li>")
+    u = (cr.get("utms") or {}).get("summary")
+    if u and u.get("creatives"):
+        pct = u["tagged"]["creatives"] / u["creatives"]
+        bits.append(f"<li><strong>{u['tagged']['creatives']} of {u['creatives']}</strong> creatives "
+                    f"({pct:.0%}) are running UTM codes — {u['untagged']['creatives']} carry none, "
+                    f"{u['partially_tagged']['creatives']} are partially tagged</li>")
+    st = (cr.get("sizetype") or {})
+    if st.get("counts", {}).get("low_vcr"):
+        bits.append(f"<li><strong>{st['counts']['low_vcr']}</strong> video creative(s) below the "
+                    f"completion-rate floor</li>")
     if not bits:
         return ""
     return ('<p style="margin-top:18px"><strong>Also in this report:</strong></p>'
@@ -1270,8 +1296,12 @@ def creative_check_route():
 
 _CR_MONEY = ["spend", "cpm", "cost_per_conv"]
 _CR_INTS = ["blank_rows", "impressions", "clicks", "campaigns", "conversions",
-            "days", "rows", "creatives", "clients", "campaign_impressions"]
-_CR_PCT = ["ctr", "product_ctr", "share", "drop", "ctr_early", "ctr_late"]
+            "days", "rows", "creatives", "clients", "campaign_impressions",
+            "tagged", "untagged", "placements", "distinct_urls", "urls_seen",
+            "tagged_impressions", "q25", "q50", "q75", "q100"]
+_CR_PCT = ["ctr", "product_ctr", "share", "drop", "ctr_early", "ctr_late",
+           "tagged_pct", "tagged_impr_pct", "pct_of_creatives", "pct_of_impr",
+           "conv_rate", "vcr", "q25_rate", "q50_rate", "q75_rate", "dropoff"]
 
 
 def _cr_rows(df, n=200):
@@ -1300,6 +1330,21 @@ def _creative_ctx_from(cr, persist=True):
         tbl = perf.get(key)
         if tbl is not None and len(tbl):
             _CACHE[f"creative_{key}.csv"] = tbl
+
+    utm = cr.get("utms") or {}
+    for key in ("per_creative", "untagged", "partial", "multi_url", "by_client", "params"):
+        tbl = utm.get(key)
+        if tbl is not None and len(tbl):
+            _CACHE[f"creative_utm_{key}.csv"] = tbl
+    st = cr.get("sizetype") or {}
+    for key in ("by_size", "by_type", "by_type_size", "by_product_size",
+                "completion", "low_vcr"):
+        tbl = st.get(key)
+        if tbl is not None and len(tbl):
+            _CACHE[f"creative_{key}.csv"] = tbl
+    mp = cr.get("missing_preview")
+    if mp is not None and len(mp):
+        _CACHE["creative_missing_preview_by_creative.csv"] = mp
     if persist:
         _persist_download_csvs()
 
@@ -1310,7 +1355,8 @@ def _creative_ctx_from(cr, persist=True):
         "by_client": _cr_rows(cr["by_client"], 50),
         "grouped": {k: _cr_rows(v, 200) for k, v in (cr.get("grouped") or {}).items()},
         "grouped_total": {k: int(len(v)) for k, v in (cr.get("grouped") or {}).items()},
-        "perf": None,
+        "perf": None, "utm": None, "sizetype": None,
+        "missing_preview": None, "missing_preview_total": 0,
     }
     if perf:
         ctx["perf"] = {
@@ -1329,6 +1375,32 @@ def _creative_ctx_from(cr, persist=True):
                        ("winners", "laggards", "no_clicks", "no_conversions", "fatigue",
                         "single_creative", "dominant", "dupe_names", "roster")},
         }
+    if utm:
+        ctx["utm"] = {
+            "summary": utm["summary"],
+            "params": _cr_rows(utm["params"], 12),
+            "untagged": _cr_rows(utm["untagged"], 100),
+            "partial": _cr_rows(utm["partial"], 60),
+            "multi_url": _cr_rows(utm["multi_url"], 60),
+            "by_client": _cr_rows(utm["by_client"], 60),
+            "totals": {k: int(len(utm[k])) for k in
+                       ("untagged", "partial", "multi_url", "by_client", "per_creative")},
+        }
+    if st:
+        ctx["sizetype"] = {
+            "counts": st["counts"], "vcr_floor": st["vcr_floor"],
+            "vcr_min_impr": st["vcr_min_impr"],
+            "by_size": _cr_rows(st["by_size"], 40),
+            "by_type": _cr_rows(st["by_type"], 20),
+            "by_product_size": _cr_rows(st["by_product_size"], 60),
+            "completion": _cr_rows(st["completion"], 50),
+            "low_vcr": _cr_rows(st["low_vcr"], 40),
+            "totals": {k: int(len(st[k])) for k in
+                       ("by_size", "by_type", "by_product_size", "completion", "low_vcr")},
+        }
+    if mp is not None and len(mp):
+        ctx["missing_preview"] = _cr_rows(mp, 200)
+        ctx["missing_preview_total"] = int(len(mp))
     return ctx
 
 

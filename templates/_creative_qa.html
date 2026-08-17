@@ -34,6 +34,14 @@
       <div class="n">{{ '{:,.0f}'.format(s.sm_display_size_creatives or 0) }}</div>
       <div class="l">Social Mirror creatives named with a banner size</div>
     </div>
+    {% if c.utm %}
+    <div class="kpi"><div class="n">{{ '{:.0f}%'.format(c.utm.summary.tagged.creatives / c.utm.summary.creatives * 100 if c.utm.summary.creatives else 0) }}</div>
+      <div class="l">Creatives running UTM codes ({{ '{:,.0f}'.format(c.utm.summary.tagged.creatives) }} of {{ '{:,.0f}'.format(c.utm.summary.creatives) }})</div></div>
+    {% endif %}
+    {% if s.missing_preview_creatives %}
+    <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(s.missing_preview_creatives) }}</div>
+      <div class="l">Creatives with no preview image</div></div>
+    {% endif %}
     <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.creatives) }}</div><div class="l">Named creatives in file</div></div>
     <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
   </div>
@@ -63,6 +71,10 @@
     <a href="#cq-rotation">Rotation ({{ p.totals.single_creative }})</a>
     <a href="#cq-top">Top creatives</a>
     {% endif %}
+    {% if c.sizetype %}<a href="#cq-sizetype">Size &amp; type</a>{% endif %}
+    {% if c.sizetype and c.sizetype.totals.completion %}<a href="#cq-vcr">Completion rate</a>{% endif %}
+    {% if c.utm %}<a class="{% if c.utm.summary.untagged.creatives %}bad{% endif %}" href="#cq-utm">UTM tagging{% if c.utm.summary.untagged.creatives %} ({{ c.utm.summary.untagged.creatives }} untagged){% endif %}</a>{% endif %}
+    {% if s.missing_preview_creatives %}<a class="bad" href="#cq-preview">Missing previews ({{ s.missing_preview_creatives }})</a>{% endif %}
     <a href="#cq-integrity">Data integrity</a>
     <a class="dl" href="/download_creative_qa.xlsx" style="padding:4px 0">Download everything (Excel)</a>
   </div>
@@ -292,6 +304,211 @@
     <a class="dl" href="/download/creative_top.csv">CSV</a>
     <a class="dl" href="/download/creative_roster.csv">full roster CSV</a></h3>
   {{ creative_table(p.top, '<th>Days</th>', ['days']) }}
+{% endif %}
+
+{% set st = c.sizetype %}
+{% if st %}
+  <!-- ======================== SIZE & TYPE PERFORMANCE ======================== -->
+  <h2 id="cq-sizetype" class="cqsec">Performance by creative size &amp; type
+    <span class="sub">(which formats are actually earning their delivery)</span></h2>
+  <p class="cqlead">Size comes from the export's <code>Creative Size</code> column; where that's blank it's
+    parsed out of the creative name{% if st.counts.size_from_name %} (needed for
+    {{ '{:,.0f}'.format(st.counts.size_from_name) }} rows this window){% endif %}. Compare CTR
+    <em>within</em> a product, not across — the product×size table below is the honest read, since
+    a 300x250 on Display and a 1080x1920 on Social Mirror aren't competing for the same attention.
+    {% if st.totals.completion %}Video completion rate (VCR = 100% completions ÷ impressions) is shown
+    wherever the quartile fields are populated — it's the metric CTV, Video and Audio deserve, since
+    they're excluded from CTR judgements.{% endif %}</p>
+
+  <h3>By creative type <span class="sub">({{ st.totals.by_type }} types)</span>
+    <a class="dl" href="/download/creative_by_type.csv">CSV</a></h3>
+  <table class="cq"><thead><tr>
+    <th>Type</th><th>Creatives</th><th>Impressions</th><th>Share</th><th>Clicks</th><th>CTR</th>
+    <th>Conv</th><th>Conv rate</th><th>VCR</th><th>Spend</th><th>CPM</th>
+  </tr></thead><tbody>
+    {% for r in st.by_type %}
+    <tr><td>{{ r.type }}</td><td>{{ r.creatives }}</td><td>{{ r.impressions }}</td><td>{{ r.pct_of_impr }}</td>
+        <td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.conv_rate }}</td>
+        <td>{{ r.vcr if r.vcr != '0.00%' else '—' }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+
+  <h3>By creative size <span class="sub">({{ st.totals.by_size }} sizes — "family" groups IAB display vs social-native vs video shapes)</span>
+    <a class="dl" href="/download/creative_by_size.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr>
+    <th>Size</th><th>Family</th><th>Creatives</th><th>Impressions</th><th>Share</th><th>Clicks</th>
+    <th>CTR</th><th>Conv</th><th>VCR</th><th>Spend</th><th>CPM</th>
+  </tr></thead><tbody>
+    {% for r in st.by_size %}
+    <tr><td>{{ r.size }}</td><td><span class="flag q">{{ r.family }}</span></td><td>{{ r.creatives }}</td>
+        <td>{{ r.impressions }}</td><td>{{ r.pct_of_impr }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>
+        <td>{{ r.conversions }}</td><td>{{ r.vcr if r.vcr != '0.00%' else '—' }}</td>
+        <td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+
+  {% if st.by_product_size %}
+  <h3>Size performance within each product
+    <span class="sub">(≥ 5,000 impressions — the like-for-like comparison)</span>
+    <a class="dl" href="/download/creative_by_product_size.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr>
+    <th>Product</th><th>Size</th><th>Creatives</th><th>Impressions</th><th>Clicks</th><th>CTR</th>
+    <th>Conv</th><th>VCR</th><th>Spend</th><th>CPM</th>
+  </tr></thead><tbody>
+    {% for r in st.by_product_size %}
+    <tr><td>{{ pills(r.product) if pills is defined else r.product }}</td><td>{{ r.size }}</td>
+        <td>{{ r.creatives }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>
+        <td>{{ r.conversions }}</td><td>{{ r.vcr if r.vcr != '0.00%' else '—' }}</td>
+        <td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if st.completion %}
+  <h3 id="cq-vcr" class="cqsec">Video completion by creative
+    <span class="sub">(quartile funnel — drop-off is the share of quarter-viewers who didn't finish)</span>
+    <a class="dl" href="/download/creative_completion.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Creative</th><th>Impressions</th>
+    <th>25%</th><th>50%</th><th>75%</th><th>VCR</th><th>Drop-off</th><th>Spend</th>
+  </tr></thead><tbody>
+    {% for r in st.completion %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td><td>{{ r.impressions }}</td>
+        <td>{{ r.q25_rate }}</td><td>{{ r.q50_rate }}</td><td>{{ r.q75_rate }}</td>
+        <td><strong>{{ r.vcr }}</strong></td><td>{{ r.dropoff }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% if st.totals.completion > st.completion|length %}<p class="note">Showing {{ st.completion|length }} of {{ '{:,.0f}'.format(st.totals.completion) }} — full list in the CSV.</p>{% endif %}
+  {% endif %}
+
+  {% if st.low_vcr %}
+  <h3>Low completion rate
+    <span class="sub">(under {{ '{:.0f}%'.format(st.vcr_floor*100) }} VCR at ≥ {{ '{:,}'.format(st.vcr_min_impr) }} impressions — wrong audience, or a weak first three seconds)</span>
+    <a class="dl" href="/download/creative_low_vcr.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Product</th><th>Creative</th><th>Impressions</th><th>VCR</th><th>Drop-off</th><th>Spend</th></tr></thead><tbody>
+    {% for r in st.low_vcr %}
+    <tr style="background:#fff6f4"><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td><td>{{ r.impressions }}</td>
+        <td><span class="flag lo">{{ r.vcr }}</span></td><td>{{ r.dropoff }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+{% endif %}
+
+{% set u = c.utm %}
+{% if u %}
+  <!-- ============================== UTM TAGGING ============================== -->
+  {% set us = u.summary %}
+  <h2 id="cq-utm" class="cqsec">UTM tagging
+    <span class="sub">(counted by distinct {{ us.id_basis }} — {{ '{:,.0f}'.format(us.creatives) }} creatives across {{ '{:,.0f}'.format(us.placements) }} creative × campaign placements)</span>
+    <a class="dl" href="/download/creative_utm_per_creative.csv">CSV</a></h2>
+  <p class="cqlead">"Tagged" means the clickthrough URL carries at least one <code>utm_*</code> parameter.
+    <strong>Fully tagged</strong> means it carries all three of <code>utm_source</code>,
+    <code>utm_medium</code> and <code>utm_campaign</code> — anything less and Google Analytics can't
+    attribute the session to the campaign. Where a creative runs several URLs, the verdict comes from
+    the URL behind the most delivery.</p>
+
+  <div class="cards">
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(us.tagged.creatives) }}<span style="font-size:14px;font-weight:600;color:#5B6B7C"> / {{ '{:,.0f}'.format(us.creatives) }}</span></div>
+      <div class="l">Creatives running UTM codes ({{ '{:.0f}%'.format(us.tagged.creatives / us.creatives * 100 if us.creatives else 0) }})</div></div>
+    <div class="kpi"><div class="n">{{ '{:.1f}%'.format(us.tagged.impr_pct*100) }}</div>
+      <div class="l">Share of delivery that's UTM-tagged</div></div>
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(us.fully_tagged.creatives) }}</div>
+      <div class="l">Fully tagged (source + medium + campaign)</div></div>
+    <div class="kpi{% if us.partially_tagged.creatives %} warn{% endif %}"><div class="n">{{ '{:,.0f}'.format(us.partially_tagged.creatives) }}</div>
+      <div class="l">Partially tagged — GA can't attribute these</div></div>
+    <div class="kpi{% if us.untagged.creatives %} warn{% endif %}"><div class="n">{{ '{:,.0f}'.format(us.untagged.creatives) }}</div>
+      <div class="l">No UTM codes at all ({{ '{:.1f}%'.format(us.untagged.impr_pct*100) }} of delivery)</div></div>
+    <div class="kpi{% if us.no_url.creatives %} warn{% endif %}"><div class="n">{{ '{:,.0f}'.format(us.no_url.creatives) }}</div>
+      <div class="l">No clickthrough URL at all</div></div>
+  </div>
+  {% if us.other_tracking_only.creatives %}
+  <p class="note">{{ us.other_tracking_only.creatives }} creative(s) carry a click ID (gclid / fbclid / msclkid)
+     but no UTM codes — that gives you platform-side tracking, not campaign attribution in GA.</p>
+  {% endif %}
+
+  {% if u.params %}
+  <h3>Which parameters are in use <a class="dl" href="/download/creative_utm_params.csv">CSV</a></h3>
+  <table class="cq"><thead><tr><th>Parameter</th><th>Creatives</th><th>% of creatives</th><th>Impressions</th></tr></thead><tbody>
+    {% for r in u.params %}
+    <tr><td><code>{{ r.parameter }}</code></td><td>{{ r.creatives }}</td><td>{{ r.pct_of_creatives }}</td><td>{{ r.impressions }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if u.untagged %}
+  <h3>Creatives with no UTM codes <span class="sub">(sorted by impressions — tag the top of this list first)</span>
+    <a class="dl" href="/download/creative_utm_untagged.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Creative</th>{% if s.has_creative_id %}<th>Creative ID</th>{% endif %}
+    <th>Campaigns</th><th>Status</th><th>Other tracking</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Spend</th>
+  </tr></thead><tbody>
+    {% for r in u.untagged %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td>{% if s.has_creative_id %}<td>{{ r.creative_id }}</td>{% endif %}
+        <td>{{ r.campaigns }}</td><td><span class="flag lo">{{ r.status }}</span></td>
+        <td>{{ r.other_tracking or '—' }}</td>
+        <td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% if u.totals.untagged > u.untagged|length %}<p class="note">Showing {{ u.untagged|length }} of {{ '{:,.0f}'.format(u.totals.untagged) }} — full list in the CSV.</p>{% endif %}
+  {% endif %}
+
+  {% if u.partial %}
+  <h3>Partially tagged <span class="sub">(some UTMs, but missing one of source / medium / campaign)</span>
+    <a class="dl" href="/download/creative_utm_partial.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Creative</th><th>Has</th><th>Campaigns</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in u.partial %}
+    <tr><td>{{ r.client }}</td><td class="cqwrap">{{ r.creative }}</td><td class="cqwrap">{{ r.utm_params }}</td>
+        <td>{{ r.campaigns }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if u.multi_url %}
+  <h3>Same creative, different landing pages
+    <span class="sub">(one creative pointing at more than one URL across its campaigns — intentional, or a tagging slip)</span>
+    <a class="dl" href="/download/creative_utm_multi_url.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Creative</th><th>Distinct URLs</th><th>Campaigns</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in u.multi_url %}
+    <tr><td>{{ r.client }}</td><td class="cqwrap">{{ r.creative }}</td><td>{{ r.distinct_urls }}</td>
+        <td>{{ r.campaigns }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if u.by_client %}
+  <h3>Tagging coverage by client <span class="sub">(worst first — untagged creatives, then delivery)</span>
+    <a class="dl" href="/download/creative_utm_by_client.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Creatives</th><th>Tagged</th><th>Untagged</th><th>% tagged</th><th>% of delivery tagged</th><th>Impressions</th><th>Spend</th></tr></thead><tbody>
+    {% for r in u.by_client %}
+    <tr><td>{{ r.client }}</td><td>{{ r.creatives }}</td><td>{{ r.tagged }}</td><td>{{ r.untagged }}</td>
+        <td>{{ r.tagged_pct }}</td><td>{{ r.tagged_impr_pct }}</td><td>{{ r.impressions }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+{% endif %}
+
+{% if c.missing_preview %}
+  <!-- =========================== PREVIEW IMAGES ============================= -->
+  <h2 id="cq-preview" class="cqsec">Creatives missing a preview image
+    <span class="sub">({{ '{:,.0f}'.format(s.missing_preview_creatives) }} creatives — can't be visually QA'd or shown to a client)</span>
+    <a class="dl" href="/download/creative_missing_preview_by_creative.csv">CSV</a>
+    <a class="dl" href="/download/creative_missing_preview.csv">row-level CSV</a>
+    <a class="dl" href="/download_creative_qa.xlsx">Excel</a></h2>
+  <table class="cq paginate"><thead><tr>
+    <th>Client</th><th>Product</th><th>Creative</th>{% if s.has_creative_id %}<th>Creative ID</th>{% endif %}
+    <th>Campaign</th><th>Campaign ID</th><th>Days</th><th>Impressions</th><th>Clicks</th><th>Spend</th>
+  </tr></thead><tbody>
+    {% for r in c.missing_preview %}
+    <tr><td>{{ r.client }}</td><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td class="cqwrap">{{ r.creative }}</td>{% if s.has_creative_id %}<td>{{ r.creative_id }}</td>{% endif %}
+        <td class="cqwrap">{{ r.campaign }}</td><td>{{ r.campaign_id }}</td>
+        <td>{{ r.days }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.spend }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% if c.missing_preview_total > c.missing_preview|length %}<p class="note">Showing {{ c.missing_preview|length }} of {{ '{:,.0f}'.format(c.missing_preview_total) }} — full list in the CSV / Excel export.</p>{% endif %}
 {% endif %}
 
   <!-- ============================ DATA INTEGRITY ============================= -->

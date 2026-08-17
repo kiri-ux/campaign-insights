@@ -117,6 +117,33 @@ _CREATIVE_EXTRA = {
     "creative_type": "Creative Type",
     "campaign_pool_name": "Campaign Pool Name",
     "campaign_pool_id": "Campaign Pool ID",
+    # Added to the data view Aug 2026. Header matching is canonical (lowercase,
+    # alphanumerics only), so '25% Completed', '25_completed' and 'Completed 25%'
+    # all land on the same engine column — the vendor can rename these without
+    # breaking the report.
+    "creative_clickthrough_url": "Clickthrough URL",
+    "clickthrough_url": "Clickthrough URL",
+    "click_through_url": "Clickthrough URL",
+    "creative_click_through_url": "Clickthrough URL",
+    "landing_page_url": "Clickthrough URL",
+    "destination_url": "Clickthrough URL",
+    "final_url": "Clickthrough URL",
+    "preview_image_url": "Preview Image URL",
+    "creative_preview_image_url": "Preview Image URL",
+    "preview_url": "Preview Image URL",
+    "thumbnail_url": "Preview Image URL",
+    "25_completed": "25% Completed", "completed_25": "25% Completed",
+    "video_25_completed": "25% Completed", "video_completions_25": "25% Completed",
+    "first_quartile": "25% Completed",
+    "50_completed": "50% Completed", "completed_50": "50% Completed",
+    "video_50_completed": "50% Completed", "video_completions_50": "50% Completed",
+    "midpoint": "50% Completed",
+    "75_completed": "75% Completed", "completed_75": "75% Completed",
+    "video_75_completed": "75% Completed", "video_completions_75": "75% Completed",
+    "third_quartile": "75% Completed",
+    "100_completed": "100% Completed", "completed_100": "100% Completed",
+    "video_100_completed": "100% Completed", "video_completions_100": "100% Completed",
+    "completions": "100% Completed", "video_complete": "100% Completed",
 }
 _CREATIVE_COLMAP = dict(_COLMAP, **_CREATIVE_EXTRA)
 _CREATIVE_CANON = {_canon(k): v for k, v in _CREATIVE_COLMAP.items()}
@@ -126,7 +153,9 @@ _CREATIVE_KEEP = ["Date", "Client Business Unit", "Client", "Product 2",
                   "Creative Size", "Creative Type", "Campaign Pool Name",
                   "Campaign Pool ID", "Campaign ID", "Impressions", "Clicks", "CTR",
                   "Post Click Conversions", "Post View Conversions", "CPM",
-                  "Billable Spend", "DSP"]
+                  "Billable Spend", "DSP", "Clickthrough URL", "Preview Image URL",
+                  "25% Completed", "50% Completed", "75% Completed", "100% Completed"]
+_CREATIVE_QUARTILES = ["25% Completed", "50% Completed", "75% Completed", "100% Completed"]
 
 
 def _wanted_engine_name(header, canon_map=None, keep=None):
@@ -234,16 +263,29 @@ def _prune_creative(df):
     never categorized or filled."""
     keep = [c for c in _CREATIVE_KEEP if c in df.columns]
     df = df[keep].copy()
-    for c in ("Impressions", "Clicks", "Post Click Conversions", "Post View Conversions"):
+    for c in ["Impressions", "Clicks", "Post Click Conversions",
+              "Post View Conversions"] + _CREATIVE_QUARTILES:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    # URLs stay verbatim strings: a blank Preview Image URL is a finding, and the
+    # clickthrough URL's query string is what the UTM analysis reads.
+    for c in ("Clickthrough URL", "Preview Image URL"):
+        if c in df.columns:
+            df[c] = df[c].astype("object")
+    # IDs are labels, not measures. A column with any blank reads as float64, so
+    # '1001801' would render (and export) as '1001801.0' — nobody can paste that
+    # into the DSP. Force them to clean strings, blanks stay blank.
+    for c in ("Creative ID", "Campaign ID", "Campaign Pool ID"):
+        if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
+            df[c] = (df[c].astype("Int64").astype("string")
+                     .fillna("").astype("object"))
     if "Billable Spend" in df.columns:
         df["Billable Spend"] = pd.to_numeric(df["Billable Spend"], errors="coerce").fillna(0.0)
     for c in ("CTR", "CPM"):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
     for c in ("Client Business Unit", "Product 2", "Strategy Type", "Campaign ID",
-              "Campaign Pool ID"):
+              "Campaign Pool ID", "Creative Type", "Creative Size"):
         if c in df.columns:
             df[c] = df[c].astype("category")
     return df

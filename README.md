@@ -17,7 +17,9 @@ Proactive oversight layer for AdLib delivery. Two inputs:
 3. **Creative-insights export** (.csv/.xlsx, filename prefix `creative-insights`)
    — creative-grain delivery. Feeds the **Creative tab**: vendor data errors
    (blank creative names), trafficking flags (Social Mirror running display
-   banner sizes), and per-creative performance. See below.
+   banner sizes), asset gaps (missing preview image / clickthrough URL), UTM
+   tagging coverage, and per-creative performance by size, type and completion
+   rate. See below.
 
 ## Creative insights
 
@@ -34,6 +36,27 @@ size** (300x250, 728x90, 300x600…), which is the signature of a display asset 
 onto a social line. Social-native sizes (1080x1080, 1200x628…) are listed separately as
 naming noise. Also flags a still image on a video/CTV product, or a video file on a
 display product.
+
+**Assets & tracking** — creatives with no preview image URL (can't be visually QA'd or shown
+to a client; CSV + Excel export), creatives with no clickthrough URL, missing creative IDs,
+and one creative ID appearing under several names.
+
+**UTM tagging** — how many creatives carry `utm_*` codes on their clickthrough URL, counted by
+distinct creative ID. Split into *fully tagged* (all three of `utm_source` / `utm_medium` /
+`utm_campaign` — the minimum GA needs to attribute a session), *partially tagged*, *no UTMs*, and
+*no URL at all*; those three buckets partition the library exactly. Also: which parameters are in
+use, creatives carrying only a click ID (gclid / fbclid) instead of UTMs, one creative pointing at
+several landing pages, and tagging coverage per client. Verdicts are per creative — where a creative
+runs several URLs, the URL behind the most delivery wins, so nothing lands in two buckets.
+
+**Performance by size & type** — delivery, CTR, conversion rate, CPM and video completion rate
+rolled up by `Creative Size` and `Creative Type`, plus a product×size table (the like-for-like
+comparison) and a size "family" label (IAB display / social native / vertical / landscape). Where
+`Creative Size` is blank the size is parsed out of the creative name.
+
+**Video completion** — from the 25/50/75/100% quartile fields: VCR per creative, the quartile
+funnel, drop-off between first quartile and completion, and a low-completion flag. This is what
+gives CTV / Video / Audio a real metric, since they're excluded from CTR judgements.
 
 **Performance** (creative grain — invisible to the placement dashboard):
 
@@ -79,6 +102,7 @@ Env vars (all optional):
 | `CREATIVE_NOCONV_MIN_SPEND` | `50` | Spend floor for the zero-conversion flag |
 | `CREATIVE_FATIGUE_MIN_IMPR` / `CREATIVE_FATIGUE_DROP` | `5000` / `0.40` | Fatigue thresholds (per half, and the decline) |
 | `CREATIVE_SINGLE_MIN_IMPR` | `10000` | Impression floor for the no-rotation flag |
+| `CREATIVE_VCR_FLOOR` / `CREATIVE_VCR_MIN_IMPR` | `0.50` / `5000` | Completion-rate floor, and the impressions needed to apply it |
 
 ## Run locally
     pip install -r requirements.txt

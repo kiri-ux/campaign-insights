@@ -48,6 +48,14 @@ _ALIASES = {
     "creative": ["Creative Name", "creative_name", "Creative", "creative"],
     "creative_id": ["Creative ID", "creative_id", "Creative Id"],
     "creative_size": ["Creative Size", "creative_size"],
+    "creative_type": ["Creative Type", "creative_type"],
+    "click_url": ["Clickthrough URL", "creative_clickthrough_url",
+                  "Creative Clickthrough URL", "clickthrough_url"],
+    "preview_url": ["Preview Image URL", "preview_image_url", "preview_url"],
+    "q25": ["25% Completed", "25_completed", "completed_25"],
+    "q50": ["50% Completed", "50_completed", "completed_50"],
+    "q75": ["75% Completed", "75_completed", "completed_75"],
+    "q100": ["100% Completed", "100_completed", "completed_100"],
     "date": ["Date", "date"],
     "bu": ["Client Business Unit", "Business Unit", "client_business_unit"],
     "client": ["Client", "client"],
@@ -162,6 +170,311 @@ def _rank(df, by, n):
     if df is None or not len(df) or by not in df.columns:
         return df if df is not None else pd.DataFrame()
     return df.sort_values(by, ascending=False).head(n).reset_index(drop=True)
+
+
+def _is_blank(series):
+    """True where a text column is empty in any of the ways an export manages."""
+    s = series.astype(str).str.strip().str.lower()
+    return series.isna() | s.isin(["", "nan", "none", "null", "n/a", "na", "-", "#n/a", "0"])
+
+
+# ------------------------------------------------------------------------ UTMs
+_UTM_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+             "utm_id", "utm_source_platform")
+# Click IDs and other tracking that isn't UTM — worth knowing about, but it does
+# not give you campaign attribution in GA.
+_OTHER_TRACKING = ("gclid", "fbclid", "msclkid", "ttclid", "dclid", "wbraid", "gbraid",
+                   "cid", "mc_cid", "li_fat_id", "epik", "twclid", "sccid", "vmcid")
+
+
+def parse_utms(url):
+    """(present_keys, other_tracking_keys) for one clickthrough URL. Reads the
+    whole string rather than only the query, because vendor URLs frequently
+    double-encode or append the tag block after a fragment."""
+    if url is None or (isinstance(url, float) and pd.isna(url)):
+        return (), ()
+    u = str(url).strip().lower()
+    if not u:
+        return (), ()
+    present = tuple(k for k in _UTM_KEYS if f"{k}=" in u)
+    other = tuple(k for k in _OTHER_TRACKING if f"{k}=" in u)
+    return present, other
+
+
+def analyze_utms(d, cols, ccol, bad_mask):
+    """How much of the creative library — and of actual delivery — carries UTM
+    tagging on its clickthrough URL. Returns None when the export has no
+    clickthrough column at all."""
+    ucol = cols.get("click_url")
+    if not ucol or ucol not in d.columns:
+        return None
+    named = d[~bad_mask].copy()
+    if not len(named):
+        return None
+    named["_url"] = named[ucol].astype(str).where(~_is_blank(named[ucol]), "")
+
+    # Group to the creative FIRST, then parse once per creative. Parsing per row
+    # and aggregating with max() would let a creative land in two buckets at once
+    # when the export carries different URLs for it on different dates.
+    gk = [c for c in (cols["client"], cols["product"], cols["campaign_id"],
+                      cols["creative_id"], ccol) if c]
+    per = named.groupby(gk, dropna=False, observed=True).agg(
+        impressions=("_impr", "sum"), clicks=("_clicks", "sum"), spend=("_spend", "sum"),
+        # the URL that carries the most delivery wins when a creative has several
+        url=("_url", lambda s: next((v for v in s if v), "")),
+        urls_seen=("_url", lambda s: int(len({v for v in s if v}))),
+    ).reset_index()
+    ren = {cols["client"]: "client", cols["product"]: "product",
+           cols["campaign_id"]: "campaign_id", cols["creative_id"]: "creative_id",
+           ccol: "creative"}
+    per = per.rename(columns={k: v for k, v in ren.items() if k})
+    for c in ("client", "product", "campaign_id", "creative_id", "creative"):
+        if c in per.columns and str(per[c].dtype) == "category":
+            per[c] = per[c].astype(str)
+
+    parsed = per["url"].map(parse_utms)
+    per["utm_params"] = parsed.map(lambda t: ", ".join(t[0]))
+    per["utm_count"] = parsed.map(lambda t: len(t[0]))
+    per["other_tracking"] = parsed.map(lambda t: ", ".join(t[1]))
+    per["no_url"] = per["url"].eq("")
+    # The core three are what GA needs to attribute a session to the campaign.
+    per["has_core"] = parsed.map(lambda t: all(k in t[0] for k in
+                                              ("utm_source", "utm_medium", "utm_campaign")))
+    per["status"] = np.where(per["no_url"], "no clickthrough URL",
+                     np.where(per["utm_count"] == 0, "no UTM codes",
+                       np.where(per["has_core"], "fully tagged", "partially tagged")))
+    per["ctr"] = np.where(per["impressions"] > 0, per["clicks"] / per["impressions"], 0.0)
+
+    # Headline counts are DISTINCT creatives (by ID when the export carries one,
+    # else by name). Collapse to that grain BEFORE classifying: a creative that
+    # runs in five campaigns is one creative, and if those campaigns carry
+    # different URLs it gets one verdict — from the URL behind the most delivery —
+    # instead of landing in two buckets at once.
+    idkey = ("creative_id" if "creative_id" in per.columns
+             and per["creative_id"].astype(str).str.strip().ne("").any() else "creative")
+    ranked = per.sort_values("impressions", ascending=False)
+    cre = ranked.groupby(idkey, dropna=False, observed=True).agg(
+        creative=("creative", "first"),
+        client=("client", "first") if "client" in per.columns else ("creative", "first"),
+        product=("product", "first") if "product" in per.columns else ("creative", "first"),
+        url=("url", "first"),                        # highest-delivery URL wins
+        distinct_urls=("url", lambda s: int(len({v for v in s if v}))),
+        campaigns=("campaign_id", "nunique") if "campaign_id" in per.columns else ("url", "size"),
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        spend=("spend", "sum")).reset_index()
+    cparsed = cre["url"].map(parse_utms)
+    cre["utm_params"] = cparsed.map(lambda t: ", ".join(t[0]))
+    cre["utm_count"] = cparsed.map(lambda t: len(t[0]))
+    cre["other_tracking"] = cparsed.map(lambda t: ", ".join(t[1]))
+    cre["no_url"] = cre["url"].eq("")
+    cre["has_core"] = cparsed.map(lambda t: all(k in t[0] for k in
+                                               ("utm_source", "utm_medium", "utm_campaign")))
+    cre["status"] = np.where(cre["no_url"], "no clickthrough URL",
+                     np.where(cre["utm_count"] == 0, "no UTM codes",
+                       np.where(cre["has_core"], "fully tagged", "partially tagged")))
+    cre["ctr"] = np.where(cre["impressions"] > 0, cre["clicks"] / cre["impressions"], 0.0)
+
+    tot_i = float(cre["impressions"].sum()) or 1.0
+
+    def _slice(mask):
+        sub = cre[mask]
+        return {"creatives": int(len(sub)),
+                "impressions": int(sub["impressions"].sum()),
+                "spend": float(sub["spend"].sum()),
+                "impr_pct": float(sub["impressions"].sum() / tot_i)}
+    summary = {
+        "creatives": int(len(cre)),
+        "placements": int(len(per)),
+        "id_basis": "creative ID" if idkey == "creative_id" else "creative name",
+        # tagged / untagged / no_url partition the library exactly
+        "tagged": _slice(cre["utm_count"] > 0),
+        "fully_tagged": _slice(cre["has_core"]),
+        "partially_tagged": _slice((cre["utm_count"] > 0) & ~cre["has_core"]),
+        "untagged": _slice((cre["utm_count"] == 0) & ~cre["no_url"]),
+        "no_url": _slice(cre["no_url"]),
+        "other_tracking_only": _slice((cre["utm_count"] == 0) & cre["other_tracking"].ne("")),
+        "multi_url": _slice(cre["distinct_urls"] > 1),
+    }
+    # Which individual parameters are in use, by creative count
+    param_rows = []
+    for k in _UTM_KEYS:
+        m = cre["utm_params"].str.contains(k, na=False)
+        if m.any():
+            param_rows.append({"parameter": k, "creatives": int(m.sum()),
+                               "impressions": int(cre.loc[m, "impressions"].sum()),
+                               "pct_of_creatives": float(m.sum() / max(len(cre), 1))})
+    params = pd.DataFrame(param_rows)
+
+    cre["_tagged"] = cre["utm_count"] > 0
+    by_client = pd.DataFrame()
+    if "client" in cre.columns:
+        by_client = cre.groupby("client", dropna=False, observed=True).agg(
+            creatives=("creative", "size"), tagged=("_tagged", "sum"),
+            impressions=("impressions", "sum"), spend=("spend", "sum")).reset_index()
+        ti = cre[cre["_tagged"]].groupby("client", dropna=False, observed=True)["impressions"].sum()
+        by_client["tagged_impressions"] = by_client["client"].map(ti).fillna(0).astype("int64")
+        by_client["untagged"] = by_client["creatives"] - by_client["tagged"]
+        by_client["tagged_pct"] = by_client["tagged"] / by_client["creatives"].replace(0, np.nan)
+        by_client["tagged_impr_pct"] = (by_client["tagged_impressions"] /
+                                        by_client["impressions"].replace(0, np.nan)).fillna(0)
+        by_client = by_client.sort_values(["untagged", "impressions"],
+                                         ascending=False).reset_index(drop=True)
+
+    keep = [c for c in ("client", "product", "creative", "creative_id", "campaigns",
+                        "status", "utm_params", "other_tracking", "distinct_urls", "url",
+                        "impressions", "clicks", "ctr", "spend") if c in cre.columns]
+    untagged = cre[cre["utm_count"] == 0][keep].sort_values(
+        "impressions", ascending=False).reset_index(drop=True)
+    partial = cre[(cre["utm_count"] > 0) & ~cre["has_core"]][keep].sort_values(
+        "impressions", ascending=False).reset_index(drop=True)
+    multi_url = cre[cre["distinct_urls"] > 1][keep].sort_values(
+        "impressions", ascending=False).reset_index(drop=True)
+    return {"summary": summary, "per_creative": cre[keep], "by_placement": per,
+            "params": params, "by_client": by_client, "untagged": untagged,
+            "partial": partial, "multi_url": multi_url}
+
+
+# ------------------------------------------------- size / type / completion
+def _size_from_name(name):
+    """First WxH token in a creative name — the fallback when Creative Size is
+    blank, which it often is for social and video assets."""
+    got = sizes_in(name)
+    return got[0] if got else None
+
+
+def _size_bucket(size):
+    """Label a WxH size so a size table reads as media planning, not arithmetic."""
+    if not size or "x" not in str(size):
+        return "unknown"
+    try:
+        w, h = (int(x) for x in str(size).lower().split("x")[:2])
+    except ValueError:
+        return "unknown"
+    if size in _DISPLAY_SIZES:
+        return "IAB display"
+    if size in _SOCIAL_SIZES:
+        return "social native"
+    ratio = w / h if h else 0
+    if ratio >= 1.6:
+        return "landscape/video"
+    if ratio <= 0.7:
+        return "vertical/story"
+    return "square-ish"
+
+
+def analyze_size_type(d, cols, ccol, bad_mask, norms):
+    """Delivery and performance rolled up by creative size and by creative type,
+    with video completion rate wherever the quartile fields are populated."""
+    scol, tcol = cols.get("creative_size"), cols.get("creative_type")
+    has_q = bool(cols.get("q100") or cols.get("q25"))
+    if not (scol or tcol or has_q):
+        return None
+    named = d[~bad_mask].copy()
+    if not len(named):
+        return None
+
+    # Size: the column when populated, else parsed out of the creative name.
+    if scol and scol in named.columns:
+        size = named[scol].astype(str).str.strip().str.lower().str.replace(" ", "", regex=False)
+        blank = _is_blank(named[scol])
+        parsed = named[ccol].map(_size_from_name)
+        size = size.where(~blank, parsed)
+        named["_size_source"] = np.where(blank, "parsed from name", "export column")
+    else:
+        size = named[ccol].map(_size_from_name)
+        named["_size_source"] = "parsed from name"
+    named["_size"] = size.fillna("(not specified)").replace({"": "(not specified)"})
+    named["_size_bucket"] = named["_size"].map(_size_bucket)
+    if tcol and tcol in named.columns:
+        _t = named[tcol].astype("object").astype(str).str.strip()
+        named["_type"] = _t.where(~_is_blank(named[tcol]), "(not specified)")
+    else:
+        named["_type"] = "(not specified)"
+
+    q = {}
+    for key in ("q25", "q50", "q75", "q100"):
+        c = cols.get(key)
+        q[key] = _num(named[c]) if c and c in named.columns else pd.Series(0.0, index=named.index)
+        named[f"_{key}"] = q[key]
+
+    def _roll(keys, label_map=None):
+        g = named.groupby(keys, dropna=False, observed=True).agg(
+            creatives=(ccol, "nunique"), campaigns=(cols["campaign_id"], "nunique")
+            if cols["campaign_id"] else (ccol, "nunique"),
+            impressions=("_impr", "sum"), clicks=("_clicks", "sum"),
+            conversions=("_conv", "sum"), spend=("_spend", "sum"),
+            q25=("_q25", "sum"), q50=("_q50", "sum"), q75=("_q75", "sum"),
+            q100=("_q100", "sum")).reset_index()
+        g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0.0)
+        g["cpm"] = np.where(g["impressions"] > 0, g["spend"] / g["impressions"] * 1000, 0.0)
+        g["conv_rate"] = np.where(g["impressions"] > 0, g["conversions"] / g["impressions"], 0.0)
+        g["vcr"] = np.where(g["impressions"] > 0, g["q100"] / g["impressions"], 0.0)
+        g["q25_rate"] = np.where(g["impressions"] > 0, g["q25"] / g["impressions"], 0.0)
+        g["pct_of_impr"] = g["impressions"] / max(float(named["_impr"].sum()), 1.0)
+        if label_map:
+            g = g.rename(columns=label_map)
+        return g.sort_values("impressions", ascending=False).reset_index(drop=True)
+
+    by_size = _roll(["_size", "_size_bucket"], {"_size": "size", "_size_bucket": "family"})
+    by_type = _roll(["_type"], {"_type": "type"})
+    keys = ["_type", "_size"]
+    if cols["product"]:
+        keys = [cols["product"]] + keys
+    by_type_size = _roll(keys, {cols["product"]: "product", "_type": "type", "_size": "size"}
+                         if cols["product"] else {"_type": "type", "_size": "size"})
+
+    # Size performance within each product, so a 300x250 on Display isn't judged
+    # against a 1080x1920 on Social Mirror.
+    by_product_size = pd.DataFrame()
+    if cols["product"]:
+        by_product_size = _roll([cols["product"], "_size"],
+                                {cols["product"]: "product", "_size": "size"})
+        by_product_size = by_product_size[by_product_size["impressions"] >= 5000]
+
+    # Video completion, creative grain — the metric CTV/Video/Audio deserve,
+    # since they're deliberately excluded from CTR judgements.
+    completion = pd.DataFrame()
+    if has_q and named["_q100"].sum() > 0:
+        gk = [c for c in (cols["client"], cols["product"], cols["campaign_id"],
+                          cols["creative_id"], ccol) if c]
+        cg = named.groupby(gk, dropna=False, observed=True).agg(
+            impressions=("_impr", "sum"), spend=("_spend", "sum"),
+            q25=("_q25", "sum"), q50=("_q50", "sum"), q75=("_q75", "sum"),
+            q100=("_q100", "sum")).reset_index()
+        ren = {cols["client"]: "client", cols["product"]: "product",
+               cols["campaign_id"]: "campaign_id", cols["creative_id"]: "creative_id",
+               ccol: "creative"}
+        cg = cg.rename(columns={k: v for k, v in ren.items() if k})
+        for c in ("client", "product", "campaign_id", "creative_id", "creative"):
+            if c in cg.columns and str(cg[c].dtype) == "category":
+                cg[c] = cg[c].astype(str)
+        for name, num in (("vcr", "q100"), ("q25_rate", "q25"),
+                          ("q50_rate", "q50"), ("q75_rate", "q75")):
+            cg[name] = np.where(cg["impressions"] > 0, cg[num] / cg["impressions"], 0.0)
+        # Drop-off between first quartile and completion: high drop = wrong
+        # audience or a weak first three seconds.
+        cg["dropoff"] = np.where(cg["q25"] > 0, 1 - cg["q100"] / cg["q25"], 0.0)
+        completion = cg[cg["q25"] > 0].sort_values("impressions",
+                                                   ascending=False).reset_index(drop=True)
+
+    low_vcr = pd.DataFrame()
+    if len(completion):
+        floor = _env_num("CREATIVE_VCR_MIN_IMPR", 5000, int)
+        thresh = _env_num("CREATIVE_VCR_FLOOR", 0.50)
+        low_vcr = completion[(completion["impressions"] >= floor) &
+                             (completion["vcr"] < thresh)].sort_values(
+            "spend", ascending=False).reset_index(drop=True)
+
+    counts = {"sizes": int(by_size["size"].nunique()) if len(by_size) else 0,
+              "types": int(by_type["type"].nunique()) if len(by_type) else 0,
+              "size_from_name": int((named["_size_source"] == "parsed from name").sum()),
+              "completion_creatives": int(len(completion)),
+              "low_vcr": int(len(low_vcr))}
+    return {"by_size": by_size, "by_type": by_type, "by_type_size": by_type_size,
+            "by_product_size": by_product_size, "completion": completion,
+            "low_vcr": low_vcr, "counts": counts,
+            "vcr_floor": _env_num("CREATIVE_VCR_FLOOR", 0.50),
+            "vcr_min_impr": _env_num("CREATIVE_VCR_MIN_IMPR", 5000, int)}
 
 
 # ---------------------------------------------------------------- performance
@@ -367,6 +680,9 @@ def audit_creatives(df, min_impressions=None):
     conv = _num(d[cols["conv"]]) if cols["conv"] else pd.Series(0, index=d.index)
     conv = conv + (_num(d[cols["vconv"]]) if cols["vconv"] else 0)
     d["_impr"], d["_clicks"], d["_spend"], d["_conv"] = impr, clicks, spend, conv
+    for _k in ("q25", "q50", "q75", "q100"):
+        _c = cols.get(_k)
+        d[f"_{_k}"] = _num(d[_c]) if _c and _c in d.columns else 0.0
     d["_date"] = pd.to_datetime(d[cols["date"]], errors="coerce") if cols["date"] else pd.NaT
 
     reason = d[ccol].map(blank_reason)
@@ -389,6 +705,11 @@ def audit_creatives(df, min_impressions=None):
         "blank_impr_pct": float(impr[bad].sum() / impr.sum()) if impr.sum() else 0.0,
         "blank_spend_pct": float(spend[bad].sum() / spend.sum()) if spend.sum() else 0.0,
         "has_creative_id": bool(cols["creative_id"]),
+        "has_click_url": bool(cols.get("click_url")),
+        "has_preview_url": bool(cols.get("preview_url")),
+        "has_quartiles": bool(cols.get("q100") or cols.get("q25")),
+        "has_creative_size": bool(cols.get("creative_size")),
+        "has_creative_type": bool(cols.get("creative_type")),
     }
 
     # ---- roll the blanks up to the campaign the vendor has to fix -----------
@@ -504,6 +825,40 @@ def audit_creatives(df, min_impressions=None):
          (~bad) & ((is_video_prod & looks_image) | (is_disp_prod & looks_video)),
          note="a still image on a video/CTV product, or a video file on a display product")
 
+    # -- creative asset completeness ------------------------------------------
+    # A creative with no preview image can't be eyeballed in a QA pass or shown
+    # to a client, so it's an asset-completeness gap rather than a metrics one.
+    if cols.get("preview_url"):
+        _add("missing_preview", "Missing preview image URL", "warn",
+             (~bad) & _is_blank(d[cols["preview_url"]]),
+             note="no preview image on the creative — can't be visually QA'd or shown to the client",
+             extra_cols=(cols["preview_url"],))
+    if cols.get("click_url"):
+        _add("missing_click_url", "Missing clickthrough URL", "warn",
+             (~bad) & _is_blank(d[cols["click_url"]]),
+             note="no landing page on the creative — clicks have nowhere to go",
+             extra_cols=(cols["click_url"],))
+        _add("no_utm", "Clickthrough URL with no UTM codes", "info",
+             (~bad) & ~_is_blank(d[cols["click_url"]]) &
+             ~d[cols["click_url"]].astype(str).str.lower().str.contains("utm_", na=False),
+             note="traffic from this creative lands unattributed in Google Analytics",
+             extra_cols=(cols["click_url"],))
+
+    # -- creative identity ----------------------------------------------------
+    # Now that the export carries creative_id, the ID and the name should agree.
+    if cols.get("creative_id"):
+        cid = d[cols["creative_id"]].astype(str)
+        _add("missing_creative_id", "Missing creative ID", "warn",
+             (~bad) & _is_blank(d[cols["creative_id"]]),
+             note="named creative with no ID — can't be matched back to the DSP")
+        pair = d.loc[~bad, [cols["creative_id"], ccol]].astype(str)
+        multi_name = pair.groupby(cols["creative_id"], observed=True)[ccol].transform("nunique") > 1
+        mask_mn = pd.Series(False, index=d.index)
+        mask_mn.loc[pair.index] = multi_name.values
+        _add("id_name_conflict", "One creative ID, several names", "warn",
+             mask_mn & ~bad,
+             note="the same creative ID appears under different names — renamed mid-flight, or an ID collision")
+
     # -- data integrity --------------------------------------------------------
     if cols["product"]:
         unmapped = ~prod_l.isin(_KNOWN_PRODUCTS) & prod_l.ne("") & prod_l.ne("nan")
@@ -560,10 +915,54 @@ def audit_creatives(df, min_impressions=None):
     if performance:
         summary.update({f"perf_{k}": v for k, v in performance["counts"].items()})
 
+    utms = analyze_utms(d, cols, ccol, bad)
+    if utms:
+        u = utms["summary"]
+        summary.update({
+            "utm_creatives": u["creatives"],
+            "utm_tagged": u["tagged"]["creatives"],
+            "utm_tagged_pct": (u["tagged"]["creatives"] / u["creatives"]) if u["creatives"] else 0.0,
+            "utm_fully_tagged": u["fully_tagged"]["creatives"],
+            "utm_partial": u["partially_tagged"]["creatives"],
+            "utm_untagged": u["untagged"]["creatives"],
+            "utm_no_url": u["no_url"]["creatives"],
+            "utm_tagged_impr_pct": u["tagged"]["impr_pct"],
+        })
+
+    sizetype = analyze_size_type(d, cols, ccol, bad,
+                                (performance or {}).get("norms", {}))
+    if sizetype:
+        summary.update({f"st_{k}": v for k, v in sizetype["counts"].items()})
+
+    # Preview-image gap, rolled up to the creative — this is the export the
+    # design team actually works from.
+    missing_preview = pd.DataFrame()
+    if cols.get("preview_url") and "missing_preview" in tables:
+        mp = tables["missing_preview"]
+        gk = [c for c in (cols["client"], cols["product"], cols["campaign"],
+                          cols["campaign_id"], cols["creative_id"], ccol)
+              if c and c in mp.columns]
+        if gk:
+            missing_preview = mp.groupby(gk, dropna=False, observed=True).agg(
+                days=(cols["impressions"], "size"),
+                impressions=(cols["impressions"], "sum"),
+                clicks=(cols["clicks"], "sum") if cols["clicks"] else (cols["impressions"], "size"),
+                spend=(cols["spend"], "sum") if cols["spend"] else (cols["impressions"], "size"),
+            ).reset_index()
+            ren = {cols["client"]: "client", cols["product"]: "product",
+                   cols["campaign"]: "campaign", cols["campaign_id"]: "campaign_id",
+                   cols["creative_id"]: "creative_id", ccol: "creative"}
+            missing_preview = missing_preview.rename(
+                columns={k: v for k, v in ren.items() if k}).sort_values(
+                "impressions", ascending=False).reset_index(drop=True)
+    summary["missing_preview_creatives"] = int(
+        missing_preview["creative"].nunique()) if len(missing_preview) and "creative" in missing_preview else 0
+
     return {"summary": summary, "checks": checks, "tables": tables,
             "grouped": grouped,
             "blank_campaigns": blank_campaigns, "blank_rows": blank_rows,
-            "by_client": by_client, "performance": performance}
+            "by_client": by_client, "performance": performance,
+            "utms": utms, "sizetype": sizetype, "missing_preview": missing_preview}
 
 
 def alert_subject(summary, label=""):
