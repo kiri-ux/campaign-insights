@@ -53,8 +53,9 @@
   {% elif s.blank_campaigns_delivering %}
     <p class="note" style="background:#fdecea;border-left:3px solid #b42318;padding:10px 14px;border-radius:6px">
       ⚠ <strong>{{ '{:,.0f}'.format(s.blank_campaigns_delivering) }} campaign(s) are delivering with no creative name.</strong>
-      Send the list below to the vendor — {{ '{:,.0f}'.format(s.blank_impressions) }} impressions
-      (${{ '{:,.2f}'.format(s.blank_spend) }}) can't be attributed to a creative.</p>
+      {{ '{:,.0f}'.format(s.blank_impressions) }} impressions
+      (${{ '{:,.2f}'.format(s.blank_spend) }}) can't be attributed to a creative — see the note below on where
+      this is introduced.</p>
   {% else %}
     <p class="note" style="background:#fff6e5;border-left:3px solid #8a5a00;padding:10px 14px;border-radius:6px">
       Blank creative names found, but none of the affected rows delivered impressions.</p>
@@ -81,8 +82,15 @@
 
   <!-- ============================ BLANK CREATIVES ============================ -->
   <h2 id="cq-blank" class="cqsec">Blank creative names
-    <span class="sub">(what the vendor has to fix — sorted by impressions at risk)</span>
+    <span class="sub">(delivery the export can't attribute to a creative — sorted by impressions at risk)</span>
     <a class="dl" href="/download/creative_blank_campaigns.csv">CSV</a></h2>
+  <p class="cqlead" style="background:#eef4fc;border-left:3px solid #0066B3;padding:10px 14px;border-radius:6px">
+    <strong>Known cause (checked against AdLib's own S3 files, Aug 2026).</strong> AdLib's Campaign Creative
+    Report carries a creative name on <strong>100% of rows</strong> for the same window — the blank is
+    introduced in the <strong>TapClicks ingestion</strong>, which collapses a campaign's creatives into one
+    nameless row. The impressions, clicks and spend on that row equal the campaign's true total, so
+    <strong>delivery figures are correct</strong>; only the creative attribution is lost. Treat rows here as
+    "spend we can't tie to a creative", not as inventory that failed to run.</p>
   {% if not s.has_creative_id %}
     <p class="cqlead">⚠ <strong>This export carries no <code>creative_id</code> column</strong> — the only IDs
       available are the campaign and campaign-pool IDs shown below, which is what a nameless creative can

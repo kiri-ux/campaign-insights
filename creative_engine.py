@@ -7,10 +7,18 @@ Input is the TapClicks *creative-insights* export (one row per date x campaign x
 creative). Three families of output, all rendered in the Creative tab of the
 main dashboard:
 
-1. DATA QUALITY — the vendor errors we want to catch the day they happen
+1. DATA QUALITY — the errors we want to catch the day they happen
    blank_creative     Creative Name empty or a placeholder ('n/a', 'untitled'…).
                       Rolled up to the campaign, with every ID the export
-                      carries so the vendor can find the row.
+                      carries so the row can be traced upstream.
+                      ROOT CAUSE, verified against AdLib's own S3 files (Aug 2026):
+                      AdLib's Campaign Creative Report carries a name on 100% of
+                      rows for the same window. The blank appears only in the
+                      TapClicks export, which collapses a campaign's creatives
+                      into a single nameless row — impressions, clicks and spend
+                      on that row equal the campaign's true total, so the delivery
+                      is ingested correctly and only the creative dimension is
+                      lost. Not an AdLib data gap; a TapClicks ingestion defect.
    unmapped_product   Product 2 isn't a Vici product (campaign name leaked in)
    missing_bu         Client Business Unit blank
    impossible_metrics clicks > impressions, or a negative count
@@ -795,7 +803,9 @@ def audit_creatives(df, min_impressions=None):
                 if cols["impressions"] in out.columns else out
 
     _add("blank_creative", "Blank creative name", "critical", bad,
-         note="creative name missing or a placeholder — vendor data error")
+         note="creative name missing or a placeholder. Verified Aug 2026: AdLib's source files DO "
+              "carry the name — it is lost in the TapClicks ingestion, which rolls the campaign's "
+              "creatives into one nameless row (delivery totals stay correct)")
 
     # -- trafficking: Social Mirror carrying a display-banner size ------------
     name_s = d[ccol].astype(str)
