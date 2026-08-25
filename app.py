@@ -2137,7 +2137,19 @@ def previews_page():
         return render_template("previews.html", pmap=PMAP, res=None, cmeta=None,
                                pmeta=None, rows=[], by_client=[], error=str(e),
                                version=_build_version()), 502
+    # ?client= narrows to one advertiser. AdLib's file is their WHOLE book — 523
+    # advertisers on the Aug 14 drop — so a book-wide count will never match what
+    # anyone reading a single client's dashboard sees.
+    who = (request.args.get("client") or "").strip()
+    if who and "Client" in creative.columns:
+        key = re.sub(r"[^a-z0-9]", "", who.lower())
+        norm = creative["Client"].astype(str).str.lower().str.replace(
+            r"[^a-z0-9]", "", regex=True)
+        creative = creative[norm.str.contains(key, na=False)]
     res = audit_previews(creative, previews)
+    res["summary"]["client_filter"] = who or None
+    res["summary"]["advertisers"] = (int(creative["Client"].nunique())
+                                     if "Client" in creative.columns else 0)
     for name, tbl in (("preview_missing.csv", res.get("missing")),
                       ("preview_missing_by_client.csv", res.get("by_client")),
                       ("preview_no_image_anywhere.csv", res.get("nowhere")),

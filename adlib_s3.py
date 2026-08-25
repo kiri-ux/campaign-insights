@@ -56,10 +56,35 @@ WINDOW_DAYS = int(os.environ.get("ADLIB_WINDOW_DAYS", "7"))
 # working. Override any of them with the matching env var.
 MATCH = {
     "creative": os.environ.get("ADLIB_CREATIVE_MATCH", "campaign_creative_report"),
-    "previews": os.environ.get("ADLIB_PREVIEW_MATCH", "adpreviews,ad previews"),
+    "previews": os.environ.get("ADLIB_PREVIEW_MATCH", "adpreviews,ad previews,preview"),
     "device": os.environ.get("ADLIB_DEVICE_MATCH", "device_report"),
     "campaign": os.environ.get("ADLIB_CAMPAIGN_MATCH", "campaign_report"),
+    "screenshot": os.environ.get("ADLIB_SCREENSHOT_MATCH", "screenshot"),
 }
+
+# The bucket is organised one folder per data view — the same directories the
+# TapClicks S3 connector is pointed at. Listing the whole bucket means paging
+# 6,000+ objects to find the handful that matter, and it makes filename matching
+# do work the folder already did. Each report is listed under its own prefix;
+# set any of these to "" to fall back to scanning from PREFIX.
+PREFIXES = {
+    "creative": os.environ.get("ADLIB_CREATIVE_PREFIX", "performance/creatives"),
+    "previews": os.environ.get("ADLIB_PREVIEW_PREFIX", "preview_link_files"),
+    "device": os.environ.get("ADLIB_DEVICE_PREFIX", "device"),
+    "campaign": os.environ.get("ADLIB_CAMPAIGN_PREFIX", "performance/campaigns"),
+    "screenshot": os.environ.get("ADLIB_SCREENSHOT_PREFIX", "screenshot_files"),
+}
+# Other directories in the same bucket, not read yet but worth naming so the
+# next person doesn't have to rediscover them: site-domain, app, app_TTD-DV,
+# publisher, audience, pixel, dooh, geo/city, geo/region, geo/zip,
+# performance/reach_frequency. The screenshot_files folder is shared by three
+# data views, two of them marked inactive — ignore those.
+
+
+def _norm_prefix(p):
+    """'/device' and 'device' and 'device/' all mean the same folder."""
+    p = str(p or "").strip().lstrip("/")
+    return (p.rstrip("/") + "/") if p else ""
 
 
 def _canon(s):
@@ -117,18 +142,48 @@ def configured():
         or os.environ.get("AWS_ACCESS_KEY_ID"))
 
 
-def list_objects(s3=None, bucket=None, prefix=None):
-    """[{name, key, modified, size, kind, stamp}] for everything in the bucket."""
-    s3 = s3 or client()
-    bucket = bucket or BUCKET
+def _list_prefix(s3, bucket, prefix, kind=None):
     out = []
-    for page in s3.get_paginator("list_objects_v2").paginate(
-            Bucket=bucket, Prefix=prefix if prefix is not None else PREFIX):
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for o in page.get("Contents", []):
+            if o["Key"].endswith("/"):
+                continue                      # folder placeholder object
             name = o["Key"].rsplit("/", 1)[-1]
             out.append({"name": name, "key": o["Key"], "size": o["Size"],
                         "modified": o["LastModified"].replace(tzinfo=None),
-                        "kind": kind_of(name), "stamp": date_in_name(name)})
+                        # The folder is the authority on what a file is; the
+                        # filename is only consulted when it isn't in a known one.
+                        "kind": kind or kind_of(name), "stamp": date_in_name(name),
+                        "prefix": prefix})
+    return out
+
+
+def list_objects(s3=None, bucket=None, prefix=None, kinds=None):
+    """[{name, key, modified, size, kind, stamp, prefix}] for the reports we read.
+
+    Lists each report's own folder rather than the whole bucket — one LIST per
+    report instead of paging thousands of objects, and a file's folder decides
+    what it is. Falls back to a full scan when no prefixes are configured, or
+    when an explicit `prefix` is passed.
+    """
+    s3 = s3 or client()
+    bucket = bucket or BUCKET
+    if prefix is not None:
+        return sorted(_list_prefix(s3, bucket, prefix), key=lambda m: m["modified"])
+    wanted = list(kinds) if kinds else [k for k in PREFIXES if k != "screenshot"]
+    seen, out = set(), []
+    for kind in wanted:
+        pre = _norm_prefix(PREFIXES.get(kind, ""))
+        if not pre:
+            continue
+        for m in _list_prefix(s3, bucket, _norm_prefix(PREFIX) + pre, kind):
+            if m["key"] not in seen:
+                seen.add(m["key"])
+                out.append(m)
+    if not out:
+        # No prefixes matched anything — either they aren't set, or the bucket
+        # is flat. Scan and classify by filename, as before.
+        out = [m for m in _list_prefix(s3, bucket, _norm_prefix(PREFIX)) if m["kind"]]
     return sorted(out, key=lambda m: m["modified"])
 
 
@@ -347,26 +402,56 @@ def fetch_device(days=None, start=None, end=None, s3=None, bucket=None, metas=No
     return _pull("device", days, start, end, s3, bucket, metas, _DEVICE_MAP, on_file)
 
 
-def fetch_previews(s3=None, bucket=None, metas=None):
-    """The newest Ad Previews export — the creative asset list, not delivery.
+PREVIEW_MAX_FILES = int(os.environ.get("ADLIB_PREVIEW_MAX_FILES", "60"))
 
-    It carries no Date column and is a full snapshot each time, so only the
-    newest file is read; older ones are strictly stale.
+
+def fetch_previews(s3=None, bucket=None, metas=None, max_files=None):
+    """The Ad Previews exports POOLED — the creative asset list, not delivery.
+
+    Reading only the newest file is wrong unless each drop is a complete
+    snapshot, and there is no way to tell from one file that it is. The 14 Aug
+    2026 drop held 1,043 creatives against 3,235 delivering, and every creative
+    in it had a flight ending on or after the drop date — consistent with a
+    partial or filtered extract. Under-reading here shows up as creatives
+    "missing a preview" that in fact have one in another drop, so this pools
+    every previews file (newest first, capped) and keeps ONE row per
+    Creative ID + URL, newest winning.
+
+    Returns (df, meta); meta['files_read'] vs meta['files_available'] says
+    whether the cap truncated the pool.
     """
     s3 = s3 or client()
     bucket = bucket or BUCKET
     metas = metas if metas is not None else list_objects(s3, bucket)
-    files = [m for m in metas if m["kind"] == "previews"]
+    files = sorted([m for m in metas if m["kind"] == "previews"],
+                   key=lambda x: x["modified"], reverse=True)
     if not files:
-        return pd.DataFrame(), {"error": "no Ad Previews file in the bucket"}
-    m = max(files, key=lambda x: x["modified"])
-    df = _read_csv(_get(s3, bucket, m["key"]), _PREVIEW_MAP)
-    if len(df) and "Creative ID" in df.columns:
-        df["Creative ID"] = df["Creative ID"].astype(str).str.strip().str.replace(
+        return pd.DataFrame(), {"error": "no Ad Previews file in the bucket",
+                                "files_available": 0, "files_read": 0}
+    cap = max_files or PREVIEW_MAX_FILES
+    frames, read = [], []
+    for m in files[:cap]:
+        df = _read_csv(_get(s3, bucket, m["key"]), _PREVIEW_MAP)
+        if len(df):
+            df["_src"] = m["name"]
+            frames.append(df)
+        read.append({"file": m["name"], "modified": str(m["modified"]),
+                     "rows": int(len(df))})
+    if not frames:
+        return pd.DataFrame(), {"error": "previews files were unreadable",
+                                "files_available": len(files), "files_read": len(read)}
+    out = pd.concat(frames, ignore_index=True)
+    if "Creative ID" in out.columns:
+        out["Creative ID"] = out["Creative ID"].astype(str).str.strip().str.replace(
             r"\.0$", "", regex=True)
-    return df, {"file": m["name"], "modified": str(m["modified"]),
-                "rows": int(len(df)),
-                "creatives": int(df["Creative ID"].nunique()) if "Creative ID" in df else 0}
+        sub = ["Creative ID"] + [c for c in ("Preview Image URL",) if c in out.columns]
+        out = out.drop_duplicates(subset=sub, keep="first")   # newest file read first
+    return out, {"file": files[0]["name"], "modified": str(files[0]["modified"]),
+                 "files_available": len(files), "files_read": len(read),
+                 "truncated": len(files) > cap,
+                 "oldest_read": read[-1]["modified"] if read else None,
+                 "rows": int(len(out)),
+                 "creatives": int(out["Creative ID"].nunique()) if "Creative ID" in out else 0}
 
 
 # ------------------------------------------------------------------- CLI
@@ -374,6 +459,8 @@ def _cli():
     import argparse
     ap = argparse.ArgumentParser(description="Check the AdLib S3 wiring.")
     ap.add_argument("--check", action="store_true", help="list and classify, no downloads")
+    ap.add_argument("--folders", action="store_true",
+                    help="list the bucket's top-level folders and what we map them to")
     ap.add_argument("--previews", action="store_true")
     ap.add_argument("--creative", action="store_true")
     ap.add_argument("--device", action="store_true")
@@ -382,6 +469,23 @@ def _cli():
     a = ap.parse_args()
 
     s3 = client()
+    if a.folders:
+        # Cheap directory listing: one delimited LIST, no recursion into the
+        # thousands of files underneath. Confirms the folder names before any
+        # prefix is trusted.
+        mapped = {_norm_prefix(v): k for k, v in PREFIXES.items() if v}
+        print(f"s3://{a.bucket}/{PREFIX}  top-level folders")
+        stack = [_norm_prefix(PREFIX)]
+        while stack:
+            base = stack.pop(0)
+            resp = s3.list_objects_v2(Bucket=a.bucket, Prefix=base, Delimiter="/")
+            for cp in resp.get("CommonPrefixes", []):
+                p = cp["Prefix"]
+                role = mapped.get(p)
+                print(f"  {p:34s} {'-> ' + role if role else ''}")
+                if p.count("/") < 2:          # one level down (performance/…, geo/…)
+                    stack.append(p)
+        return
     metas = list_objects(s3, a.bucket)
     print(f"s3://{a.bucket}/{PREFIX}  {len(metas):,} object(s)")
     counts = {}

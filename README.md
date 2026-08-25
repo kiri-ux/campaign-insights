@@ -229,10 +229,28 @@ AdLib's export has no Product 2 / Business Unit / Strategy columns — those are
 enrichment. Product is inferred from the campaign pool name (`… - Social Mirror - 99971`); anything
 unrecognized stays `(not in export)` rather than being guessed, since the CTR norms are per product.
 
+### Folders, not filenames
+
+The bucket is one folder per data view — the same directories the TapClicks S3 connector reads —
+so each report is listed under its own prefix instead of paging 6,000+ objects at the root, and a
+file's **folder** decides what it is (filename matching is only the fallback):
+
+| Report | Folder | Env var |
+|---|---|---|
+| Creative | `/performance/creatives` | `ADLIB_CREATIVE_PREFIX` |
+| Creative Preview | `/preview_link_files` | `ADLIB_PREVIEW_PREFIX` |
+| Device | `/device` | `ADLIB_DEVICE_PREFIX` |
+| Screenshot | `/screenshot_files` | `ADLIB_SCREENSHOT_PREFIX` (not read yet; two of the three views on this folder are inactive) |
+| Campaign (parent) | `/performance/campaigns` | `ADLIB_CAMPAIGN_PREFIX` |
+
+Also present and not read yet: `/site-domain`, `/app`, `/app_TTD-DV`, `/publisher`, `/audience`,
+`/pixel`, `/dooh`, `/geo/city`, `/geo/region`, `/geo/zip`, `/performance/reach_frequency`.
+`python adlib_s3.py --folders` lists the bucket's real folders and marks which ones are mapped.
+
 | Route | What it does |
 |---|---|
 | `GET /adlib` | JSON: what's in the bucket, how current each report is, and what a pull *would* read. **Downloads nothing** |
-| `GET /previews` | Preview coverage (below). `?days=` / `?start=&end=` |
+| `GET /previews` | Preview coverage (below). `?days=` / `?start=&end=` / `?client=Name` |
 
     python adlib_s3.py --check          # list + classify + the pull plan, no downloads
     python adlib_s3.py --creative --days 7
@@ -257,8 +275,26 @@ link. `PREVIEW_PUBLIC_HOSTS` / `PREVIEW_INTERNAL_HOSTS` tune the host lists; an 
 counts as public, since it is at least a real URL.
 
 It also reports previews for creatives that aren't delivering (stale, not a fault) and creatives
-pointing at several different preview images. Joined on **Creative ID**, never on name — AdLib's own
-reports punctuate advertiser and creative names differently.
+pointing at several different preview images.
+
+**The join is `Creative ID`, and only that.** Both exports carry it, it is AdLib's internal numeric
+ID, and it matches: 999 of the 1,043 IDs in the previews file are present in the creative report
+(the other 44 aren't delivering). `Creative External ID` is *not* an alternative key — it is free
+text and sometimes holds a landing-page URL; it matches zero preview IDs. Names are never used:
+AdLib's own reports punctuate advertiser names differently ('Artman Equipment Inc.' vs 'Artman
+Equipment, Inc.'), which is what made an earlier comparison look 8x worse than it was.
+
+**Previews are pooled across every drop, not read from the newest file.** One drop is not
+necessarily a complete snapshot, and there is no way to tell from a single file that it is —
+reading only the newest one under-reports coverage and invents "missing" creatives that have a
+preview in an earlier drop. Splitting the Aug 14 file in two and reading only the newer half drops
+measured coverage from 39% to 24%, which is exactly the failure mode. `ADLIB_PREVIEW_MAX_FILES`
+(default 60) caps the pool; the page says how many files were read of how many exist and warns when
+the cap truncated it, so an understated number is visible rather than silent.
+
+**Counts are book-wide unless you filter.** AdLib's file covers their whole book — 523 advertisers
+and 3,235 delivering creatives on the 14 Aug drop — so it will not match a single client's
+dashboard. Use `?client=Name` (punctuation-insensitive) to compare like for like.
 
 Downloads: `preview_missing.csv`, `preview_no_image_anywhere.csv`, `preview_missing_by_client.csv`,
 `preview_orphans.csv`.

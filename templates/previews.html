@@ -57,8 +57,19 @@
 
   <p class="note">Delivery {{ cmeta.start }} → {{ cmeta.end }} from
     <strong>{{ cmeta.files|length }}</strong> AdLib file(s) &middot;
-    previews from <strong>{{ pmeta.file }}</strong> ({{ pmeta.modified }})
+    {% if s.client_filter %}client <strong>{{ s.client_filter }}</strong>{% else %}
+    <strong>all {{ '{:,.0f}'.format(s.advertisers) }} advertisers</strong> in AdLib's book
+    (add <code>?client=Name</code> for one){% endif %} &middot;
+    previews pooled from <strong>{{ pmeta.files_read }}</strong> of
+    {{ pmeta.files_available }} file(s) in the previews folder
+    ({{ pmeta.oldest_read or pmeta.modified }} → {{ pmeta.modified }}),
+    {{ '{:,.0f}'.format(pmeta.creatives) }} creatives
     &middot; <a class="dl" href="/previews" style="margin-left:0">re-run</a></p>
+  {% if pmeta.truncated %}
+    <div class="err"><strong>Only the newest {{ pmeta.files_read }} previews files were read</strong>
+      ({{ pmeta.files_available }} exist). Coverage below is a floor, not the true number — raise
+      <code>ADLIB_PREVIEW_MAX_FILES</code> to pool more.</div>
+  {% endif %}
   {% if cmeta.partial_files %}
     <div class="err">Undersized source file(s) skipped or used: {{ cmeta.partial_files|join(', ') }} —
       these are partial drops and may understate delivery.</div>
