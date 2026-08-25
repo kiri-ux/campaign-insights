@@ -46,6 +46,10 @@
     <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
   </div>
 
+    {% if c.grain_source %}
+    <p class="note"><strong>Source:</strong> {{ c.grain_source }}</p>
+  {% endif %}
+
   {% if c.dedupe %}
     <p class="note" style="background:#f4f6f8;border-left:3px solid #5B6B7C;padding:10px 14px;border-radius:6px">
       <strong>Pooling:</strong> {{ c.dedupe.files }} creative file(s) →

@@ -4,6 +4,9 @@
   {% set v = device %}
   {% set s = v.summary %}
   {% set rc = v.recon %}
+  {% if v.grain_source %}
+    <p class="note"><strong>Source:</strong> {{ v.grain_source }}</p>
+  {% endif %}
 
   <div class="cards">
     <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.impressions) }}</div>

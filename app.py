@@ -169,7 +169,7 @@ def analyze():
 
 
 def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
-                  device_dedupe=None, creative_dedupe=None):
+                  device_dedupe=None, creative_dedupe=None, grain_source=None):
     """Run the full analysis and return the template ctx. Pass either an .xlsx
     `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read).
     `creative_df` is the optional creative-insights export and `device_df` the
@@ -643,6 +643,8 @@ def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
                 ctx["creative"] = _creative_ctx(creative_df)
                 if ctx["creative"] is not None and creative_dedupe:
                     ctx["creative"]["dedupe"] = creative_dedupe
+                if ctx["creative"] is not None and grain_source:
+                    ctx["creative"]["grain_source"] = grain_source
                 if ctx["creative"] is None:
                     ctx["errors"].append(
                         "Creative QA: the creative file has no Creative Name column — "
@@ -656,6 +658,8 @@ def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
         try:
             if device_df is not None and len(device_df):
                 ctx["device"] = _device_ctx(device_df, creative_df, device_dedupe)
+                if ctx["device"] is not None and grain_source:
+                    ctx["device"]["grain_source"] = grain_source
                 if ctx["device"] is None:
                     ctx["errors"].append(
                         "Device: the file has no Device Type column — check that the "
@@ -1543,6 +1547,7 @@ def _run_pull(send_email=False, start=None, end=None):
             creative_df = device_df = None
             device_dedupe = None
             creative_dedupe = None
+            adlib_note = None
             if os.environ.get("S3_BUCKET", "").strip():
                 from s3_pull import (fetch_two, list_range, get_bytes,
                                      fetch_latest_creative, fetch_latest_device)
@@ -1556,9 +1561,19 @@ def _run_pull(send_email=False, start=None, end=None):
                         have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
                                 "message": f"No complete site+app file pairs dated {start} → {end} (found: {have})."}, 200
+                    # Prefer AdLib's own files for the creative and device grains
+                    # (proven consistent with each other; the TapClicks creative
+                    # view was not). Falls back silently to the export below.
+                    adlib_note = None
+                    if _adlib_direct_enabled():
+                        _c, _d, adlib_note = _adlib_direct_frames(start, end)
+                        if _c is not None:
+                            creative_df = _c
+                        if _d is not None:
+                            device_df = _d
                     # Creative QA rides along on the same window (own grain, own tab)
                     cdfs = []
-                    for m in cmetas:
+                    for m in (cmetas if creative_df is None else []):
                         b = get_bytes(m["key"])
                         cdfs.append(read_creative_flat(b, m["name"]))
                         b = None
@@ -1572,7 +1587,7 @@ def _run_pull(send_email=False, start=None, end=None):
                     # means the same delivery date arrives in several files, so the
                     # de-dupe is mandatory and what it removed gets reported.
                     ddfs = []
-                    for m in dmetas:
+                    for m in (dmetas if device_df is None else []):
                         b = get_bytes(m["key"])
                         ddfs.append(read_device_flat(b, m["name"]))
                         b = None
@@ -1702,7 +1717,8 @@ def _run_pull(send_email=False, start=None, end=None):
         try:
             ctx = _analyze_path(workbook_path, frames=frames, creative_df=creative_df,
                                 device_df=device_df, device_dedupe=device_dedupe,
-                                creative_dedupe=creative_dedupe)
+                                creative_dedupe=creative_dedupe,
+                                grain_source=adlib_note)
             frames = creative_df = device_df = None
             # Name the report by the DELIVERY date range actually in the data,
             # not the export drop date — multiple same-day pulls of different
@@ -2080,6 +2096,53 @@ def push_blocklist():
 # Read AdLib's own S3 bucket rather than a hand-made TapClicks export, so the
 # dashboard has current data without anyone exporting anything — and so the two
 # copies of the same delivery can be compared instead of trusted.
+
+# --------------------------------------------------- AdLib direct as the source
+# The creative and device grains can come from two places: the TapClicks export
+# in our own bucket, or AdLib's files. On 2026-08-25 those two disagreed badly —
+# AdLib's own creative and device reports for 17-23 Aug agreed to 331 impressions
+# out of 17,372,364 (1.000x), while the TapClicks creative view carried ~2.3x that
+# delivery on the same row count. So where AdLib's bucket is configured it is the
+# better source, and the TapClicks export becomes the fallback.
+#
+# Set ADLIB_DIRECT=0 to force the old behaviour.
+def _adlib_direct_enabled():
+    if os.environ.get("ADLIB_DIRECT", "1").strip() in ("0", "false", "no"):
+        return False
+    try:
+        import adlib_s3
+        return adlib_s3.configured()
+    except Exception:
+        return False
+
+
+def _adlib_direct_frames(start, end):
+    """(creative_df, device_df, note) straight from AdLib's bucket, or (None, None, msg).
+
+    Never raises: if anything about the direct pull fails the caller silently
+    falls back to the TapClicks export, because a broken new source must not
+    take the whole report down.
+    """
+    try:
+        import adlib_s3
+        metas = adlib_s3.list_objects()
+        lo = pd.to_datetime(start).date() if start else None
+        hi = pd.to_datetime(end).date() if end else None
+        cre, cmeta = adlib_s3.fetch_creative(start=lo, end=hi, metas=metas)
+        dev, dmeta = adlib_s3.fetch_device(start=lo, end=hi, metas=metas)
+        if not len(cre) and not len(dev):
+            return None, None, "AdLib direct returned no rows — using the TapClicks export."
+        note = ("AdLib S3 direct · creative %s file(s), device %s file(s) · %s → %s"
+                % (len(cmeta.get("files", [])), len(dmeta.get("files", [])),
+                   cmeta.get("start"), cmeta.get("end")))
+        partial = (cmeta.get("partial_files") or []) + (dmeta.get("partial_files") or [])
+        if partial:
+            note += " · undersized: " + ", ".join(partial)
+        return (cre if len(cre) else None), (dev if len(dev) else None), note
+    except Exception as e:
+        return None, None, "AdLib direct unavailable (%s) — using the TapClicks export." % e
+
+
 def _adlib_window(default_days=7):
     start = (request.args.get("start") or "").strip() or None
     end = (request.args.get("end") or "").strip() or None
