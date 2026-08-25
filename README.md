@@ -196,6 +196,68 @@ The floor matters: without it, 1 click on 2 impressions reads as 50%. There is a
 small vocabulary (hero / master / saga / quest / sword / blast…), and it is the category that makes
 them junk, not the individual franchise.
 
+## Reading AdLib's S3 directly — `adlib_s3.py`
+
+Everything else in this app reads a TapClicks export. That export is the thing that was wrong in
+July 2026 (22-31 July ingested twice), and nobody could see it because there was no second copy to
+compare against. This module reads **AdLib's own bucket**, which gives an independent copy of the
+same delivery and removes the manual export step.
+
+Set these and the Home page offers it:
+
+| Var | Default | Meaning |
+|---|---|---|
+| `ADLIB_S3_BUCKET` | `adlib-vici` | AdLib's bucket |
+| `ADLIB_AWS_ACCESS_KEY_ID` / `ADLIB_AWS_SECRET_ACCESS_KEY` | — | Its own key pair (separate from the app's S3) |
+| `ADLIB_AWS_PROFILE` | — | Use instead of a key pair |
+| `ADLIB_S3_PREFIX` / `ADLIB_AWS_REGION` | — | Only if needed |
+| `ADLIB_WINDOW_DAYS` | `7` | The vendor's rolling window length |
+| `ADLIB_CREATIVE_MATCH` / `ADLIB_PREVIEW_MATCH` / `ADLIB_DEVICE_MATCH` / `ADLIB_CAMPAIGN_MATCH` | see module | Filename patterns, matched separator-insensitively |
+
+Three properties of those files shape the reader, and getting any of them wrong produces
+confidently wrong numbers:
+
+- **Rolling LAST-7-DAYS drops.** One delivery date sits in up to seven files, so concatenating the
+  window multiplies delivery ~7x. `cover_set()` picks a minimal non-overlapping set — a file stamped
+  D holds D-7..D-1 complete, so **five files cover a month, not thirty-one**, and no date is read twice.
+- **A file excludes its own drop day.** The 15 July file has zero 15 July rows. `complete_through()`
+  therefore reports the newest stamp *minus one day*, so the dashboard never shows a fake cliff.
+- **Undersized files are partial.** The truncated 7/29 and 8/02 drops are skipped when a full-size
+  file covers the same days, and named in the response when they aren't.
+
+AdLib's export has no Product 2 / Business Unit / Strategy columns — those are Vici's TapClicks
+enrichment. Product is inferred from the campaign pool name (`… - Social Mirror - 99971`); anything
+unrecognized stays `(not in export)` rather than being guessed, since the CTR norms are per product.
+
+| Route | What it does |
+|---|---|
+| `GET /adlib` | JSON: what's in the bucket, how current each report is, and what a pull *would* read. **Downloads nothing** |
+| `GET /previews` | Preview coverage (below). `?days=` / `?start=&end=` |
+
+    python adlib_s3.py --check          # list + classify + the pull plan, no downloads
+    python adlib_s3.py --creative --days 7
+
+## Preview coverage — is anything running without an image?
+
+The Creative tab's "missing preview URL" check reads the delivery export's own column. This is the
+other half: does the creative exist in the **Ad Previews export** at all — the list previews are
+actually served from? A creative can have a Preview Link on its delivery rows and be entirely absent
+from the preview data view.
+
+On the 14 Aug 2026 files, 3,222 creatives delivered and **999 (31%) appear in the previews export** —
+2,223 missing, behind 11.1M impressions. The page splits that into the two things it can mean:
+
+- **No image in either source** — genuinely cannot be QA'd or shown to a client. This is the urgent list.
+- **Missing from the previews export but with a Preview Link on delivery** — the image exists and the
+  dashboard falls back to it; the *previews export* is incomplete, which is AdLib's to fix.
+
+It also reports previews for creatives that aren't delivering (stale, not a fault) and creatives
+pointing at several different preview images. Joined on **Creative ID**, never on name — AdLib's own
+reports punctuate advertiser and creative names differently.
+
+Downloads: `preview_missing.csv`, `preview_no_image_anywhere.csv`, `preview_missing_by_client.csv`,
+`preview_orphans.csv`.
+
 ## Run locally
     pip install -r requirements.txt
     python app.py            # http://localhost:5000

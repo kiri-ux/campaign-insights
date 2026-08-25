@@ -2069,5 +2069,88 @@ def push_blocklist():
         return jsonify({"ok": False, "error": f"Push failed: {e}"}), 502
 
 
+# ---------------------------------------------------------------- AdLib direct
+# Read AdLib's own S3 bucket rather than a hand-made TapClicks export, so the
+# dashboard has current data without anyone exporting anything — and so the two
+# copies of the same delivery can be compared instead of trusted.
+def _adlib_window(default_days=7):
+    start = (request.args.get("start") or "").strip() or None
+    end = (request.args.get("end") or "").strip() or None
+    days = request.args.get("days")
+    to_date = (lambda s: pd.to_datetime(s).date() if s else None)
+    return (to_date(start), to_date(end),
+            int(days) if (days or "").isdigit() else default_days)
+
+
+@app.route("/adlib")
+def adlib_status():
+    """What's in AdLib's bucket, how current it is, and what a pull would read.
+    Metadata only — downloads nothing, so it's safe to hit any time."""
+    import adlib_s3
+    try:
+        metas = adlib_s3.list_objects()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e),
+                        "hint": "Set ADLIB_S3_BUCKET plus ADLIB_AWS_ACCESS_KEY_ID / "
+                                "ADLIB_AWS_SECRET_ACCESS_KEY (or ADLIB_AWS_PROFILE)."}), 502
+    _, _, days = _adlib_window()
+    reports = {}
+    for kind in ("creative", "previews", "device", "campaign"):
+        group = [m for m in metas if m["kind"] == kind]
+        if not group:
+            continue
+        newest = max(group, key=lambda m: m["modified"])
+        through = adlib_s3.complete_through(group)
+        entry = {"files": len(group), "newest": newest["name"],
+                 "newest_uploaded": str(newest["modified"]),
+                 "complete_through": str(through) if through else None}
+        if kind in ("creative", "device") and through:
+            plan = adlib_s3.cover_set(
+                group, through - datetime.timedelta(days=days - 1), through)
+            entry["a_pull_would_read"] = [
+                {"file": m["name"], "from": str(s), "to": str(e),
+                 "mb": round(m["size"] / 1e6, 1), "full_size": bool(full)}
+                for m, (s, e), full in plan]
+            entry["mb"] = round(sum(m["size"] for m, _, _ in plan) / 1e6, 1)
+        reports[kind] = entry
+    return jsonify({"ok": True, "bucket": adlib_s3.BUCKET, "objects": len(metas),
+                    "window_days": days, "reports": reports})
+
+
+@app.route("/previews")
+def previews_page():
+    """Preview coverage: which delivering creatives have no image on file.
+
+    Distinct from the Creative tab's 'missing preview URL' check, which only
+    reads the delivery export's own column. This joins delivery against the Ad
+    Previews export — the list the previews are actually served from.
+    """
+    import adlib_s3
+    from preview_engine import audit_previews
+    start, end, days = _adlib_window()
+    try:
+        metas = adlib_s3.list_objects()
+        creative, cmeta = adlib_s3.fetch_creative(days=days, start=start, end=end,
+                                                  metas=metas)
+        previews, pmeta = adlib_s3.fetch_previews(metas=metas)
+    except Exception as e:
+        return render_template("previews.html", pmap=PMAP, res=None, cmeta=None,
+                               pmeta=None, rows=[], by_client=[], error=str(e),
+                               version=_build_version()), 502
+    res = audit_previews(creative, previews)
+    for name, tbl in (("preview_missing.csv", res.get("missing")),
+                      ("preview_missing_by_client.csv", res.get("by_client")),
+                      ("preview_no_image_anywhere.csv", res.get("nowhere")),
+                      ("preview_orphans.csv", res.get("orphans"))):
+        if tbl is not None and len(tbl):
+            _CACHE[name] = tbl
+    _persist_download_csvs()
+    return render_template("previews.html", pmap=PMAP, res=res, cmeta=cmeta,
+                           pmeta=pmeta, error=None,
+                           rows=_cr_rows(res.get("missing"), 300),
+                           by_client=_cr_rows(res.get("by_client"), 60),
+                           version=_build_version())
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)

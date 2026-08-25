@@ -84,6 +84,9 @@
       dashboard</strong>. This runs the same checks on their own against the newest
       <strong>creative-insights</strong> export when you just want a fast answer.</div>
     {% if has_source %}<a href="/creative" style="text-decoration:none"><button type="button">Check newest creative export</button></a>{% endif %}
+    <a href="/previews" style="text-decoration:none"><button type="button">Preview coverage (AdLib direct)</button></a>
+    <a href="/adlib" style="text-decoration:none"><button type="button">AdLib bucket status</button></a>
+    <div class="hint" style="margin-top:6px">Straight from AdLib's S3 — no export needed. Bucket status downloads nothing.</div>
     <form method="post" action="/analyze" enctype="multipart/form-data" style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
       <div class="hint" style="margin-bottom:8px">Or check a file directly:</div>
       <input type="file" name="creative_file" accept=".csv,.xlsx" required>

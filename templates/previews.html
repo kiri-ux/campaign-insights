@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview coverage — BARCK+ Insights</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--atlas:#002D58;--velocity:#0066B3;--gold:#F1B434;--ink:#16283B;--muted:#5B6B7C;
+        --line:#D9DFE6;--bg:#FDFBF7;--card:#FFFFFF;--warn:#B42318;--warnbg:#fbeeea;
+        --font-head:'Barlow Condensed',Arial,sans-serif;--font-body:'Barlow',Arial,sans-serif;}
+  *{box-sizing:border-box}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 0 40px;}
+  header.brand{background:var(--atlas);color:#fff;padding:16px 24px;border-bottom:4px solid var(--gold);}
+  header.brand .hrow{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:baseline;gap:16px;}
+  header.brand h1{margin:0;font-family:var(--font-head);font-weight:700;font-size:24px;letter-spacing:.04em;text-transform:uppercase;}
+  header.brand .ver{font-size:11px;color:#7E93A8;margin-left:auto;}
+  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding:14px 12px 0;}
+  a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
+  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 4px;color:var(--atlas);text-transform:uppercase;letter-spacing:.04em;}
+  h2{font-family:var(--font-head);font-size:17px;margin:26px 0 10px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;}
+  h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;text-transform:none;letter-spacing:0;}
+  .cards{display:flex;flex-wrap:wrap;gap:12px;margin:10px 0 8px;}
+  .kpi{flex:1;min-width:160px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .kpi .n{font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--atlas);}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px;}
+  .kpi.warn{background:var(--warnbg);border-color:#f3cfc9;} .kpi.warn .n{color:var(--warn);}
+  .kpi.ok{background:#e9f7ef;border-color:#bfe3cd;} .kpi.ok .n{color:#177245;}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left;white-space:normal;}
+  th{background:#F3F6F9;color:var(--atlas);font-family:var(--font-head);font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;}
+  tr:last-child td{border-bottom:0;}
+  .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
+  .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
+  .err{background:var(--warnbg);border:1px solid #f3cfc9;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
+  .lead{background:#eef4fc;border-left:3px solid var(--velocity);padding:10px 14px;border-radius:6px;font-size:13.5px;}
+  .scroll{overflow-x:auto;}
+</style>
+</head>
+<body>
+<header class="brand"><div class="hrow"><h1>adtini · Preview coverage</h1><span class="ver">build {{ version }}</span></div></header>
+<div class="wrap">
+  <a class="back" href="/">&larr; Home</a>
+  <h1>Preview coverage</h1>
+
+  {% if error %}
+    <div class="err"><strong>Couldn't read AdLib's bucket.</strong> {{ error }}<br>
+      Set <code>ADLIB_S3_BUCKET</code> and <code>ADLIB_AWS_ACCESS_KEY_ID</code> /
+      <code>ADLIB_AWS_SECRET_ACCESS_KEY</code> (or <code>ADLIB_AWS_PROFILE</code>), then
+      check <a href="/adlib">/adlib</a> — it lists the bucket without downloading anything.</div>
+  {% elif not res or not res.summary.available %}
+    <div class="err">No comparison produced{% if res and res.summary.reason %}: {{ res.summary.reason }}{% endif %}.</div>
+  {% else %}
+  {% set s = res.summary %}
+
+  <p class="note">Delivery {{ cmeta.start }} → {{ cmeta.end }} from
+    <strong>{{ cmeta.files|length }}</strong> AdLib file(s) &middot;
+    previews from <strong>{{ pmeta.file }}</strong> ({{ pmeta.modified }})
+    &middot; <a class="dl" href="/previews" style="margin-left:0">re-run</a></p>
+  {% if cmeta.partial_files %}
+    <div class="err">Undersized source file(s) skipped or used: {{ cmeta.partial_files|join(', ') }} —
+      these are partial drops and may understate delivery.</div>
+  {% endif %}
+
+  <div class="cards">
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.delivering_creatives) }}</div><div class="l">Creatives delivering</div></div>
+    <div class="kpi{% if s.coverage_pct < 0.9 %} warn{% else %} ok{% endif %}">
+      <div class="n">{{ '{:.0f}%'.format(s.coverage_pct*100) }}</div><div class="l">Have a preview image on file</div></div>
+    <div class="kpi{% if s.missing %} warn{% endif %}"><div class="n">{{ '{:,.0f}'.format(s.missing) }}</div>
+      <div class="l">Missing from the previews export</div></div>
+    <div class="kpi{% if s.no_preview_anywhere %} warn{% else %} ok{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</div>
+      <div class="l">No image in <em>either</em> source — cannot be QA'd</div></div>
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.missing_impressions) }}</div>
+      <div class="l">Impressions behind the gap ({{ '{:.0f}%'.format(s.missing_impr_pct*100) }})</div></div>
+  </div>
+
+  <p class="lead">
+    Two different failures, and only one of them is urgent.
+    <strong>{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</strong> creative(s) have no preview image in the
+    Ad Previews export <em>or</em> on their delivery rows — those genuinely can't be shown to a client.
+    The other <strong>{{ '{:,.0f}'.format(s.recoverable_from_delivery) }}</strong> are absent from the previews
+    export but still carry a Preview Link on their delivery rows, so the image exists and this dashboard falls
+    back to it — it's the <em>previews export itself</em> that is incomplete, which is AdLib's to fix.
+    {% if s.orphan_previews %}Separately, {{ '{:,.0f}'.format(s.orphan_previews) }} creative(s) appear in the
+    previews export but aren't delivering — stale entries, not a fault.{% endif %}
+  </p>
+
+  {% if by_client %}
+  <h2>By client <span class="sub">(worst coverage first, by impressions with no preview record)</span>
+    <a class="dl" href="/download/preview_missing_by_client.csv">CSV</a></h2>
+  <div class="scroll"><table>
+    <tr><th>Client</th><th>Creatives</th><th>With preview</th><th>Missing</th><th>Coverage</th><th>Impressions missing</th></tr>
+    {% for r in by_client %}
+    <tr><td>{{ r.client }}</td><td>{{ r.creatives }}</td><td>{{ r.with_preview }}</td>
+        <td>{{ r.missing }}</td><td>{{ r.coverage }}</td><td>{{ r.missing_impressions }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+
+  {% if rows %}
+  <h2>Creatives with no preview on file <span class="sub">(sorted by impressions at risk)</span>
+    <a class="dl" href="/download/preview_missing.csv">CSV</a>
+    {% if s.no_preview_anywhere %}<a class="dl" href="/download/preview_no_image_anywhere.csv">urgent only</a>{% endif %}</h2>
+  <div class="scroll"><table>
+    <tr><th>Creative</th><th>Client</th><th>Type</th><th>Size</th><th>Impressions</th><th>Spend</th><th>Why</th></tr>
+    {% for r in rows %}
+    <tr><td>{{ r.creative }}<br><span class="note">ID {{ r.creative_id }}</span></td>
+        <td>{{ r.client }}</td><td>{{ r.type }}</td><td>{{ r.size }}</td>
+        <td>{{ r.impressions }}</td><td>{{ r.spend }}</td><td>{{ r.reason }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="note">Showing {{ rows|length }} of {{ '{:,.0f}'.format(s.missing) }}. Full list in the CSV.</p>
+  {% else %}
+  <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
+    ✔ Every delivering creative has a preview image on file.</p>
+  {% endif %}
+  {% endif %}
+</div>
+</body>
+</html>
