@@ -102,6 +102,9 @@
     the ask.
     {% if s.no_preview_anywhere %}<strong>{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</strong> have no link
     of any kind, which is worse — those may not have an asset at all.{% endif %}
+    {% if s.excluded_creatives %} {{ '{:,.0f}'.format(s.excluded_creatives) }} creative(s)
+    ({{ s.excluded_types|join(', ') }}) are excluded from these counts — there is no image to
+    publish for them.{% endif %}
     {% if s.orphan_previews %} Separately, {{ '{:,.0f}'.format(s.orphan_previews) }} creative(s) appear in
     the previews export but aren't delivering — stale entries, not a fault.{% endif %}
   </p>

@@ -275,6 +275,12 @@ creatives delivered and 2,813 (84%) have a preview anyone could send to a client
 entirely. `PREVIEW_PUBLIC_HOSTS` / `PREVIEW_INTERNAL_HOSTS` tune the host lists; an unrecognized host
 counts as public, since it is at least a real URL.
 
+**Audio and VAST Tag are excluded from the counts** — audio has no image, and a VAST tag points at
+a video the exchange serves rather than an asset AdLib hosts, so neither has a preview to publish
+and counting them pads the gap. They are always reported alongside the total rather than dropped
+silently; `PREVIEW_EXCLUDE_TYPES` changes the list, and the standalone script takes
+`--include-audio`.
+
 It also reports previews for creatives that aren't delivering (stale, not a fault) and creatives
 pointing at several different preview images.
 

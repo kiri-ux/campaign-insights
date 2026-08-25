@@ -79,7 +79,15 @@ def _col(df, *names):
     return None
 
 
-def audit_previews(creative_df, preview_df, min_impressions=1):
+# Creative types that have no visual preview to publish, so counting them as a
+# gap is noise: audio has no image, and a VAST tag is a pointer to a video
+# served by the exchange rather than an asset AdLib hosts. Excluded from the
+# coverage denominator, but always REPORTED, so the number stays auditable.
+EXCLUDE_TYPES = {c.strip().lower().replace(" ", "") for c in os.environ.get(
+    "PREVIEW_EXCLUDE_TYPES", "audio,vast tag,vasttag").split(",") if c.strip()}
+
+
+def audit_previews(creative_df, preview_df, min_impressions=1, exclude_types=None):
     """Coverage of delivering creatives by the Ad Previews export.
 
     creative_df: creative-grain delivery (AdLib's Campaign Creative Report, or
@@ -149,6 +157,16 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
             per[c] = per[c].astype(str)
 
     delivering = per[per["impressions"] >= max(min_impressions, 1)].copy()
+
+    skip = EXCLUDE_TYPES if exclude_types is None else {
+        str(t).strip().lower().replace(" ", "") for t in exclude_types}
+    excluded = pd.DataFrame()
+    if skip and "type" in delivering.columns:
+        is_skip = delivering["type"].astype(str).str.lower().str.replace(
+            " ", "", regex=False).isin(skip)
+        excluded = delivering[is_skip].copy()
+        delivering = delivering[~is_skip].copy()
+
     delivering["in_previews"] = delivering["_id"].isin(have_ids)
     # "Covered" means a client-shareable image exists SOMEWHERE — the previews
     # export, or a public link on the delivery rows. An AdLib dashboard link is
@@ -212,6 +230,10 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
                             if len(missing) else 0,
         "orphan_previews": int(len(orph)),
         "clients_affected": int(missing["client"].nunique()) if "client" in missing else 0,
+        "excluded_creatives": int(len(excluded)),
+        "excluded_impressions": (int(excluded["impressions"].sum())
+                                 if len(excluded) else 0),
+        "excluded_types": sorted(set(excluded["type"].astype(str))) if len(excluded) else [],
     }
     # Everything in `missing` is un-sendable to a client. Split by WHY, because
     # the two need different asks: an AdLib dashboard link means the creative
