@@ -169,7 +169,7 @@ def analyze():
 
 
 def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
-                  device_dedupe=None):
+                  device_dedupe=None, creative_dedupe=None):
     """Run the full analysis and return the template ctx. Pass either an .xlsx
     `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read).
     `creative_df` is the optional creative-insights export and `device_df` the
@@ -641,6 +641,8 @@ def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
         try:
             if creative_df is not None and len(creative_df):
                 ctx["creative"] = _creative_ctx(creative_df)
+                if ctx["creative"] is not None and creative_dedupe:
+                    ctx["creative"]["dedupe"] = creative_dedupe
                 if ctx["creative"] is None:
                     ctx["errors"].append(
                         "Creative QA: the creative file has no Creative Name column — "
@@ -1204,7 +1206,9 @@ def _load_creative_frame(start=None, end=None):
         for m in cmetas:
             dfs.append(read_creative_flat(get_bytes(m["key"]), m["name"]))
             gc.collect()
-        df = filter_date_range(combine_creatives(dfs), start, end)
+        df, creative_dedupe = combine_creatives(dfs, report=True)
+        df = filter_date_range(df, start, end)
+        _CACHE_CREATIVE["dedupe"] = creative_dedupe
         return df, f"{len(cmetas)} creative file(s) pooled ({start} → {end})"
     name, data, _d = fetch_latest_creative()
     if not data:
@@ -1538,6 +1542,7 @@ def _run_pull(send_email=False, start=None, end=None):
         try:
             creative_df = device_df = None
             device_dedupe = None
+            creative_dedupe = None
             if os.environ.get("S3_BUCKET", "").strip():
                 from s3_pull import (fetch_two, list_range, get_bytes,
                                      fetch_latest_creative, fetch_latest_device)
@@ -1559,7 +1564,8 @@ def _run_pull(send_email=False, start=None, end=None):
                         b = None
                         gc.collect()
                     if cdfs:
-                        creative_df = filter_date_range(combine_creatives(cdfs), start, end)
+                        creative_df, creative_dedupe = combine_creatives(cdfs, report=True)
+                        creative_df = filter_date_range(creative_df, start, end)
                         cdfs = None
                         gc.collect()
                     # Device files are rolling LAST-7-DAYS windows: pooling a range
@@ -1695,7 +1701,8 @@ def _run_pull(send_email=False, start=None, end=None):
 
         try:
             ctx = _analyze_path(workbook_path, frames=frames, creative_df=creative_df,
-                                device_df=device_df, device_dedupe=device_dedupe)
+                                device_df=device_df, device_dedupe=device_dedupe,
+                                creative_dedupe=creative_dedupe)
             frames = creative_df = device_df = None
             # Name the report by the DELIVERY date range actually in the data,
             # not the export drop date — multiple same-day pulls of different

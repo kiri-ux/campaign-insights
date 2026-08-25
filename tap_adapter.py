@@ -575,21 +575,50 @@ def combine_creatives(dfs, report=False):
     same date, client, campaign, pool, creative, size and type is the same
     delivery, whatever the vendor now calls it. Newest file wins, which also
     means a restated name or a late-arriving preview URL is picked up.
+
+    With report=True returns (frame, stats). The stats are the instrument: if
+    pooled creative totals disagree with the device or site/app grain, the first
+    question is whether this de-dupe actually collapsed anything, and
+    `residual_dupe_rows` says whether rows sharing a creative identity survived
+    because some other dimension differs between snapshots.
     """
     dfs = [d for d in dfs if d is not None and len(d)]
     if not dfs:
         return (pd.DataFrame(), {}) if report else pd.DataFrame()
     combined = pd.concat(dfs, ignore_index=True, sort=False)
+    raw_rows = len(combined)
+    raw_impr = float(pd.to_numeric(combined.get("Impressions", 0),
+                                   errors="coerce").fillna(0).sum())
     dims = [c for c in combined.columns
             if c not in _MEASURE_COLS and c not in _VOLATILE_ATTRS]
     if dims:
         # dropna=False semantics: blank creative names must survive de-dupe
         combined = combined.drop_duplicates(subset=dims, keep="last")
     combined = combined.reset_index(drop=True)
-    # Now that one row is one delivery, the ID backfill can run across the whole
-    # pool — a creative blank in every row of today's file can take its name
-    # from an earlier drop.
-    return resolve_creative_names(combined, report=report)
+    out = resolve_creative_names(combined, report=report)
+    df = out[0] if report else out
+    if not report:
+        return df
+    stats = out[1] if isinstance(out, tuple) else {}
+    kept_impr = float(pd.to_numeric(df.get("Impressions", 0),
+                                    errors="coerce").fillna(0).sum())
+    # Rows that still share one creative identity after de-dupe. If this is
+    # large, some OTHER dimension is differing between snapshots and the
+    # identity key needs to grow — that is the diagnosis, printed rather than
+    # guessed at.
+    idkeys = [c for c in ("Date", "Client", "Campaign ID", "Campaign Pool ID",
+                          "Creative ID") if c in df.columns]
+    residual = int(df.duplicated(subset=idkeys).sum()) if idkeys else 0
+    stats.update({
+        "files": len(dfs), "raw_rows": raw_rows, "kept_rows": int(len(df)),
+        "rows_removed": raw_rows - int(len(df)),
+        "raw_impressions": int(raw_impr), "kept_impressions": int(kept_impr),
+        "impressions_removed": int(raw_impr - kept_impr),
+        "inflation_factor": (raw_impr / kept_impr) if kept_impr else 1.0,
+        "identity_key": idkeys, "residual_dupe_rows": residual,
+        "dedupe_columns": len(dims),
+    })
+    return df, stats
 
 
 # Attributes the vendor restates between snapshots of the same delivery. They

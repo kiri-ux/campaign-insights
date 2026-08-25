@@ -46,6 +46,22 @@
     <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
   </div>
 
+  {% if c.dedupe %}
+    <p class="note" style="background:#f4f6f8;border-left:3px solid #5B6B7C;padding:10px 14px;border-radius:6px">
+      <strong>Pooling:</strong> {{ c.dedupe.files }} creative file(s) →
+      {{ '{:,.0f}'.format(c.dedupe.raw_rows) }} rows in,
+      <strong>{{ '{:,.0f}'.format(c.dedupe.kept_rows) }}</strong> after de-duplication
+      ({{ '{:,.0f}'.format(c.dedupe.impressions_removed) }} duplicate impressions removed —
+      naive pooling would have read <strong>{{ '{:.2f}×'.format(c.dedupe.inflation_factor) }}</strong>
+      the true delivery).
+      {% if c.dedupe.residual_dupe_rows %}
+      <br><strong style="color:#b42318">{{ '{:,.0f}'.format(c.dedupe.residual_dupe_rows) }} rows still share a
+      creative identity</strong> ({{ c.dedupe.identity_key|join(' + ') }}) — some other dimension differs
+      between snapshots, so this delivery may still be counted more than once. That is the number to
+      chase if this grain disagrees with device or site/app.{% endif %}
+    </p>
+  {% endif %}
+
   {% if s.names_recovered %}
     <p class="note" style="background:#eef4fc;border-left:3px solid #0066B3;padding:10px 14px;border-radius:6px">
       <strong>{{ '{:,.0f}'.format(s.names_recovered) }} row(s) had a blank Creative Name that we filled in</strong>
