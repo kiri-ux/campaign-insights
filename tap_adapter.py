@@ -17,6 +17,7 @@ import io
 import os
 import re
 import tempfile
+import numpy as np
 import pandas as pd
 
 _MEASURES = ["Impressions", "Clicks", "Post Click Conversions",
@@ -69,9 +70,32 @@ _CANON_MAP.update({_canon(v): v for v in _COLMAP.values()})
 
 def _normalize_headers(df, canon_map=None):
     """Rename export headers to the Title Case names the engines use, matching
-    on canonical form so 'Campaign Id', 'campaign_id', 'CAMPAIGN ID' all work."""
+    on canonical form so 'Campaign Id', 'campaign_id', 'CAMPAIGN ID' all work.
+
+    Two different headers can canonicalize to the same name — the creative data
+    view ships 'Creative Name' AND 'Creative Name**', and canonical matching
+    strips the punctuation that tells them apart. Renaming both to 'Creative
+    Name' would leave two identically-labelled columns, and df['Creative Name']
+    would then hand back a DataFrame instead of a Series, breaking every engine
+    downstream. So the second and later collisions take a ' (alt)' suffix and
+    are KEPT — those are the columns carrying a name when the first is blank.
+    """
     cmap = canon_map or _CANON_MAP
-    ren = {c: cmap[_canon(c)] for c in df.columns if _canon(c) in cmap}
+    ren, used = {}, set()
+    for c in df.columns:
+        name = cmap.get(_canon(c))
+        if not name:
+            continue
+        if name in used:
+            import re as _re
+            base = _re.sub(r" \(alt(?: \d+)?\)$", "", name)
+            n, cand = 1, base + " (alt)"
+            while cand in used:
+                n += 1
+                cand = f"{base} (alt {n})"
+            name = cand
+        used.add(name)
+        ren[c] = name
     return df.rename(columns=ren) if ren else df
 
 
@@ -115,6 +139,17 @@ _CREATIVE_EXTRA = {
     "creative_title": "Creative Name", "ad_name": "Creative Name",
     "creative_id": "Creative ID", "creative_size": "Creative Size",
     "creative_type": "Creative Type",
+    # The data view carries SEVERAL creative-name fields, and which one is
+    # populated varies by row: 'Creative Name' can be blank where 'Creative
+    # External Name' has the real name. Each gets its own engine column so
+    # resolve_creative_names() can fall back across them.
+    "creative_external_name": "Creative External Name",
+    "external_creative_name": "Creative External Name",
+    "creative_name_external": "Creative External Name",
+    "external_name": "Creative External Name",
+    "creative_name_use_me": "Creative Name (alt)",
+    "creative_name_2": "Creative Name (alt)",
+    "creative_name_alt": "Creative Name (alt)",
     "campaign_pool_name": "Campaign Pool Name",
     "campaign_pool_id": "Campaign Pool ID",
     # Added to the data view Aug 2026. Header matching is canonical (lowercase,
@@ -149,13 +184,126 @@ _CREATIVE_COLMAP = dict(_COLMAP, **_CREATIVE_EXTRA)
 _CREATIVE_CANON = {_canon(k): v for k, v in _CREATIVE_COLMAP.items()}
 _CREATIVE_CANON.update({_canon(v): v for v in _CREATIVE_COLMAP.values()})
 _CREATIVE_KEEP = ["Date", "Client Business Unit", "Client", "Product 2",
-                  "Strategy Type", "Strategy Name", "Creative Name", "Creative ID",
+                  "Strategy Type", "Strategy Name", "Creative Name",
+                  "Creative External Name", "Creative Name (alt)",
+                  "Creative Name (alt 2)", "Creative Name (alt 3)", "Creative ID",
                   "Creative Size", "Creative Type", "Campaign Pool Name",
                   "Campaign Pool ID", "Campaign ID", "Impressions", "Clicks", "CTR",
                   "Post Click Conversions", "Post View Conversions", "CPM",
                   "Billable Spend", "DSP", "Clickthrough URL", "Preview Image URL",
-                  "25% Completed", "50% Completed", "75% Completed", "100% Completed"]
+                  "25% Completed", "50% Completed", "75% Completed", "100% Completed",
+                  "Name Source"]
 _CREATIVE_QUARTILES = ["25% Completed", "50% Completed", "75% Completed", "100% Completed"]
+
+
+# --- device-insights export -------------------------------------------------
+# Device-grain export (S3 prefix 'device-insights', e.g.
+# 'device-insights_20260822_0844_0.csv'): one row per date x campaign x device.
+# Same dimensions as the creative export, with the creative identity swapped for
+# the device breakdown. Own map/keep list, same as the creative reader.
+_DEVICE_EXTRA = {
+    "device_type": "Device Type", "device": "Device Type",
+    "device_category": "Device Type", "devicetype": "Device Type",
+    "operating_system": "Operating System", "os": "Operating System",
+    "device_os": "Operating System",
+    "browser": "Browser", "device_make": "Device Make", "make": "Device Make",
+    "device_model": "Device Model", "model": "Device Model",
+    "environment": "Environment", "ad_environment": "Environment",
+    "channel_type": "Channel Type", "inventory_type": "Inventory Type",
+    "campaign_pool_name": "Campaign Pool Name",
+    "campaign_pool_id": "Campaign Pool ID",
+}
+_DEVICE_COLMAP = dict(_COLMAP, **_DEVICE_EXTRA)
+_DEVICE_CANON = {_canon(k): v for k, v in _DEVICE_COLMAP.items()}
+_DEVICE_CANON.update({_canon(v): v for v in _DEVICE_COLMAP.values()})
+_DEVICE_KEEP = ["Date", "Client Business Unit", "Client", "Product 2",
+                "Strategy Type", "Strategy Name", "Device Type", "Operating System",
+                "Browser", "Device Make", "Device Model", "Environment",
+                "Channel Type", "Inventory Type", "Campaign Pool Name",
+                "Campaign Pool ID", "Campaign ID", "Impressions", "Clicks", "CTR",
+                "Post Click Conversions", "Post View Conversions", "CPM",
+                "Billable Spend", "DSP"]
+
+
+def _prune_device(df):
+    """Prune/downcast a device export. Device dimensions are low-cardinality, so
+    they categorize well; the Date column stays a plain value because the
+    de-duplication and reconciliation both key on it."""
+    keep = [c for c in _DEVICE_KEEP if c in df.columns]
+    df = df[keep].copy()
+    for c in ("Impressions", "Clicks", "Post Click Conversions", "Post View Conversions"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    if "Billable Spend" in df.columns:
+        df["Billable Spend"] = pd.to_numeric(df["Billable Spend"], errors="coerce").fillna(0.0)
+    for c in ("CTR", "CPM"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
+    for c in ("Client Business Unit", "Product 2", "Strategy Type", "Campaign ID",
+              "Campaign Pool ID", "Device Type", "Operating System", "Browser",
+              "Device Make", "Environment", "Channel Type", "Inventory Type"):
+        if c in df.columns:
+            df[c] = df[c].astype("category")
+    for c in ("Campaign ID", "Campaign Pool ID"):
+        if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
+            df[c] = df[c].astype("Int64").astype("string").fillna("").astype("object")
+    return df
+
+
+def read_device_flat(data, filename=""):
+    """Read one device-insights export (xlsx or csv bytes) with normalized headers."""
+    bio = io.BytesIO(data)
+    if (filename or "").lower().endswith(".csv"):
+        try:
+            df = pd.read_csv(bio, low_memory=False,
+                             usecols=lambda c: _wanted_engine_name(c, _DEVICE_CANON, _DEVICE_KEEP) is not None)
+        except ValueError:
+            df = None
+        if df is None or not len(df.columns):
+            bio.seek(0)
+            df = pd.read_csv(bio, low_memory=False)
+    else:
+        df = _read_xlsx_slim(bio, _DEVICE_CANON, _DEVICE_KEEP)
+    df = _normalize_headers(df, _DEVICE_CANON)
+    if "Device Type" not in df.columns:
+        return df  # let the caller report the layout problem
+    return _prune_device(df)
+
+
+def combine_devices(dfs, report=False):
+    """Pool several device exports into one frame.
+
+    THIS IS THE LOAD-BEARING FUNCTION for the Jul 2026 inflated-device-impressions
+    issue. The vendor drops a rolling LAST-7-DAYS file every day, so any given
+    delivery date appears in up to seven consecutive files. Concatenating them
+    without de-duplicating multiplies that date's impressions by the number of
+    files carrying it — which is exactly the shape of an inflation that hits
+    impressions and clicks by the same factor.
+
+    De-dupe keys on every dimension column (date, client, campaign, device, …)
+    and keeps the LAST occurrence, so the newest file's restatement of a row
+    wins. With `report=True` returns (frame, stats) where stats records how much
+    duplication was removed — surfaced in the dashboard so a silent double-count
+    can never look like growth again."""
+    dfs = [d for d in dfs if d is not None and len(d)]
+    if not dfs:
+        return (pd.DataFrame(), {}) if report else pd.DataFrame()
+    combined = pd.concat(dfs, ignore_index=True, sort=False)
+    raw_rows = len(combined)
+    raw_impr = float(pd.to_numeric(combined.get("Impressions", 0), errors="coerce").fillna(0).sum())
+    dims = [c for c in combined.columns if c not in _MEASURE_COLS]
+    if dims:
+        combined = combined.drop_duplicates(subset=dims, keep="last")
+    combined = combined.reset_index(drop=True)
+    if not report:
+        return combined
+    kept_impr = float(pd.to_numeric(combined.get("Impressions", 0), errors="coerce").fillna(0).sum())
+    stats = {"files": len(dfs), "rows_before": raw_rows, "rows_after": len(combined),
+             "rows_removed": raw_rows - len(combined),
+             "impressions_before": int(raw_impr), "impressions_after": int(kept_impr),
+             "impressions_removed": int(raw_impr - kept_impr),
+             "inflation_factor": (raw_impr / kept_impr) if kept_impr else 1.0}
+    return combined, stats
 
 
 def _wanted_engine_name(header, canon_map=None, keep=None):
@@ -291,6 +439,95 @@ def _prune_creative(df):
     return df
 
 
+# Fallback order for a creative's name. The vendor's files carry a name on 100%
+# of rows; the blanks are created by the data view, and which of its name fields
+# is populated varies row to row — so a blank in the first column is not a
+# missing name until every one of these is blank too.
+_NAME_FALLBACKS = ["Creative Name", "Creative External Name", "Creative Name (alt)",
+                   "Creative Name (alt 2)", "Creative Name (alt 3)"]
+_NAME_SOURCE_COL = "Name Source"
+
+
+def _blank_mask(s):
+    """True where a text column is empty in any of the ways an export manages."""
+    t = s.astype(str).str.strip().str.lower()
+    return s.isna() | t.isin(["", "nan", "none", "null", "n/a", "na", "-", "--",
+                              "#n/a", "0", "."])
+
+
+def resolve_creative_names(df, report=False):
+    """Fill a blank Creative Name from the export's other name fields, then from
+    the same Creative ID elsewhere in the data. Records where each name came from.
+
+    Two independent recoveries, in order of trust:
+
+    1. **Sibling columns** — 'Creative External Name' / 'Creative Name (alt)'.
+       Same row, same vendor, so this is a straight read, not a guess.
+    2. **The same Creative ID on another row** — one ID is one creative, so a
+       name found on any row of that ID applies to all of them. The most
+       frequent non-blank spelling wins. Only runs where an ID exists.
+
+    Anything still blank afterwards is a genuine missing name and stays blank —
+    the point of the report is to catch those, so nothing is invented here.
+    """
+    stats = {"rows": int(len(df)), "blank_before": 0, "recovered": 0,
+             "blank_after": 0, "by_source": {}, "recovered_impressions": 0}
+    if not len(df) or "Creative Name" not in df.columns:
+        return (df, stats) if report else df
+
+    df = df.copy()
+    name = df["Creative Name"].astype("object")
+    blank = _blank_mask(name)
+    source = pd.Series(np.where(blank, "", "vendor"), index=df.index, dtype="object")
+    # Second pass over pooled files: keep the provenance the first pass recorded,
+    # or every already-recovered row would be relabelled 'vendor' and the report
+    # would understate how much of the library the vendor actually named.
+    if _NAME_SOURCE_COL in df.columns:
+        prior = df[_NAME_SOURCE_COL].astype("object")
+        keep = prior.notna() & (prior != "") & (prior != "(still blank)") & ~blank
+        source = source.where(~keep, prior)
+
+    for col in _NAME_FALLBACKS[1:]:
+        if col not in df.columns or not blank.any():
+            continue
+        alt = df[col].astype("object")
+        take = blank & ~_blank_mask(alt)
+        if take.any():
+            name = name.where(~take, alt)
+            source = source.where(~take, col)
+            blank = _blank_mask(name)
+
+    if blank.any() and "Creative ID" in df.columns:
+        cid = df["Creative ID"].astype(str).str.strip()
+        known = pd.DataFrame({"_id": cid[~blank], "_n": name[~blank].astype(str)})
+        known = known[(known["_id"] != "") & (known["_id"].str.lower() != "nan")]
+        if len(known):
+            # most frequent spelling per ID — vendor exports restate names
+            best = (known.groupby("_id")["_n"].agg(
+                lambda s: s.value_counts().idxmax()))
+            filled = cid.map(best)
+            take = blank & filled.notna()
+            if take.any():
+                name = name.where(~take, filled)
+                source = source.where(~take, "matched on Creative ID")
+                blank = _blank_mask(name)
+
+    df["Creative Name"] = name
+    src = source.where(source != "", "(still blank)")
+    df[_NAME_SOURCE_COL] = src
+    # Stats describe the FINAL state of the frame, not just this pass, so they
+    # stay true whether resolution ran once (single upload) or twice (pooled).
+    rec = src.isin(_NAME_FALLBACKS[1:] + ["matched on Creative ID"])
+    stats["recovered"] = int(rec.sum())
+    stats["blank_after"] = int((src == "(still blank)").sum())
+    stats["blank_before"] = stats["recovered"] + stats["blank_after"]
+    stats["by_source"] = {k: int(v) for k, v in src[rec].value_counts().items()}
+    if "Impressions" in df.columns:
+        stats["recovered_impressions"] = int(
+            pd.to_numeric(df.loc[rec, "Impressions"], errors="coerce").fillna(0).sum())
+    return (df, stats) if report else df
+
+
 def read_creative_flat(data, filename=""):
     """Read one creative-insights export (xlsx or csv bytes) into a DataFrame
     with normalized headers. Blank creative names are preserved verbatim."""
@@ -313,21 +550,29 @@ def read_creative_flat(data, filename=""):
     df = _normalize_headers(df, _CREATIVE_CANON)
     if "Creative Name" not in df.columns:
         return df  # let the caller report the layout problem
-    return _prune_creative(df)
+    # Resolve names BEFORE pruning, while the sibling name columns are still here.
+    return _prune_creative(resolve_creative_names(df))
 
 
-def combine_creatives(dfs):
+def combine_creatives(dfs, report=False):
     """Concat several creative exports, de-duped on the dimension columns
-    (rolling windows restate rows) keeping the newest file's version."""
+    (rolling windows restate rows) keeping the newest file's version.
+
+    Name resolution runs again after the concat: a creative that is blank in
+    every row of today's file may be named in yesterday's, and the ID match can
+    only see that once the files are pooled.
+    """
     dfs = [d for d in dfs if d is not None and len(d)]
     if not dfs:
-        return pd.DataFrame()
+        return (pd.DataFrame(), {}) if report else pd.DataFrame()
     combined = pd.concat(dfs, ignore_index=True, sort=False)
     dims = [c for c in combined.columns if c not in _MEASURE_COLS]
     if dims:
         # dropna=False semantics: blank creative names must survive de-dupe
         combined = combined.drop_duplicates(subset=dims, keep="last")
-    return combined.reset_index(drop=True)
+    combined = combined.reset_index(drop=True)
+    out = resolve_creative_names(combined, report=report)
+    return out if report else out
 
 
 _MEASURE_COLS = set(_MEASURES) | {"CTR", "CPM", "Total Spend"}

@@ -1,0 +1,168 @@
+{# Device block — mix, performance and the cross-grain reconciliation.
+   Expects `device` (see app._device_ctx). #}
+{% if device %}
+  {% set v = device %}
+  {% set s = v.summary %}
+  {% set rc = v.recon %}
+
+  <div class="cards">
+    <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.impressions) }}</div>
+      <div class="l">Device-grain impressions ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
+    <div class="kpi"><div class="n">{{ s.top_device or '—' }}<span style="font-size:14px;font-weight:600;color:#5B6B7C"> · {{ '{:.0f}%'.format(s.top_device_share*100) }}</span></div>
+      <div class="l">Largest device ({{ s.devices }} in the file)</div></div>
+    {% if rc %}
+    <div class="kpi{% if rc.summary.clients_mismatched %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(rc.summary.clients_mismatched) }}<span style="font-size:14px;font-weight:600;color:#5B6B7C"> / {{ '{:,.0f}'.format(rc.summary.clients) }}</span></div>
+      <div class="l">Clients where device ≠ campaign totals</div></div>
+    <div class="kpi{% if rc.summary.clients_duplication_shape %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(rc.summary.clients_duplication_shape) }}</div>
+      <div class="l">…of those, with the duplicated-rows fingerprint</div></div>
+    <div class="kpi"><div class="n">{{ '{:+.2f}%'.format(rc.summary.net_pct*100) }}<span style="font-size:14px;font-weight:600;color:#b3402a"> · {{ '{:.2f}%'.format(rc.summary.gross_pct*100) }} gross</span></div>
+      <div class="l">Net vs gross difference (net hides offsetting errors)</div></div>
+    {% endif %}
+    {% if s.ctv_off_target_impressions %}
+    <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(s.ctv_off_target_impressions) }}</div>
+      <div class="l">CTV/Video impressions on a non-TV device</div></div>
+    {% endif %}
+    <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div>
+      <div class="l">Delivery window</div></div>
+  </div>
+
+  <!-- ========================== RECONCILIATION =========================== -->
+  <h2 id="dv-recon" class="cqsec">Reconciliation against the {{ rc.reference if rc else 'creative export' }}
+    <span class="sub">(same delivery, different grain — the totals must agree)</span>
+    {% if rc %}<a class="dl" href="/download/device_recon_by_client.csv">CSV</a>
+    <a class="dl" href="/download_device.xlsx">Excel</a>{% endif %}</h2>
+  {% if not rc %}
+    <p class="note">No creative export in this run to reconcile against — pull both together and
+      this check runs automatically.</p>
+  {% else %}
+    {% set rs = rc.summary %}
+    {% if rs.clients_mismatched %}
+      <p class="note" style="background:#fdecea;border-left:3px solid #b42318;padding:10px 14px;border-radius:6px">
+        ⚠ <strong>{{ rs.clients_mismatched }} client(s) disagree between the device and creative exports</strong>
+        — {{ rs.clients_device_higher }} showing MORE in device, {{ rs.clients_device_lower }} showing less.
+        {% if rs.worst_client %}Worst: <strong>{{ rs.worst_client }}</strong> at {{ '{:+.1%}'.format(rs.worst_pct) }}.{% endif %}
+        These are the same delivery counted two ways, so any gap is a data fault, not a real difference.</p>
+    {% else %}
+      <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
+        ✔ Every client reconciles between the device and creative exports (within
+        {{ '{:.1%}'.format(rc.tolerance) }}).</p>
+    {% endif %}
+    <p class="cqlead"><strong>Why net and gross are both shown.</strong> Netting every client together
+      hides offsetting errors: in July 2026 the month totals differed by only −0.4% while individual
+      advertisers were out by +33%, because inflation on some clients cancelled a 304k-impression
+      shortfall on others. This report compares <em>every client separately</em> and reports the gross
+      error, which is the number that matters. A client whose impressions <em>and</em> clicks are both
+      up by the same factor is flagged as the duplicated-rows fingerprint — the signature of a rolling
+      export pooled without de-duplication.</p>
+
+    {% if rc.clients %}
+    <h3>Clients that don't reconcile <span class="sub">({{ rc.clients_total }})</span></h3>
+    <table class="cq paginate"><thead><tr>
+      <th>Client</th><th>Device impr</th><th>Creative impr</th><th>Difference</th><th>%</th>
+      <th>Device clicks</th><th>Creative clicks</th><th>Click %</th><th>Read</th>
+    </tr></thead><tbody>
+      {% for r in rc.clients %}
+      <tr style="background:#fff6f4">
+        <td>{{ r.client }}</td><td>{{ r.impressions_device }}</td><td>{{ r.impressions_reference }}</td>
+        <td>{{ r.impr_diff }}</td><td><strong>{{ r.impr_pct }}</strong></td>
+        <td>{{ r.clicks_device }}</td><td>{{ r.clicks_reference }}</td><td>{{ r.click_pct }}</td>
+        <td class="cqwrap">{{ r.verdict }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    {% if rc.clients_total > rc.clients|length %}<p class="note">Showing {{ rc.clients|length }} of {{ rc.clients_total }} — full list in the CSV.</p>{% endif %}
+    {% endif %}
+
+    {% if rc.campaigns %}
+    <h3>Campaign-level detail <span class="sub">({{ rc.campaigns_total }} campaigns out of tolerance)</span>
+      <a class="dl" href="/download/device_recon_by_campaign.csv">CSV</a></h3>
+    <table class="cq paginate"><thead><tr>
+      <th>Client</th><th>Campaign ID</th><th>Device impr</th><th>Creative impr</th><th>Difference</th><th>%</th><th>Read</th>
+    </tr></thead><tbody>
+      {% for r in rc.campaigns %}
+      <tr><td>{{ r.client }}</td><td>{{ r.campaign_id }}</td><td>{{ r.impressions_device }}</td>
+          <td>{{ r.impressions_reference }}</td><td>{{ r.impr_diff }}</td><td>{{ r.impr_pct }}</td>
+          <td class="cqwrap">{{ r.verdict }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    {% endif %}
+  {% endif %}
+
+  {% if s.dedupe and s.dedupe.rows_removed %}
+  <h3>Rolling-window de-duplication <span class="sub">(what pooling the files would have double-counted)</span></h3>
+  <p class="note" style="background:#fff6e5;border-left:3px solid #8a5a00;padding:10px 14px;border-radius:6px">
+    Pooled <strong>{{ s.dedupe.files }}</strong> device files. Each is a rolling last-7-days window, so
+    the same delivery date arrives in several of them: <strong>{{ '{:,.0f}'.format(s.dedupe.rows_removed) }}</strong>
+    duplicate rows carrying <strong>{{ '{:,.0f}'.format(s.dedupe.impressions_removed) }}</strong> impressions
+    were removed. Summing the files as-is would have reported
+    <strong>{{ '{:.2f}×'.format(s.dedupe.inflation_factor) }}</strong> the true delivery.</p>
+  {% endif %}
+
+  <!-- ============================== DEVICE MIX ============================ -->
+  <h2 id="dv-mix" class="cqsec">Device mix
+    <span class="sub">(where delivery actually lands)</span>
+    <a class="dl" href="/download/device_by_device.csv">CSV</a></h2>
+  <table class="cq"><thead><tr>
+    <th>Device</th><th>Impressions</th><th>Share</th><th>Clicks</th><th>CTR</th>
+    <th>Conv</th><th>Conv rate</th><th>Spend</th><th>CPM</th><th>Campaigns</th>
+  </tr></thead><tbody>
+    {% for r in v.by_device %}
+    <tr><td>{{ r.device }}</td><td>{{ r.impressions }}</td><td>{{ r.share }}</td><td>{{ r.clicks }}</td>
+        <td>{{ r.ctr }}</td><td>{{ r.conversions }}</td><td>{{ r.conv_rate }}</td>
+        <td>{{ r.spend }}</td><td>{{ r.cpm }}</td><td>{{ r.campaigns }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+
+  {% if v.ctv_off_target %}
+  <h3>CTV / Video delivering off a TV screen
+    <span class="sub">(a connected-TV line serving to desktop or mobile is a trafficking question)</span>
+    <a class="dl" href="/download/device_ctv_off_target.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Product</th><th>Device</th><th>Impressions</th><th>Share of product</th><th>Clicks</th><th>Spend</th><th>CPM</th></tr></thead><tbody>
+    {% for r in v.ctv_off_target %}
+    <tr style="background:#fff6f4"><td>{{ pills(r.product) if pills is defined else r.product }}</td>
+        <td>{{ r.device }}</td><td>{{ r.impressions }}</td><td>{{ r.share }}</td>
+        <td>{{ r.clicks }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if v.by_product_device %}
+  <h3>Device mix within each product
+    <span class="sub">(share is of that product's own delivery)</span>
+    <a class="dl" href="/download/device_by_product_device.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Product</th><th>Device</th><th>Impressions</th><th>Share of product</th><th>Clicks</th><th>CTR</th><th>Conv</th><th>Spend</th><th>CPM</th></tr></thead><tbody>
+    {% for r in v.by_product_device %}
+    <tr><td>{{ pills(r.product) if pills is defined else r.product }}</td><td>{{ r.device }}</td>
+        <td>{{ r.impressions }}</td><td>{{ r.share }}</td><td>{{ r.clicks }}</td><td>{{ r.ctr }}</td>
+        <td>{{ r.conversions }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if v.by_date %}
+  <h3>Daily totals <span class="sub">(a spike means duplicate files, a dip means a missing one)</span>
+    <a class="dl" href="/download/device_by_date.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Date</th><th>Impressions</th><th>vs median</th><th>Clicks</th><th>Spend</th><th>Rows</th><th>Flag</th></tr></thead><tbody>
+    {% for r in v.by_date %}
+    <tr{% if r.flag %} style="background:#fff6f4"{% endif %}>
+      <td>{{ r.date }}</td><td>{{ r.impressions }}</td><td>{{ r.vs_median }}</td><td>{{ r.clicks }}</td>
+      <td>{{ r.spend }}</td><td>{{ r.rows }}</td><td class="cqwrap">{{ r.flag }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if v.by_client_device %}
+  <h3>Device mix by client <span class="sub">(share is of that client's own delivery)</span>
+    <a class="dl" href="/download/device_by_client_device.csv">CSV</a></h3>
+  <table class="cq paginate"><thead><tr><th>Client</th><th>Device</th><th>Impressions</th><th>Share</th><th>Clicks</th><th>CTR</th><th>Spend</th><th>CPM</th></tr></thead><tbody>
+    {% for r in v.by_client_device %}
+    <tr><td>{{ r.client }}</td><td>{{ r.device }}</td><td>{{ r.impressions }}</td><td>{{ r.share }}</td>
+        <td>{{ r.clicks }}</td><td>{{ r.ctr }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+{% else %}
+  <p class="note">No device-insights export in this run. Drop a <code>device-insights…</code> file
+     in the S3 prefix and it will appear here, along with the reconciliation against the creative export.</p>
+{% endif %}

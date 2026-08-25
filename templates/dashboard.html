@@ -108,6 +108,10 @@
   .pager button:disabled{color:var(--muted);cursor:default;opacity:.5;}
   tr.lowctrblock{background:#eef4fc;}
   tr.lowctrblock td{border-bottom-color:#d5e3f5;}
+  .cq td:nth-child(-n+3),.cq th:nth-child(-n+3){text-align:left;}
+  .cqwrap{white-space:normal;max-width:340px;word-break:break-word;text-align:left;}
+  .cqsec{scroll-margin-top:90px;}
+  .cqlead{color:#5B6B7C;font-size:13px;margin:4px 0 10px;max-width:1100px;}
   .acctbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#ffe9e4;color:#b42318;letter-spacing:.02em;}
 </style>
 </head>
@@ -140,6 +144,7 @@
     <button class="tabbtn active" data-tab="all" type="button">All Placements</button>
     <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
     <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
+    <button class="tabbtn" data-tab="device" type="button">Device{% set _dm = (device.recon.summary.clients_mismatched if device and device.recon else 0) %}{% if _dm %}<span class="ct" style="background:#ffe9e4;color:#b42318;font-weight:700;padding:1px 7px;border-radius:99px">{{ _dm }} to check</span>{% endif %}</button>
     <button class="tabbtn" data-tab="creative" type="button">Creative{% set _cf = (creative.summary.blank_campaigns if creative else 0) + (creative.summary.sm_display_size_creatives if creative else 0) %}{% if _cf %}<span class="ct" style="background:#ffe9e4;color:#b42318;font-weight:700;padding:1px 7px;border-radius:99px">{{ _cf }} to review</span>{% endif %}</button>
     {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
     <span class="pillgroup">
@@ -346,6 +351,13 @@
       <span class="sub">(creative-grain export — data quality, trafficking, and per-creative performance)</span></h2>
     {% include "_creative_qa.html" %}
   </div><!-- /tab-creative -->
+
+  <!-- ============================== DEVICE TAB =============================== -->
+  <div class="tabpane" id="tab-device" style="display:none">
+    <h2 class="tabhead">Device
+      <span class="sub">(device-grain delivery — mix, performance, and reconciliation against the creative export)</span></h2>
+    {% include "_device.html" %}
+  </div><!-- /tab-device -->
 
 </div>
 <script>

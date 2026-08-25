@@ -47,7 +47,7 @@ def list_range(start_iso, end_iso, grace_days=None):
     override with S3_RANGE_GRACE_DAYS) catches files dropped up to a week+ after
     the requested window that still carry in-range delivery — rows get filtered
     to the exact range downstream. Returns (site_metas, app_metas, ttddv_metas,
-    creative_metas, capped): metas are [{'name','key','date'}] oldest-first (so
+    creative_metas, device_metas, capped): metas are [{'name','key','date'}] oldest-first (so
     later files win de-dupe); capped=True if the S3_RANGE_MAX_FILES cap (default
     16 per side) trimmed the oldest files out."""
     import datetime as _dt
@@ -58,8 +58,9 @@ def list_range(start_iso, end_iso, grace_days=None):
     s3, bucket = _client_and_cfg()
     cap = int(os.environ.get("S3_RANGE_MAX_FILES", "16"))
 
-    sites, apps, ttddv, creatives = [], [], [], []
-    buckets = {"site": sites, "app": apps, "ttddv": ttddv, "creative": creatives}
+    sites, apps, ttddv, creatives, devices = [], [], [], [], []
+    buckets = {"site": sites, "app": apps, "ttddv": ttddv, "creative": creatives,
+               "device": devices}
     for obj in _iter_objects(s3, bucket):
         key = obj["Key"]
         kind = _kind_for_key(key)
@@ -73,7 +74,7 @@ def list_range(start_iso, end_iso, grace_days=None):
 
     capped = False
     out = []
-    for lst in (sites, apps, ttddv, creatives):
+    for lst in (sites, apps, ttddv, creatives, devices):
         lst.sort(key=lambda m: (m["date"], m["_lm"]))  # oldest first
         if len(lst) > cap:
             lst = lst[-cap:]  # keep the newest `cap` files
@@ -81,7 +82,7 @@ def list_range(start_iso, end_iso, grace_days=None):
         for m in lst:
             m.pop("_lm", None)
         out.append(lst)
-    return out[0], out[1], out[2], out[3], capped
+    return out[0], out[1], out[2], out[3], out[4], capped
 
 
 def list_available_dates():
@@ -90,13 +91,15 @@ def list_available_dates():
     Lets the UI show what's pullable before anyone hits the button."""
     s3, bucket = _client_and_cfg()
     dates = {}
-    label = {"site": "sites", "app": "apps", "ttddv": "ttddv", "creative": "creatives"}
+    label = {"site": "sites", "app": "apps", "ttddv": "ttddv",
+             "creative": "creatives", "device": "devices"}
     for obj in _iter_objects(s3, bucket):
         kind = _kind_for_key(obj["Key"])
         if not kind:
             continue
         fdate = _date_from_key(obj["Key"], obj.get("LastModified"))
-        d = dates.setdefault(fdate, {"sites": 0, "apps": 0, "ttddv": 0, "creatives": 0})
+        d = dates.setdefault(fdate, {"sites": 0, "apps": 0, "ttddv": 0,
+                                     "creatives": 0, "devices": 0})
         d[label[kind]] += 1
     return dates
 
@@ -126,15 +129,24 @@ def _creative_match():
     return os.environ.get("S3_CREATIVE_MATCH", "creative-insights").strip().lower()
 
 
+def _device_match():
+    """Substring marking a device-insights export, e.g.
+    'device-insights_20260822_0844_0.csv'. Override: S3_DEVICE_MATCH."""
+    return os.environ.get("S3_DEVICE_MATCH", "device-insights").strip().lower()
+
+
 def _classify(base):
-    """'creative' | 'ttddv' | 'site' | 'app' | None for a lowercased filename.
+    """'creative' | 'device' | 'ttddv' | 'site' | 'app' | None for a lowercased
+    filename.
     Creative exports are checked FIRST — they're a different grain entirely and
     their name can contain other markers. TTD/DV360 combined exports come next
     because their name ('ttddv-siteapp-…') also contains the site/app substrings."""
     t, si, ap = _matchers()
-    cr = _creative_match()
+    cr, dv = _creative_match(), _device_match()
     if cr and _sep_strip(cr) in _sep_strip(base):
         return "creative"
+    if dv and _sep_strip(dv) in _sep_strip(base):
+        return "device"
     if t and t in base:
         return "ttddv"
     if si in base:
@@ -148,8 +160,12 @@ def _suffixes(kind):
     """Accepted extensions per kind. Site/app/ttddv follow S3_SUFFIX (default
     .xlsx); the creative export arrives as CSV, so it accepts .csv and .xlsx
     unless S3_CREATIVE_SUFFIX narrows it."""
-    raw = (os.environ.get("S3_CREATIVE_SUFFIX", ".csv,.xlsx") if kind == "creative"
-           else os.environ.get("S3_SUFFIX", ".xlsx"))
+    if kind == "creative":
+        raw = os.environ.get("S3_CREATIVE_SUFFIX", ".csv,.xlsx")
+    elif kind == "device":
+        raw = os.environ.get("S3_DEVICE_SUFFIX", ".csv,.xlsx")
+    else:
+        raw = os.environ.get("S3_SUFFIX", ".xlsx")
     return tuple(s.strip().lower() for s in raw.split(",") if s.strip())
 
 
@@ -169,9 +185,10 @@ def _prefixes():
     """Prefixes to scan. S3_CREATIVE_PREFIX is optional — set it only if the
     creative exports land in a different folder than the site/app ones."""
     out = [os.environ.get("S3_PREFIX", "").strip()]
-    cp = os.environ.get("S3_CREATIVE_PREFIX", "").strip()
-    if cp and cp not in out:
-        out.append(cp)
+    for var in ("S3_CREATIVE_PREFIX", "S3_DEVICE_PREFIX"):
+        p = os.environ.get(var, "").strip()
+        if p and p not in out:
+            out.append(p)
     return out
 
 
@@ -204,7 +221,8 @@ def fetch_two():
     region = os.environ.get("AWS_REGION", "").strip() or None
     s3 = boto3.client("s3", region_name=region)
 
-    newest = {"site": None, "app": None, "ttddv": None, "creative": None}
+    newest = {"site": None, "app": None, "ttddv": None, "creative": None,
+              "device": None}
     for obj in _iter_objects(s3, bucket):
         kind = _kind_for_key(obj["Key"])
         if kind and (newest[kind] is None or obj["LastModified"] > newest[kind]["LastModified"]):
@@ -223,6 +241,22 @@ def fetch_two():
     tname, tbytes, _tdate = _get(newest_ttddv)
     date_str = sdate or adate
     return sname, sbytes, aname, abytes, tname, tbytes, date_str
+
+
+def fetch_latest_device():
+    """Return (filename, bytes, date_str) for the newest device-insights export."""
+    s3, bucket = _client_and_cfg()
+    newest = None
+    for obj in _iter_objects(s3, bucket):
+        if _kind_for_key(obj["Key"]) != "device":
+            continue
+        if newest is None or obj["LastModified"] > newest["LastModified"]:
+            newest = obj
+    if not newest:
+        return None, None, None
+    body = s3.get_object(Bucket=bucket, Key=newest["Key"])["Body"].read()
+    return (newest["Key"].rsplit("/", 1)[-1], body,
+            _date_from_key(newest["Key"], newest.get("LastModified")))
 
 
 def fetch_latest_creative():
@@ -262,7 +296,7 @@ def fetch_latest_xlsx():
             key = obj["Key"]
             if key.endswith("/") or not key.lower().endswith(suffix):
                 continue
-            if _classify(key.rsplit("/", 1)[-1].lower()) == "creative":
+            if _classify(key.rsplit("/", 1)[-1].lower()) in ("creative", "device"):
                 continue  # different grain — never the "insights workbook"
             if newest is None or obj["LastModified"] > newest["LastModified"]:
                 newest = obj

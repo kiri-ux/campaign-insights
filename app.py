@@ -18,6 +18,7 @@ import pandas as pd
 from insights_engine import build_insights
 from block_audit_engine import audit_block_leak
 from creative_engine import audit_creatives, alert_subject
+from device_engine import analyze_devices
 from exchange_engine import analyze_exchanges
 from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks, merge_site_blocks
 from product_map import build_pmap
@@ -167,11 +168,14 @@ def analyze():
     return render_template("dashboard.html", **ctx)
 
 
-def _analyze_path(path=None, frames=None, creative_df=None):
+def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
+                  device_dedupe=None):
     """Run the full analysis and return the template ctx. Pass either an .xlsx
     `path` (manual upload) or pre-built `frames` (automated pull — no xlsx read).
-    `creative_df` is the optional creative-insights export (its own grain — it
-    feeds the Creative QA tab only and never touches the placement analysis)."""
+    `creative_df` is the optional creative-insights export and `device_df` the
+    optional device-insights export. Both are their own grain: they feed their own
+    tabs and never touch the placement analysis. `device_dedupe` carries what
+    combine_devices removed when pooling rolling-window files."""
     # Free the previous run's cached DataFrames before loading a new dataset —
     # every MB matters on a small instance, and disk-persisted CSVs still serve
     # downloads for saved reports while the new run repopulates the cache.
@@ -185,7 +189,7 @@ def _analyze_path(path=None, frames=None, creative_df=None):
            "low_ctr_sites": None, "low_ctr_sites_total": 0, "low_ctr_sites_acct_blocked": 0,
            "blocked_site_clients": None, "rec_high": None, "rec_low": None,
            "has_blocklist": bool(os.environ.get("BLOCKLIST_WEBHOOK_URL", "").strip()),
-           "creative": None,
+           "creative": None, "device": None,
            "errors": []}
     perf_bu = pd.DataFrame()
     cflag = pd.DataFrame()
@@ -644,6 +648,19 @@ def _analyze_path(path=None, frames=None, creative_df=None):
         except Exception as e:
             ctx["errors"].append(f"Creative QA: {e}")
 
+        # Device analysis — own grain, own tab. The reconciliation compares it
+        # against the creative frame (same delivery, different grain), which is
+        # the check that would have caught July's inflated device impressions.
+        try:
+            if device_df is not None and len(device_df):
+                ctx["device"] = _device_ctx(device_df, creative_df, device_dedupe)
+                if ctx["device"] is None:
+                    ctx["errors"].append(
+                        "Device: the file has no Device Type column — check that the "
+                        "device-insights export layout hasn't changed.")
+        except Exception as e:
+            ctx["errors"].append(f"Device analysis: {e}")
+
         # Persist every cached CSV to disk so /download links keep working after the
         # in-memory cache is cleared (next run) or the process restarts (e.g. saved
         # reports served later). The latest analysis's CSVs are always available.
@@ -662,6 +679,96 @@ def _creative_ctx(creative_df):
         return None
     _CACHE_CREATIVE["latest"] = {"cr": cr, "source": "pull"}
     return _creative_ctx_from(cr)
+
+
+_DV_MONEY = ["spend", "cpm", "spend_device", "spend_reference"]
+_DV_INTS = ["impressions", "clicks", "conversions", "campaigns", "rows",
+            "impressions_device", "impressions_reference", "impr_diff",
+            "clicks_device", "clicks_reference", "click_diff"]
+_DV_PCT = ["ctr", "conv_rate", "share", "impr_pct", "click_pct", "vs_median"]
+_CACHE_DEVICE = {}
+
+
+def _dv_rows(df, n=200):
+    if df is None or not len(df):
+        return []
+    return _fmt(df.head(n), pct_cols=_DV_PCT, money_cols=_DV_MONEY,
+                int_cols=_DV_INTS).to_dict("records")
+
+
+def _device_ctx(device_df, reference_df=None, dedupe_stats=None):
+    """Run the device analysis and shape it for the template. The reference frame
+    is the creative export for the same window — same delivery, different grain,
+    so the two must total the same."""
+    dv = analyze_devices(device_df, reference_df, "creative export", dedupe_stats)
+    if not dv:
+        return None
+    for key in ("by_device", "by_product_device", "by_client_device",
+                "ctv_off_target", "by_date"):
+        tbl = dv.get(key)
+        if tbl is not None and len(tbl):
+            _CACHE[f"device_{key}.csv"] = tbl
+    recon = dv.get("reconciliation") or {}
+    for key in ("by_client", "by_campaign"):
+        tbl = recon.get(key)
+        if tbl is not None and len(tbl):
+            _CACHE[f"device_recon_{key}.csv"] = tbl
+    _CACHE_DEVICE["latest"] = dv
+    ctx = {
+        "summary": dv["summary"],
+        "by_device": _dv_rows(dv["by_device"], 30),
+        "by_product_device": _dv_rows(dv["by_product_device"], 120),
+        "by_client_device": _dv_rows(dv["by_client_device"], 200),
+        "ctv_off_target": _dv_rows(dv["ctv_off_target"], 40),
+        "by_date": _dv_rows(dv["by_date"], 60),
+        "recon": None,
+    }
+    if recon.get("summary"):
+        bc = recon.get("by_client")
+        bk = recon.get("by_campaign")
+        mism_c = bc[bc["verdict"] != "matches"] if bc is not None and len(bc) else pd.DataFrame()
+        mism_k = bk[bk["verdict"] != "matches"] if bk is not None and len(bk) else pd.DataFrame()
+        ctx["recon"] = {
+            "summary": recon["summary"], "reference": recon["reference"],
+            "tolerance": recon["tolerance"],
+            "clients": _dv_rows(mism_c, 100), "clients_total": int(len(mism_c)),
+            "campaigns": _dv_rows(mism_k, 100), "campaigns_total": int(len(mism_k)),
+        }
+    return ctx
+
+
+def _device_xlsx_bytes(dv):
+    """Every device table in one workbook — what the reconciliation alert attaches."""
+    if not dv:
+        return None
+    recon = dv.get("reconciliation") or {}
+    sheets = [("Reconciliation by client", recon.get("by_client")),
+              ("Reconciliation by campaign", recon.get("by_campaign")),
+              ("By device", dv.get("by_device")),
+              ("By product and device", dv.get("by_product_device")),
+              ("By client and device", dv.get("by_client_device")),
+              ("CTV off target", dv.get("ctv_off_target")),
+              ("Daily totals", dv.get("by_date"))]
+    sheets = [(n, t) for n, t in sheets if t is not None and len(t)]
+    if not sheets:
+        return None
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
+        for name, t in sheets:
+            t.head(20000).to_excel(xl, sheet_name=name[:31], index=False)
+        _autosize_columns(xl)
+    return buf.getvalue()
+
+
+@app.route("/download_device.xlsx")
+def download_device():
+    data = _device_xlsx_bytes(_CACHE_DEVICE.get("latest"))
+    if data is None:
+        abort(404)
+    return send_file(io.BytesIO(data),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=f"device insights_{_CACHE.get('report_range', 'latest')}.xlsx")
 
 
 def _creative_xlsx_bytes(cr):
@@ -1429,14 +1536,17 @@ def _run_pull(send_email=False, start=None, end=None):
         workbook_path = None
         cleanup = []
         try:
-            creative_df = None
+            creative_df = device_df = None
+            device_dedupe = None
             if os.environ.get("S3_BUCKET", "").strip():
-                from s3_pull import fetch_two, list_range, get_bytes, fetch_latest_creative
+                from s3_pull import (fetch_two, list_range, get_bytes,
+                                     fetch_latest_creative, fetch_latest_device)
                 from tap_adapter import (read_flat, build_frames, combine_flats,
                                          filter_date_range, split_ttddv,
-                                         read_creative_flat, combine_creatives)
+                                         read_creative_flat, combine_creatives,
+                                         read_device_flat, combine_devices)
                 if start and end:
-                    smetas, ametas, tmetas, cmetas, capped = list_range(start, end)
+                    smetas, ametas, tmetas, cmetas, dmetas, capped = list_range(start, end)
                     if not (smetas and ametas):
                         have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
@@ -1451,6 +1561,20 @@ def _run_pull(send_email=False, start=None, end=None):
                     if cdfs:
                         creative_df = filter_date_range(combine_creatives(cdfs), start, end)
                         cdfs = None
+                        gc.collect()
+                    # Device files are rolling LAST-7-DAYS windows: pooling a range
+                    # means the same delivery date arrives in several files, so the
+                    # de-dupe is mandatory and what it removed gets reported.
+                    ddfs = []
+                    for m in dmetas:
+                        b = get_bytes(m["key"])
+                        ddfs.append(read_device_flat(b, m["name"]))
+                        b = None
+                        gc.collect()
+                    if ddfs:
+                        device_df, device_dedupe = combine_devices(ddfs, report=True)
+                        device_df = filter_date_range(device_df, start, end)
+                        ddfs = None
                         gc.collect()
                     sdfs, adfs = [], []
                     for metas, acc in ((smetas, sdfs), (ametas, adfs)):
@@ -1482,6 +1606,7 @@ def _run_pull(send_email=False, start=None, end=None):
                     source_file = (f"{len(smetas)} site + {len(ametas)} app"
                                    + (f" + {len(tmetas)} TTD/DV360" if tmetas else "")
                                    + (f" + {len(cmetas)} creative" if cmetas else "")
+                                   + (f" + {len(dmetas)} device" if dmetas else "")
                                    + f" files pooled ({start} → {end})"
                                    + (" — oldest files trimmed by S3_RANGE_MAX_FILES cap" if capped else ""))
                 else:
@@ -1530,8 +1655,21 @@ def _run_pull(send_email=False, start=None, end=None):
                         if trim_days > 0 and maxd is not None:
                             creative_df = filter_date_range(creative_df, cut_s, cut_e)
                         gc.collect()
+                    dname, dbytes, _ddate = fetch_latest_device()
+                    if dbytes:
+                        # Run the single file through the de-duper too: at device
+                        # grain (date x campaign x device) a repeated row is always
+                        # a fault, and we would rather remove it and say so than
+                        # quietly report inflated delivery.
+                        device_df, device_dedupe = combine_devices(
+                            [read_device_flat(dbytes, dname)], report=True)
+                        dbytes = None
+                        if trim_days > 0 and maxd is not None:
+                            device_df = filter_date_range(device_df, cut_s, cut_e)
+                        gc.collect()
                     source_file = f"{sname} + {aname}" + (f" + {tname}" if tname else "") \
                         + (f" + {cname}" if cname else "") \
+                        + (f" + {dname}" if dname else "") \
                         + (f" (last {trim_days} delivery days)" if trim_days > 0 else "")
             else:
                 if os.environ.get("GRAPH_CLIENT_ID", "").strip():
@@ -1556,8 +1694,9 @@ def _run_pull(send_email=False, start=None, end=None):
             return {"ok": False, "error": f"Source error: {e}"}, 502
 
         try:
-            ctx = _analyze_path(workbook_path, frames=frames, creative_df=creative_df)
-            frames = creative_df = None
+            ctx = _analyze_path(workbook_path, frames=frames, creative_df=creative_df,
+                                device_df=device_df, device_dedupe=device_dedupe)
+            frames = creative_df = device_df = None
             # Name the report by the DELIVERY date range actually in the data,
             # not the export drop date — multiple same-day pulls of different
             # windows get distinct names, while re-pulling the same window
@@ -1630,6 +1769,18 @@ def _run_pull(send_email=False, start=None, end=None):
                     if _cached:
                         result["creative"]["email"] = _send_creative_alert(
                             _cached, source_file, view_url)
+            if ctx.get("device"):
+                _ds = ctx["device"]["summary"]
+                result["device"] = {"impressions": _ds["impressions"],
+                                    "devices": _ds["devices"],
+                                    "date_flags": _ds.get("date_flags", 0)}
+                if _ds.get("recon"):
+                    result["device"]["reconciliation"] = {
+                        k: _ds["recon"][k] for k in
+                        ("clients_mismatched", "clients_device_higher",
+                         "clients_device_lower", "net_pct", "gross_pct")}
+                if _ds.get("dedupe", {}).get("rows_removed"):
+                    result["device"]["dedupe_rows_removed"] = _ds["dedupe"]["rows_removed"]
             if send_email:
                 result["email"] = _send_weekly_email(saved, view_url, xlsx, bl_xlsx, sheet_links)
             return result, 200

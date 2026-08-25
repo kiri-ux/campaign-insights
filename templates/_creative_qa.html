@@ -46,9 +46,19 @@
     <div class="kpi"><div class="n">{{ s.window_start or '—' }}{% if s.window_end and s.window_end != s.window_start %} → {{ s.window_end }}{% endif %}</div><div class="l">Delivery window ({{ '{:,.0f}'.format(s.rows) }} rows)</div></div>
   </div>
 
+  {% if s.names_recovered %}
+    <p class="note" style="background:#eef4fc;border-left:3px solid #0066B3;padding:10px 14px;border-radius:6px">
+      <strong>{{ '{:,.0f}'.format(s.names_recovered) }} row(s) had a blank Creative Name that we filled in</strong>
+      — {{ '{:,.0f}'.format(s.names_recovered_impressions) }} impressions that would otherwise be unattributable.
+      Source:
+      {% for src, n in s.name_sources.items() %}{{ '{:,.0f}'.format(n) }} from {{ src }}{% if not loop.last %}, {% endif %}{% endfor %}.
+      These names were <em>reconstructed here, not sent by the vendor</em> — the export still needs fixing, and the
+      count below is what's left after recovery.</p>
+  {% endif %}
+
   {% if not s.blank_rows %}
     <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
-      ✔ Every row in this export has a creative name.{% if s.status != 'clean' %}
+      ✔ Every row in this export {% if s.names_recovered %}now has a creative name after recovery{% else %}has a creative name{% endif %}.{% if s.status != 'clean' %}
       Other checks did flag something — see below.{% endif %}</p>
   {% elif s.blank_campaigns_delivering %}
     <p class="note" style="background:#fdecea;border-left:3px solid #b42318;padding:10px 14px;border-radius:6px">

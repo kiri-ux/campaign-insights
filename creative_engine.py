@@ -142,6 +142,32 @@ def _num(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
 
+_NAME_SOURCE_COL = "Name Source"
+
+
+def _name_source_summary(d, impr):
+    """How many creative names had to be recovered, and from where.
+
+    The creative data view carries several name fields and populates them
+    inconsistently; tap_adapter fills a blank from a sibling column, or from the
+    same Creative ID elsewhere in the data, and stamps where each name came
+    from. Surfacing that here keeps two different things apart: names the vendor
+    sent, and names we reconstructed. Without it the blank count silently drops
+    and it looks like the vendor fixed the export.
+    """
+    out = {"names_recovered": 0, "names_recovered_impressions": 0,
+           "names_from_vendor": int(len(d)), "name_sources": {}}
+    if _NAME_SOURCE_COL not in d.columns:
+        return out
+    src = d[_NAME_SOURCE_COL].astype(str)
+    rec = ~src.isin(["vendor", "(still blank)", "nan", ""])
+    out["names_recovered"] = int(rec.sum())
+    out["names_from_vendor"] = int((src == "vendor").sum())
+    out["names_recovered_impressions"] = int(impr[rec].sum()) if rec.any() else 0
+    out["name_sources"] = {str(k): int(v) for k, v in src[rec].value_counts().items()}
+    return out
+
+
 def blank_reason(v):
     """'empty' | 'placeholder' | None for one Creative Name value."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -713,6 +739,10 @@ def audit_creatives(df, min_impressions=None):
         "blank_impr_pct": float(impr[bad].sum() / impr.sum()) if impr.sum() else 0.0,
         "blank_spend_pct": float(spend[bad].sum() / spend.sum()) if spend.sum() else 0.0,
         "has_creative_id": bool(cols["creative_id"]),
+        # Name recovery, recorded upstream by tap_adapter.resolve_creative_names.
+        # Reported so a shrinking blank count can never be mistaken for the
+        # vendor having fixed something: these names were recovered, not sent.
+        **_name_source_summary(d, impr),
         "has_click_url": bool(cols.get("click_url")),
         "has_preview_url": bool(cols.get("preview_url")),
         "has_quartiles": bool(cols.get("q100") or cols.get("q25")),

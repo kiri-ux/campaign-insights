@@ -1,6 +1,6 @@
 # AdLib Placement & Impact Insights
 
-Proactive oversight layer for AdLib delivery. Two inputs:
+Proactive oversight layer for AdLib delivery. Four inputs:
 
 1. **Insights workbook** (.xlsx) — the AdLib "Insights" export with Client /
    Product / Strategy / Site+App Overview sheets. Produces performance by
@@ -21,10 +21,48 @@ Proactive oversight layer for AdLib delivery. Two inputs:
    tagging coverage, and per-creative performance by size, type and completion
    rate. See below.
 
+4. **Device-insights export** (.csv/.xlsx, filename prefix `device-insights`) —
+   device-grain delivery. Feeds the **Device tab**: device mix and performance,
+   CTV/Video delivering off a TV screen, and the cross-grain reconciliation
+   described below.
+
+## Device insights & reconciliation
+
+Device-grain delivery, plus the check that exists because of the July 2026 dispute:
+device impressions in the warehouse read ~33% higher than campaign totals for several
+advertisers while the vendor's S3 files reconciled exactly, and nothing compared the two
+grains, so it ran for three weeks.
+
+Every grain of the same delivery must total the same. On each pull the Device tab:
+
+| Check | What it does |
+|---|---|
+| Reconciliation vs the creative export | Per client **and** per campaign. Reports **net and gross** difference side by side — netting hides offsetting errors, gross doesn't |
+| Duplicated-rows fingerprint | Flags a client whose impressions **and** clicks are both up by the same factor — the signature of a rolling export pooled without de-duplication |
+| Rolling-window de-duplication | The vendor drops a LAST-7-DAYS file daily, so one delivery date lands in up to seven files. `combine_devices` de-dupes on every dimension (newest wins) and **reports what it removed** |
+| Daily totals | Spike = duplicate files, dip = a missing one |
+| CTV off target | Connected-TV / Video products delivering to desktop, mobile or tablet |
+
+Env vars: `S3_DEVICE_MATCH` (default `device-insights`), `S3_DEVICE_SUFFIX`
+(`.csv,.xlsx`), `S3_DEVICE_PREFIX`, `DEVICE_RECON_TOLERANCE` (default `0.005`),
+`DEVICE_RECON_MIN_IMPR` (default `1000`).
+
 ## Creative insights
 
 The creative export feeds a **Creative tab on every dashboard** — same report as the
 placement analysis, no separate destination. Three families of output:
+
+**Name recovery (Aug 2026).** The creative data view ships several name fields — `Creative Name`,
+`Creative External Name`, `Creative Name**`, `Creative Name - use me` — and populates them
+inconsistently, which is what produced the "blank creative name" reports. On read, a blank name is
+filled from its sibling columns, and failing that from the **same Creative ID on another row** (one ID
+is one creative, so a name found anywhere applies everywhere; the most frequent spelling wins, and
+pooled files are searched too). Every row is stamped with a `Name Source` — `vendor`, the column it
+came from, or `matched on Creative ID` — and the Creative tab reports how many names were recovered
+and how many impressions they cover. **Recovered names are reconstructed here, not sent by the
+vendor**, so the export still needs fixing; what remains blank after recovery is a genuinely missing
+name. Headers that canonicalize identically (`Creative Name` vs `Creative Name**`) no longer collide
+— the second and later take a ` (alt)` suffix rather than silently producing duplicate columns.
 
 **Data quality** — blank / placeholder creative names, rolled up to the campaign with
 every ID the export carries (campaign ID + pool ID; `creative_id` too, the moment the
@@ -103,6 +141,60 @@ Env vars (all optional):
 | `CREATIVE_FATIGUE_MIN_IMPR` / `CREATIVE_FATIGUE_DROP` | `5000` / `0.40` | Fatigue thresholds (per half, and the decline) |
 | `CREATIVE_SINGLE_MIN_IMPR` | `10000` | Impression floor for the no-rotation flag |
 | `CREATIVE_VCR_FLOOR` / `CREATIVE_VCR_MIN_IMPR` | `0.50` / `5000` | Completion-rate floor, and the impressions needed to apply it |
+
+## Diagnosing a device/creative discrepancy — `s3_diagnose.py`
+
+A standalone, read-only script for settling "the warehouse shows more impressions than
+what ran" questions directly against the S3 files. Run it **where the credentials already
+are** (the Render service, a laptop with an AWS profile, CloudShell) — nothing is written
+to the bucket and the output workbook contains no credentials.
+
+    pip install boto3 pandas openpyxl
+    export S3_BUCKET=…                       # S3_PREFIX optional
+
+    # 1. understand an unfamiliar bucket first (e.g. the AdLib direct one)
+    python s3_diagnose.py --list
+
+    # 2. full comparison for a month
+    python s3_diagnose.py --start 2026-07-01 --end 2026-07-31
+
+    # 3. the decisive drill-down: one advertiser, one delivery date
+    python s3_diagnose.py --start 2026-07-01 --end 2026-07-31 \
+        --advertiser "Fresh Start Cleaning" --date 2026-07-15
+
+    # a second credential set (the AdLib direct bucket)
+    python s3_diagnose.py --profile adlib-direct --bucket adlib-bucket --list
+
+    # rehearse the logic on files already downloaded — no AWS at all
+    python s3_diagnose.py --local-dir ./downloaded_files
+
+It reports: how many files carry each delivery date (the rolling-window overlap), what
+naive concatenation totals **versus** correct de-duplication (the inflation factor an
+ingestion without de-duping would produce), device-vs-creative impressions per advertiser
+with **net and gross** difference, and for one advertiser/date every file carrying it and
+the de-duplicated truth — the number to compare against TapClicks. It warns loudly when
+the two sides aren't a like-for-like comparison (different windows, or the TapClicks
+bucket compared against the AdLib direct bucket, which name advertisers differently).
+`--device-match` / `--creative-match` override the filename patterns.
+
+## Placement scoring — implausible CTR
+
+Name-based rules only catch inventory whose name gives it away. A placement clicking at 46% is
+invalid traffic (or a broken click macro) whatever it is called, and until Aug 2026 nothing flagged
+it — `Slicing Hero: Sword Master`, 783 impressions and 365 clicks, scored as "Unclassified".
+
+Two rules now run **after** the name rules and override them, including "Recognizable Publisher":
+
+| Rule | Default | Env var |
+|---|---|---|
+| CTR ≥ 10% → **BLOCK**, "Implausible CTR — likely invalid traffic" | `0.10` | `PLACEMENT_CTR_BLOCK` |
+| CTR ≥ 5% → **REVIEW**, "Elevated CTR — verify" | `0.05` | `PLACEMENT_CTR_REVIEW` |
+| Impressions floor before either applies | `100` | `PLACEMENT_CTR_MIN_IMPR` |
+
+The floor matters: without it, 1 click on 2 impressions reads as 50%. There is also a
+`Casual Game (title pattern)` rule for game titles the keyword list misses — games are named from a
+small vocabulary (hero / master / saga / quest / sword / blast…), and it is the category that makes
+them junk, not the individual franchise.
 
 ## Run locally
     pip install -r requirements.txt

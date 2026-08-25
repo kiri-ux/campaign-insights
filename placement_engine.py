@@ -11,6 +11,7 @@ is exact. If it doesn't, the block list still stands on its own.
 The audience-fit layer (recognizable publishers whose fit depends on the campaign
 audience) is left to classify_with_llm() — wired to Claude at deploy time.
 """
+import os
 import re
 import pandas as pd
 import numpy as np
@@ -43,7 +44,25 @@ JUNK_RULES = [
     ("Unresolved App Bundle", "BLOCK", re.compile(r"^(com|net|org|io)\.[a-z0-9_.]+$", re.I)),
     ("Kids / Coloring App", "REVIEW", re.compile(
         r"\b(coloring|nursery\s?rhyme|toddler|preschool|abc\s?kids|baby\s?game)\b", re.I)),
+    # Mobile game titles the keyword list above misses. Games are named from a
+    # small vocabulary — an action word plus hero/master/saga/quest — and it is
+    # the CATEGORY that makes them junk inventory, not any single franchise.
+    # 'Slicing Hero: Sword Master' matched nothing before this rule existed.
+    ("Casual Game (title pattern)", "BLOCK", re.compile(
+        r"\b(hero|master|saga|quest|clash|tycoon|simulator|clicker|craft|ninja|"
+        r"warrior|sword|slic(e|ing)|smash|crush|blast|dash|rush|jump|shoot(er|ing)|"
+        r"battle|legend|empire|kingdom|farm|garden|bubble|puzzle|tiles?|sudoku|"
+        r"word\s?(search|connect|cross)|brain\s?(game|test)|escape|survival)\b", re.I)),
 ]
+
+# A placement's CTR is the one junk signal that needs no name at all. Real
+# display inventory does not click at 5%, let alone 46% — that is invalid
+# traffic or a broken click macro, and it is worth blocking whatever the site
+# is called. Both floors matter: without the impression floor, 1 click on 2
+# impressions reads as 50%.
+CTR_BLOCK = float(os.environ.get("PLACEMENT_CTR_BLOCK", "0.10"))
+CTR_REVIEW = float(os.environ.get("PLACEMENT_CTR_REVIEW", "0.05"))
+CTR_MIN_IMPR = float(os.environ.get("PLACEMENT_CTR_MIN_IMPR", "100"))
 KNOWN_PUBLISHER = re.compile(
     r"\b(fox\s?news|cnn|msnbc|al\s?jazeera|nytimes|washington\s?post|usa\s?today|"
     r"weather\.com|accuweather|espn|yahoo|forbes|buzzfeed|daily\s?mail|hulu|roku|"
@@ -94,6 +113,22 @@ def score_placements(df):
     cat = w["placement"].apply(categorize)
     w["category"] = cat.apply(lambda x: x[0])
     w["concern"] = cat.apply(lambda x: x[1])
+
+    # CTR override, applied AFTER the name rules so it can promote a placement
+    # no keyword recognized. An implausible click rate outranks any name-based
+    # verdict, including 'Recognizable Publisher'.
+    w["ctr"] = np.where(w["impr"] > 0, w["clicks"] / w["impr"], 0.0)
+    eligible = w["impr"] >= CTR_MIN_IMPR
+    hot = eligible & (w["ctr"] >= CTR_BLOCK)
+    warm = eligible & (w["ctr"] >= CTR_REVIEW) & ~hot
+    if hot.any():
+        w.loc[hot, "category"] = ("Implausible CTR — likely invalid traffic ("
+                                  + (w.loc[hot, "ctr"] * 100).round(1).astype(str) + "%)")
+        w.loc[hot, "concern"] = "BLOCK"
+    if warm.any():
+        w.loc[warm, "category"] = ("Elevated CTR — verify ("
+                                   + (w.loc[warm, "ctr"] * 100).round(1).astype(str) + "%)")
+        w.loc[warm, "concern"] = "REVIEW"
     for role in ("bu", "product", "strategy"):
         w[role] = w[cols[role]] if cols[role] else "(not in export)"
     return w, cols
