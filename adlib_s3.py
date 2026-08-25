@@ -73,7 +73,14 @@ PREFIXES = {
     "device": os.environ.get("ADLIB_DEVICE_PREFIX", "device"),
     "campaign": os.environ.get("ADLIB_CAMPAIGN_PREFIX", "performance/campaigns"),
     "screenshot": os.environ.get("ADLIB_SCREENSHOT_PREFIX", "screenshot_files"),
+    "sites": os.environ.get("ADLIB_SITE_PREFIX", "site-domain"),
+    "apps": os.environ.get("ADLIB_APP_PREFIX", "app"),
+    "ttddv": os.environ.get("ADLIB_TTDDV_PREFIX", "app_TTD-DV"),
 }
+# The bucket also holds a testing/ tree (testing/site-domain, testing/app,
+# testing/geo…) whose newest files are from Nov 2025 - Jan 2026. Reading it
+# would quietly mix months-old delivery into a current report, so every prefix
+# above is exact and nothing globs.
 # Other directories in the same bucket, not read yet but worth naming so the
 # next person doesn't have to rediscover them: site-domain, app, app_TTD-DV,
 # publisher, audience, pixel, dooh, geo/city, geo/region, geo/zip,
@@ -281,6 +288,25 @@ _DEVICE_MAP = {
     "browser": "Browser", "impressions": "Impressions", "clicks": "Clicks",
     "billablespend": "Billable Spend",
 }
+_SITE_MAP = {
+    "date": "Date", "advertisername": "Client", "advertiserid": "Advertiser ID",
+    "campaignname": "Campaign Name", "campaignid": "Campaign ID",
+    "campaignpoolid": "Campaign Pool ID", "campaignpoolname": "Campaign Pool Name",
+    "sitedomain": "Site Domain",
+    "impressions": "Impressions", "clicks": "Clicks", "ctr": "CTR", "cpm": "CPM",
+    "billablespend": "Billable Spend",
+    "postclickconversions": "Post Click Conversions",
+    "postviewconversions": "Post View Conversions",
+}
+_APP_MAP = dict(_SITE_MAP, **{
+    "appid": "App ID", "appname": "App Name", "devicetype": "Device Type",
+})
+_APP_MAP.pop("sitedomain", None)
+# TTD/DV360 ships one combined column ('App/URL') holding either a domain or an
+# app name; tap_adapter.split_ttddv separates them downstream.
+_TTDDV_MAP = dict(_SITE_MAP, **{"appurl": "App/URL"})
+_TTDDV_MAP.pop("sitedomain", None)
+
 _MEASURES = ("Impressions", "Clicks", "Post Click Conversions", "Post View Conversions",
              "Billable Spend", "CTR", "CPM", "25% Completed", "50% Completed",
              "75% Completed", "100% Completed")
@@ -412,6 +438,30 @@ PREVIEW_MAX_FILES = int(os.environ.get("ADLIB_PREVIEW_MAX_FILES", "600"))
 # times a day. Cache on what the folder actually looks like — newest file plus
 # file count — so a new drop invalidates it and nothing else does.
 _PREVIEW_CACHE = {}
+
+
+def fetch_sites(days=None, start=None, end=None, s3=None, bucket=None, metas=None,
+                on_file=None):
+    """Site-domain delivery from AdLib, shaped for the placement engines."""
+    return _pull("sites", days, start, end, s3, bucket, metas, _SITE_MAP, on_file)
+
+
+def fetch_apps(days=None, start=None, end=None, s3=None, bucket=None, metas=None,
+               on_file=None):
+    """App delivery from AdLib. `Final App Name` is what the block list reads, and
+    AdLib has no such column — the raw App Name is copied into it rather than
+    left blank, so a placement never scores as 'Blank / Missing Name' purely
+    because the source changed."""
+    df, meta = _pull("apps", days, start, end, s3, bucket, metas, _APP_MAP, on_file)
+    if len(df) and "App Name" in df.columns and "Final App Name" not in df.columns:
+        df["Final App Name"] = df["App Name"]
+    return df, meta
+
+
+def fetch_ttddv(days=None, start=None, end=None, s3=None, bucket=None, metas=None,
+                on_file=None):
+    """The TTD/DV360 combined site+app file, split downstream by split_ttddv."""
+    return _pull("ttddv", days, start, end, s3, bucket, metas, _TTDDV_MAP, on_file)
 
 
 def fetch_previews(s3=None, bucket=None, metas=None, max_files=None):

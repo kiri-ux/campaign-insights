@@ -1556,21 +1556,15 @@ def _run_pull(send_email=False, start=None, end=None):
                                          read_creative_flat, combine_creatives,
                                          read_device_flat, combine_devices)
                 if start and end:
+                    adl_sites = adl_apps = None
+                    if _adlib_direct_enabled():
+                        (creative_df, device_df, adl_sites, adl_apps,
+                         adlib_note) = _adlib_direct_frames(start, end)
                     smetas, ametas, tmetas, cmetas, dmetas, capped = list_range(start, end)
-                    if not (smetas and ametas):
+                    if not (smetas and ametas) and adl_sites is None and adl_apps is None:
                         have = ", ".join(x for x in [smetas and "sites", ametas and "apps"] if x) or "neither"
                         return {"ok": True, "skipped": True,
                                 "message": f"No complete site+app file pairs dated {start} → {end} (found: {have})."}, 200
-                    # Prefer AdLib's own files for the creative and device grains
-                    # (proven consistent with each other; the TapClicks creative
-                    # view was not). Falls back silently to the export below.
-                    adlib_note = None
-                    if _adlib_direct_enabled():
-                        _c, _d, adlib_note = _adlib_direct_frames(start, end)
-                        if _c is not None:
-                            creative_df = _c
-                        if _d is not None:
-                            device_df = _d
                     # Creative QA rides along on the same window (own grain, own tab)
                     cdfs = []
                     for m in (cmetas if creative_df is None else []):
@@ -1598,6 +1592,10 @@ def _run_pull(send_email=False, start=None, end=None):
                         ddfs = None
                         gc.collect()
                     sdfs, adfs = [], []
+                    # Skip the TapClicks site/app reads entirely when AdLib's own
+                    # files already supplied those grains.
+                    if adl_sites is not None or adl_apps is not None:
+                        smetas = ametas = tmetas = []
                     for metas, acc in ((smetas, sdfs), (ametas, adfs)):
                         for m in metas:
                             b = get_bytes(m["key"])
@@ -1613,8 +1611,10 @@ def _run_pull(send_email=False, start=None, end=None):
                             adfs.append(_ta)
                         b = None
                         gc.collect()
-                    sites = filter_date_range(combine_flats(sdfs), start, end)
-                    apps = filter_date_range(combine_flats(adfs), start, end)
+                    sites = (adl_sites if adl_sites is not None
+                             else filter_date_range(combine_flats(sdfs), start, end))
+                    apps = (adl_apps if adl_apps is not None
+                            else filter_date_range(combine_flats(adfs), start, end))
                     sdfs = adfs = None
                     gc.collect()
                     if not len(sites) and not len(apps):
@@ -1624,7 +1624,8 @@ def _run_pull(send_email=False, start=None, end=None):
                     sites = apps = None
                     gc.collect()
                     date_str = f"{start}_to_{end}"
-                    source_file = (f"{len(smetas)} site + {len(ametas)} app"
+                    source_file = (adlib_note if adlib_note and adl_sites is not None else
+                                   f"{len(smetas)} site + {len(ametas)} app"
                                    + (f" + {len(tmetas)} TTD/DV360" if tmetas else "")
                                    + (f" + {len(cmetas)} creative" if cmetas else "")
                                    + (f" + {len(dmetas)} device" if dmetas else "")
@@ -2117,7 +2118,7 @@ def _adlib_direct_enabled():
 
 
 def _adlib_direct_frames(start, end):
-    """(creative_df, device_df, note) straight from AdLib's bucket, or (None, None, msg).
+    """Every grain straight from AdLib's bucket: (creative, device, sites, apps, note).
 
     Never raises: if anything about the direct pull fails the caller silently
     falls back to the TapClicks export, because a broken new source must not
@@ -2130,17 +2131,52 @@ def _adlib_direct_frames(start, end):
         hi = pd.to_datetime(end).date() if end else None
         cre, cmeta = adlib_s3.fetch_creative(start=lo, end=hi, metas=metas)
         dev, dmeta = adlib_s3.fetch_device(start=lo, end=hi, metas=metas)
-        if not len(cre) and not len(dev):
-            return None, None, "AdLib direct returned no rows — using the TapClicks export."
-        note = ("AdLib S3 direct · creative %s file(s), device %s file(s) · %s → %s"
-                % (len(cmeta.get("files", [])), len(dmeta.get("files", [])),
-                   cmeta.get("start"), cmeta.get("end")))
-        partial = (cmeta.get("partial_files") or []) + (dmeta.get("partial_files") or [])
+        # Site/app direct is OFF by default. The readers work, but the placement
+        # engines downstream expect the Insights-workbook shape — Client Business
+        # Unit, Strategy Type/Name, Internal Cost — and AdLib's files carry none
+        # of those, so the analysis comes back with zero active placements rather
+        # than an error. Until that mapping exists, the site/app grain keeps
+        # coming from TapClicks. Set ADLIB_SITEAPP=1 to try it.
+        if os.environ.get("ADLIB_SITEAPP", "0").strip() in ("1", "true", "yes"):
+            sit, smeta = adlib_s3.fetch_sites(start=lo, end=hi, metas=metas)
+            app, ameta = adlib_s3.fetch_apps(start=lo, end=hi, metas=metas)
+        else:
+            sit, smeta = pd.DataFrame(), {}
+            app, ameta = pd.DataFrame(), {}
+        try:
+            ttd, _tmeta = (adlib_s3.fetch_ttddv(start=lo, end=hi, metas=metas)
+                           if len(sit) or len(app) else (pd.DataFrame(), {}))
+        except Exception:
+            ttd = pd.DataFrame()
+        if len(ttd):
+            # One combined column of domains AND app names; the existing splitter
+            # separates them so TTD/DV360 delivery lands on the right side.
+            from tap_adapter import split_ttddv
+            _ts, _ta = split_ttddv(ttd)
+            if len(_ts):
+                sit = pd.concat([sit, _ts], ignore_index=True) if len(sit) else _ts
+            if len(_ta):
+                app = pd.concat([app, _ta], ignore_index=True) if len(app) else _ta
+        if not any(len(x) for x in (cre, dev, sit, app)):
+            return None, None, None, None, \
+                "AdLib direct returned no rows — using the TapClicks export."
+        note = ("AdLib S3 direct · %s → %s · creative %s file(s), device %s"
+                % (cmeta.get("start"), cmeta.get("end"),
+                   len(cmeta.get("files", [])), len(dmeta.get("files", []))))
+        if len(sit) or len(app):
+            note += " · site %s, app %s" % (len(smeta.get("files", [])),
+                                            len(ameta.get("files", [])))
+        else:
+            note += " · site/app still from the TapClicks export"
+        partial = sum(((m.get("partial_files") or [])
+                       for m in (cmeta, dmeta, smeta, ameta)), [])
         if partial:
-            note += " · undersized: " + ", ".join(partial)
-        return (cre if len(cre) else None), (dev if len(dev) else None), note
+            note += " · undersized: " + ", ".join(sorted(set(partial)))
+        pick = lambda d: d if (d is not None and len(d)) else None
+        return pick(cre), pick(dev), pick(sit), pick(app), note
     except Exception as e:
-        return None, None, "AdLib direct unavailable (%s) — using the TapClicks export." % e
+        return None, None, None, None, \
+            "AdLib direct unavailable (%s) — using the TapClicks export." % e
 
 
 def _adlib_window(default_days=7):
