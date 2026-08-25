@@ -5,23 +5,63 @@ running with no preview image on file.
 
 This is a different question from the one the Creative tab already answers. That
 one asks whether the *delivery export* carries a preview URL on the row. This one
-asks whether the creative exists in the **preview data view at all** — the list
-the previews are actually served from. A creative can have a Preview Link in the
-delivery file and still be absent from the preview export, and when it is absent
-nobody can visually QA it or show it to the client.
+asks whether a **client-shareable** image exists for the creative at all.
 
-On the 14 Aug 2026 sample that gap was large: 3,235 creatives delivered, 1,043
-appear in the previews file, so **2,207 live creatives were running with no
-preview record** — 11.5M impressions. Worth having as a standing check rather
-than something discovered by hand.
+The distinction that matters is the HOST, not whether the column is populated.
+AdLib's Campaign Creative Report fills Preview Link for essentially every row,
+but on the 14 Aug 2026 file 59,608 of those rows point at
+app2.adlibdsp.com/dashboard/… — AdLib's own console, which opens a login screen
+for anyone outside their team. Only 11,752 point at app.adreform.com, the public
+asset. The Ad Previews export is 100% adreform, which is why it is the reference.
+
+Scored that way on the same day: 3,222 creatives delivered and **1,262 (39%) had
+a preview anyone could send to a client**. The other 1,960 — 9.6M impressions —
+had nothing but a dashboard link.
 
 Join is on Creative ID, which both exports carry and which is stable — advertiser
 and creative NAMES are not (AdLib's own reports punctuate them differently).
 """
+import os
+from urllib.parse import urlparse
+
 import numpy as np
 import pandas as pd
 
 _ID = "Creative ID"
+
+# Not all preview URLs are equal, and the difference is the whole point of this
+# check. A preview is only useful if it can be SENT TO A CLIENT.
+#
+#   app.adreform.com/storage/attachments/perm/…   public asset — shareable
+#   app2.adlibdsp.com/dashboard/management/…      AdLib's own dashboard, behind
+#                                                 their login — useless to a client
+#
+# In the 14 Aug 2026 creative report, 59,608 rows carried an adlibdsp dashboard
+# link and only 11,752 an adreform asset. Counting a row as "has a preview"
+# because the column was non-empty scored the unusable ones as fine.
+PUBLIC_HOSTS = {h.strip().lower() for h in os.environ.get(
+    "PREVIEW_PUBLIC_HOSTS", "app.adreform.com,adreform.com").split(",") if h.strip()}
+INTERNAL_HOSTS = {h.strip().lower() for h in os.environ.get(
+    "PREVIEW_INTERNAL_HOSTS", "app2.adlibdsp.com,app.adlibdsp.com,adlibdsp.com").split(",")
+    if h.strip()}
+
+
+def link_kind(url):
+    """'public' | 'internal' | 'none' for one preview URL."""
+    s = str(url or "").strip()
+    if not s or s.lower() in ("nan", "none", "null", "-"):
+        return "none"
+    host = (urlparse(s).netloc or "").lower()
+    if not host or "." not in host:
+        return "none"
+    host = host.split("@")[-1].split(":")[0]
+    if host in PUBLIC_HOSTS or any(host.endswith("." + h) for h in PUBLIC_HOSTS):
+        return "public"
+    if host in INTERNAL_HOSTS or any(host.endswith("." + h) for h in INTERNAL_HOSTS):
+        return "internal"
+    # An unfamiliar host is treated as public rather than dismissed — it is at
+    # least a real URL, and the host list is env-tunable when a new one shows up.
+    return "public"
 
 
 def _sid(s):
@@ -50,7 +90,8 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
     """
     out = {"summary": {"available": False}, "missing": pd.DataFrame(),
            "by_client": pd.DataFrame(), "orphans": pd.DataFrame(),
-           "no_url": pd.DataFrame(), "multi_url": pd.DataFrame()}
+           "no_url": pd.DataFrame(), "multi_url": pd.DataFrame(),
+           "nowhere": pd.DataFrame(), "internal_only": pd.DataFrame()}
     if creative_df is None or not len(creative_df) or _ID not in creative_df.columns:
         out["summary"]["reason"] = "the delivery export has no Creative ID column"
         return out
@@ -79,7 +120,7 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
     purl = _col(p, "Preview Image URL", "Preview Link")
     if purl:
         u = p[purl].astype(str).str.strip()
-        p["_url"] = u.where(~u.str.lower().isin(["", "nan", "none", "null"]), "")
+        p["_url"] = u.where(u.map(link_kind) == "public", "")
     else:
         p["_url"] = ""
 
@@ -95,8 +136,13 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
         if col:
             agg[label] = (col, "first")
     if lcol:
-        d["_link"] = d[lcol].astype(str).str.strip()
-        agg["delivery_link"] = ("_link", "max")
+        d["_kind"] = d[lcol].map(link_kind)
+        # A public delivery link counts as coverage; an internal one is recorded
+        # so the report can say "there IS a link, it just isn't shareable".
+        d["_pub_link"] = d[lcol].where(d["_kind"] == "public", "")
+        d["_int_link"] = d[lcol].where(d["_kind"] == "internal", "")
+        agg["delivery_link"] = ("_pub_link", "max")
+        agg["internal_link"] = ("_int_link", "max")
     per = d.groupby("_id", dropna=False, observed=True).agg(**agg).reset_index()
     for c in per.columns:
         if str(per[c].dtype) == "category":
@@ -104,12 +150,24 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
 
     delivering = per[per["impressions"] >= max(min_impressions, 1)].copy()
     delivering["in_previews"] = delivering["_id"].isin(have_ids)
-    delivering["preview_url"] = delivering["_id"].isin(with_url)
+    # "Covered" means a client-shareable image exists SOMEWHERE — the previews
+    # export, or a public link on the delivery rows. An AdLib dashboard link is
+    # not coverage; it needs their login to open.
+    has_pub_delivery = (delivering["delivery_link"].astype(str).str.strip().ne("")
+                        if "delivery_link" in delivering.columns
+                        else pd.Series(False, index=delivering.index))
+    delivering["preview_url"] = delivering["_id"].isin(with_url) | has_pub_delivery
 
     missing = delivering[~delivering["preview_url"]].copy()
-    missing["reason"] = np.where(missing["_id"].isin(have_ids),
-                                 "in the previews export, but with no image URL",
-                                 "not in the previews export at all")
+    if "internal_link" in missing.columns:
+        has_int = missing["internal_link"].astype(str).str.strip().ne("")
+    else:
+        has_int = pd.Series(False, index=missing.index)
+    missing["reason"] = np.where(
+        has_int, "only an AdLib dashboard link — needs their login, can't go to a client",
+        np.where(missing["_id"].isin(have_ids),
+                 "in the previews export, but with no usable image URL",
+                 "no preview link anywhere"))
     missing = missing.sort_values("impressions", ascending=False).reset_index(drop=True)
     missing = missing.rename(columns={"_id": "creative_id"})
 
@@ -155,29 +213,29 @@ def audit_previews(creative_df, preview_df, min_impressions=1):
         "orphan_previews": int(len(orph)),
         "clients_affected": int(missing["client"].nunique()) if "client" in missing else 0,
     }
-    # The distinction that decides whether anyone has to chase this. A creative
-    # absent from the previews export usually still carries a Preview Link on
-    # its delivery rows — annoying, but the image exists and the dashboard can
-    # fall back to it. A creative with NO preview in EITHER place cannot be
-    # visually QA'd at all, and that is the urgent list.
-    nowhere = pd.DataFrame()
-    if len(missing) and "delivery_link" in missing.columns:
-        link = missing["delivery_link"].astype(str).str.strip()
-        bad = link.eq("") | link.str.lower().isin(["nan", "none", "null", "-"])
-        nowhere = missing[bad].copy()
-    elif len(missing):
-        nowhere = missing.copy()          # no link column at all to fall back on
-    summary["no_preview_anywhere"] = int(len(nowhere))
-    summary["no_preview_anywhere_impressions"] = (int(nowhere["impressions"].sum())
-                                                  if len(nowhere) else 0)
-    summary["recoverable_from_delivery"] = summary["missing"] - summary["no_preview_anywhere"]
-    out["nowhere"] = nowhere
+    # Everything in `missing` is un-sendable to a client. Split by WHY, because
+    # the two need different asks: an AdLib dashboard link means the creative
+    # exists and just wasn't published as a shareable asset (a request to AdLib);
+    # nothing at all may mean the creative itself is unavailable.
+    if len(missing):
+        internal_only = missing[missing["reason"].str.startswith("only an AdLib")].copy()
+        nothing = missing[missing["reason"].eq("no preview link anywhere")].copy()
+    else:
+        internal_only = nothing = pd.DataFrame()
+    summary["internal_link_only"] = int(len(internal_only))
+    summary["internal_link_only_impressions"] = (int(internal_only["impressions"].sum())
+                                                 if len(internal_only) else 0)
+    summary["no_preview_anywhere"] = int(len(nothing))
+    summary["no_preview_anywhere_impressions"] = (int(nothing["impressions"].sum())
+                                                  if len(nothing) else 0)
+    out["nowhere"] = nothing
+    out["internal_only"] = internal_only
     # One creative pointing at several different preview images — usually a
     # recycled ID, and it makes the preview you show the client a coin flip.
     multi = have[have["urls"] > 1].rename(columns={"_id": "creative_id"})
 
     keep = [c for c in ("creative_id", "client", "creative", "product", "type", "size",
-                        "impressions", "clicks", "spend", "reason", "delivery_link")
+                        "impressions", "clicks", "spend", "reason", "internal_link")
             if c in missing.columns]
     out.update({"summary": summary, "missing": missing[keep] if len(missing) else missing,
                 "by_client": by_client, "orphans": orph, "multi_url": multi})

@@ -67,25 +67,32 @@
   <div class="cards">
     <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.delivering_creatives) }}</div><div class="l">Creatives delivering</div></div>
     <div class="kpi{% if s.coverage_pct < 0.9 %} warn{% else %} ok{% endif %}">
-      <div class="n">{{ '{:.0f}%'.format(s.coverage_pct*100) }}</div><div class="l">Have a preview image on file</div></div>
+      <div class="n">{{ '{:.0f}%'.format(s.coverage_pct*100) }}</div><div class="l">Have a public, shareable preview</div></div>
     <div class="kpi{% if s.missing %} warn{% endif %}"><div class="n">{{ '{:,.0f}'.format(s.missing) }}</div>
-      <div class="l">Missing from the previews export</div></div>
+      <div class="l">Nothing you could send a client</div></div>
+    <div class="kpi{% if s.internal_link_only %} warn{% endif %}">
+      <div class="n">{{ '{:,.0f}'.format(s.internal_link_only) }}</div>
+      <div class="l">AdLib dashboard link only (needs their login)</div></div>
     <div class="kpi{% if s.no_preview_anywhere %} warn{% else %} ok{% endif %}">
       <div class="n">{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</div>
-      <div class="l">No image in <em>either</em> source — cannot be QA'd</div></div>
+      <div class="l">No preview link at all</div></div>
     <div class="kpi"><div class="n">{{ '{:,.0f}'.format(s.missing_impressions) }}</div>
       <div class="l">Impressions behind the gap ({{ '{:.0f}%'.format(s.missing_impr_pct*100) }})</div></div>
   </div>
 
   <p class="lead">
-    Two different failures, and only one of them is urgent.
-    <strong>{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</strong> creative(s) have no preview image in the
-    Ad Previews export <em>or</em> on their delivery rows — those genuinely can't be shown to a client.
-    The other <strong>{{ '{:,.0f}'.format(s.recoverable_from_delivery) }}</strong> are absent from the previews
-    export but still carry a Preview Link on their delivery rows, so the image exists and this dashboard falls
-    back to it — it's the <em>previews export itself</em> that is incomplete, which is AdLib's to fix.
-    {% if s.orphan_previews %}Separately, {{ '{:,.0f}'.format(s.orphan_previews) }} creative(s) appear in the
-    previews export but aren't delivering — stale entries, not a fault.{% endif %}
+    A preview only counts here if it is <strong>public</strong> — something you can paste into a client
+    email. Two hosts appear in AdLib's data and only one of them qualifies:
+    <code>app.adreform.com</code> serves the asset itself, while
+    <code>app2.adlibdsp.com/dashboard/…</code> is AdLib's own console and opens a login screen for anyone
+    outside their team. A non-empty Preview Link is <em>not</em> evidence of a usable preview.<br><br>
+    <strong>{{ '{:,.0f}'.format(s.internal_link_only) }}</strong> delivering creative(s) have only the
+    dashboard link — the creative exists, AdLib just hasn't published a shareable asset for it, and that is
+    the ask.
+    {% if s.no_preview_anywhere %}<strong>{{ '{:,.0f}'.format(s.no_preview_anywhere) }}</strong> have no link
+    of any kind, which is worse — those may not have an asset at all.{% endif %}
+    {% if s.orphan_previews %} Separately, {{ '{:,.0f}'.format(s.orphan_previews) }} creative(s) appear in
+    the previews export but aren't delivering — stale entries, not a fault.{% endif %}
   </p>
 
   {% if by_client %}
@@ -101,9 +108,9 @@
   {% endif %}
 
   {% if rows %}
-  <h2>Creatives with no preview on file <span class="sub">(sorted by impressions at risk)</span>
+  <h2>Creatives with no client-shareable preview <span class="sub">(sorted by impressions at risk)</span>
     <a class="dl" href="/download/preview_missing.csv">CSV</a>
-    {% if s.no_preview_anywhere %}<a class="dl" href="/download/preview_no_image_anywhere.csv">urgent only</a>{% endif %}</h2>
+    {% if s.no_preview_anywhere %}<a class="dl" href="/download/preview_no_image_anywhere.csv">no link at all</a>{% endif %}</h2>
   <div class="scroll"><table>
     <tr><th>Creative</th><th>Client</th><th>Type</th><th>Size</th><th>Impressions</th><th>Spend</th><th>Why</th></tr>
     {% for r in rows %}
@@ -115,7 +122,7 @@
   <p class="note">Showing {{ rows|length }} of {{ '{:,.0f}'.format(s.missing) }}. Full list in the CSV.</p>
   {% else %}
   <p class="note" style="background:#e9f7ef;border-left:3px solid #177245;padding:10px 14px;border-radius:6px">
-    ✔ Every delivering creative has a preview image on file.</p>
+    ✔ Every delivering creative has a public, client-shareable preview image.</p>
   {% endif %}
   {% endif %}
 </div>

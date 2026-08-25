@@ -244,12 +244,17 @@ other half: does the creative exist in the **Ad Previews export** at all — the
 actually served from? A creative can have a Preview Link on its delivery rows and be entirely absent
 from the preview data view.
 
-On the 14 Aug 2026 files, 3,222 creatives delivered and **999 (31%) appear in the previews export** —
-2,223 missing, behind 11.1M impressions. The page splits that into the two things it can mean:
+**A populated Preview Link is not a usable preview.** Two hosts appear in AdLib's data:
+`app.adreform.com` serves the asset itself and can go in a client email, while
+`app2.adlibdsp.com/dashboard/…` is AdLib's own console and opens a login screen for anyone outside
+their team. On the 14 Aug 2026 creative report, **59,608 rows carry the dashboard link and only
+11,752 the public asset** — so counting non-empty cells scores the useless ones as fine. The Ad
+Previews export is 100% adreform, which is why it is the reference.
 
-- **No image in either source** — genuinely cannot be QA'd or shown to a client. This is the urgent list.
-- **Missing from the previews export but with a Preview Link on delivery** — the image exists and the
-  dashboard falls back to it; the *previews export* is incomplete, which is AdLib's to fix.
+Scored on shareability, that day: 3,222 creatives delivered and **1,262 (39%) had a preview anyone
+could send to a client**. The other 1,960 — 9.6M impressions, ~$31k — had nothing but a dashboard
+link. `PREVIEW_PUBLIC_HOSTS` / `PREVIEW_INTERNAL_HOSTS` tune the host lists; an unrecognized host
+counts as public, since it is at least a real URL.
 
 It also reports previews for creatives that aren't delivering (stale, not a fault) and creatives
 pointing at several different preview images. Joined on **Creative ID**, never on name — AdLib's own
