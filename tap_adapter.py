@@ -455,7 +455,7 @@ def _blank_mask(s):
                               "#n/a", "0", "."])
 
 
-def resolve_creative_names(df, report=False):
+def resolve_creative_names(df, report=False, id_backfill=True):
     """Fill a blank Creative Name from the export's other name fields, then from
     the same Creative ID elsewhere in the data. Records where each name came from.
 
@@ -497,7 +497,7 @@ def resolve_creative_names(df, report=False):
             source = source.where(~take, col)
             blank = _blank_mask(name)
 
-    if blank.any() and "Creative ID" in df.columns:
+    if id_backfill and blank.any() and "Creative ID" in df.columns:
         cid = df["Creative ID"].astype(str).str.strip()
         known = pd.DataFrame({"_id": cid[~blank], "_n": name[~blank].astype(str)})
         known = known[(known["_id"] != "") & (known["_id"].str.lower() != "nan")]
@@ -550,29 +550,54 @@ def read_creative_flat(data, filename=""):
     df = _normalize_headers(df, _CREATIVE_CANON)
     if "Creative Name" not in df.columns:
         return df  # let the caller report the layout problem
-    # Resolve names BEFORE pruning, while the sibling name columns are still here.
-    return _prune_creative(resolve_creative_names(df))
+    # Sibling-column resolution runs here, BEFORE pruning, while the other name
+    # columns still exist. It reads only the row's own cells, so the same row in
+    # two snapshots always resolves the same way and de-duplication still works.
+    # The Creative-ID backfill deliberately does NOT run yet: its answer depends
+    # on what else is in the frame, so per-file it would give one snapshot a name
+    # and another a blank for the same row, and those two rows would then survive
+    # de-duplication as separate delivery. That inflated pooled creative totals
+    # ~3x and made the device reconciliation read as a 98% shortfall.
+    return _prune_creative(resolve_creative_names(df, id_backfill=False))
 
 
 def combine_creatives(dfs, report=False):
-    """Concat several creative exports, de-duped on the dimension columns
-    (rolling windows restate rows) keeping the newest file's version.
+    """Concat several creative exports and collapse the rolling-window overlap.
 
-    Name resolution runs again after the concat: a creative that is blank in
-    every row of today's file may be named in yesterday's, and the ID match can
-    only see that once the files are pooled.
+    The vendor drops a rolling window daily, so one delivery date arrives in
+    several files and the same row is present in each. De-duplicating on EVERY
+    column can't collapse those: the vendor restates attributes between drops —
+    a creative blank on Monday is named on Tuesday, a preview URL appears later —
+    and any difference makes the two copies look like two different rows, so the
+    delivery is counted twice.
+
+    So identity is the dimensions MINUS the attributes that legitimately change:
+    same date, client, campaign, pool, creative, size and type is the same
+    delivery, whatever the vendor now calls it. Newest file wins, which also
+    means a restated name or a late-arriving preview URL is picked up.
     """
     dfs = [d for d in dfs if d is not None and len(d)]
     if not dfs:
         return (pd.DataFrame(), {}) if report else pd.DataFrame()
     combined = pd.concat(dfs, ignore_index=True, sort=False)
-    dims = [c for c in combined.columns if c not in _MEASURE_COLS]
+    dims = [c for c in combined.columns
+            if c not in _MEASURE_COLS and c not in _VOLATILE_ATTRS]
     if dims:
         # dropna=False semantics: blank creative names must survive de-dupe
         combined = combined.drop_duplicates(subset=dims, keep="last")
     combined = combined.reset_index(drop=True)
-    out = resolve_creative_names(combined, report=report)
-    return out if report else out
+    # Now that one row is one delivery, the ID backfill can run across the whole
+    # pool — a creative blank in every row of today's file can take its name
+    # from an earlier drop.
+    return resolve_creative_names(combined, report=report)
+
+
+# Attributes the vendor restates between snapshots of the same delivery. They
+# are dimensions, but they are not part of a row's IDENTITY, so they must not
+# take part in de-duplication or the same delivery counts more than once.
+_VOLATILE_ATTRS = {"Creative Name", "Creative External Name", "Creative Name (alt)",
+                   "Creative Name (alt 2)", "Creative Name (alt 3)", "Name Source",
+                   "Preview Image URL", "Clickthrough URL"}
 
 
 _MEASURE_COLS = set(_MEASURES) | {"CTR", "CPM", "Total Spend"}

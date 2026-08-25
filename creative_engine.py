@@ -868,11 +868,29 @@ def audit_creatives(df, min_impressions=None):
     # -- creative asset completeness ------------------------------------------
     # A creative with no preview image can't be eyeballed in a QA pass or shown
     # to a client, so it's an asset-completeness gap rather than a metrics one.
+    summary_preview_internal = summary_preview_none = 0
     if cols.get("preview_url"):
-        _add("missing_preview", "Missing preview image URL", "warn",
-             (~bad) & _is_blank(d[cols["preview_url"]]),
-             note="no preview image on the creative — can't be visually QA'd or shown to the client",
+        # A populated cell is not a usable preview. AdLib fills this with one of
+        # two things: an app.adreform.com asset, which can go to a client, or an
+        # app2.adlibdsp.com console URL, which opens their login screen. Both
+        # count as "not shareable" here, but they are reported apart because
+        # they need different asks — publish an asset vs. supply one at all.
+        # The authoritative version of this check is /previews, which pools
+        # AdLib's whole Ad Previews folder; this one only sees the export.
+        try:
+            from preview_engine import link_kind as _lk
+            _kind = d[cols["preview_url"]].map(_lk)
+        except Exception:
+            _kind = pd.Series(np.where(_is_blank(d[cols["preview_url"]]), "none", "public"),
+                              index=d.index)
+        _add("missing_preview", "No client-shareable preview image", "warn",
+             (~bad) & (_kind != "public"),
+             note="no preview a client could open — an AdLib console link needs their "
+                  "login, and this export alone can't see previews published later "
+                  "(see the Preview coverage page for the full picture)",
              extra_cols=(cols["preview_url"],))
+        summary_preview_internal = int(((~bad) & (_kind == "internal")).sum())
+        summary_preview_none = int(((~bad) & (_kind == "none")).sum())
     if cols.get("click_url"):
         _add("missing_click_url", "Missing clickthrough URL", "warn",
              (~bad) & _is_blank(d[cols["click_url"]]),
@@ -995,6 +1013,8 @@ def audit_creatives(df, min_impressions=None):
             missing_preview = missing_preview.rename(
                 columns={k: v for k, v in ren.items() if k}).sort_values(
                 "impressions", ascending=False).reset_index(drop=True)
+    summary["preview_internal_rows"] = summary_preview_internal
+    summary["preview_no_url_rows"] = summary_preview_none
     summary["missing_preview_creatives"] = int(
         missing_preview["creative"].nunique()) if len(missing_preview) and "creative" in missing_preview else 0
 

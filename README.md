@@ -52,6 +52,17 @@ Env vars: `S3_DEVICE_MATCH` (default `device-insights`), `S3_DEVICE_SUFFIX`
 The creative export feeds a **Creative tab on every dashboard** — same report as the
 placement analysis, no separate destination. Three families of output:
 
+**De-duplication and name recovery interact — order matters.** Pooling rolling snapshots collapses
+duplicates by comparing rows, so anything that CHANGES a row between snapshots breaks it. Creative
+Name is exactly such a field: the vendor restates it, and name recovery rewrites it. Resolving names
+per file and then de-duplicating counted the same delivery two or three times — pooled creative
+totals ran ~3x high and the Device reconciliation read as a 98% shortfall against them. So:
+sibling-column resolution (deterministic, row-local) runs on read; identity de-duplication runs on
+the pool, keyed on date + client + campaign + pool + creative + size + type and explicitly EXCLUDING
+the attributes a vendor restates (`_VOLATILE_ATTRS`: the name columns, Name Source, preview and
+clickthrough URLs); and only then does the cross-file Creative-ID backfill run, once, on rows that
+are already unique.
+
 **Name recovery (Aug 2026).** The creative data view ships several name fields — `Creative Name`,
 `Creative External Name`, `Creative Name**`, `Creative Name - use me` — and populates them
 inconsistently, which is what produced the "blank creative name" reports. On read, a blank name is
