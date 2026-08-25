@@ -269,9 +269,10 @@ their team. On the 14 Aug 2026 creative report, **59,608 rows carry the dashboar
 11,752 the public asset** — so counting non-empty cells scores the useless ones as fine. The Ad
 Previews export is 100% adreform, which is why it is the reference.
 
-Scored on shareability, that day: 3,222 creatives delivered and **1,262 (39%) had a preview anyone
-could send to a client**. The other 1,960 — 9.6M impressions, ~$31k — had nothing but a dashboard
-link. `PREVIEW_PUBLIC_HOSTS` / `PREVIEW_INTERNAL_HOSTS` tune the host lists; an unrecognized host
+Scored on shareability against the FULL previews folder (334 files, 18–24 Aug 2026): **3,359
+creatives delivered and 2,813 (84%) have a preview anyone could send to a client.** The remaining
+**546** — 3.2M impressions, ~$10.7k — carry only a dashboard link, and none are missing a link
+entirely. `PREVIEW_PUBLIC_HOSTS` / `PREVIEW_INTERNAL_HOSTS` tune the host lists; an unrecognized host
 counts as public, since it is at least a real URL.
 
 It also reports previews for creatives that aren't delivering (stale, not a fault) and creatives
@@ -284,13 +285,13 @@ text and sometimes holds a landing-page URL; it matches zero preview IDs. Names 
 AdLib's own reports punctuate advertiser names differently ('Artman Equipment Inc.' vs 'Artman
 Equipment, Inc.'), which is what made an earlier comparison look 8x worse than it was.
 
-**Previews are pooled across every drop, not read from the newest file.** One drop is not
-necessarily a complete snapshot, and there is no way to tell from a single file that it is —
-reading only the newest one under-reports coverage and invents "missing" creatives that have a
-preview in an earlier drop. Splitting the Aug 14 file in two and reading only the newer half drops
-measured coverage from 39% to 24%, which is exactly the failure mode. `ADLIB_PREVIEW_MAX_FILES`
-(default 60) caps the pool; the page says how many files were read of how many exist and warns when
-the cap truncated it, so an understated number is visible rather than silent.
+**Previews are pooled across every drop, not read from the newest file.** The drops are
+INCREMENTAL — 334 files as of Aug 2026 (160 MB total, back to April), several a day, ranging from
+1.1 MB down to 0.0 MB. Reading only the newest one can land on a near-empty delta and report that
+almost nothing has a preview; measured coverage off a single file was 39%, against 84% off the full
+folder. `ADLIB_PREVIEW_MAX_FILES` (default 600) caps the pool, the page reports files-read of
+files-available and warns when the cap truncated it, and the pooled result is cached against the
+folder's newest file plus file count so a page refresh doesn't re-download 160 MB.
 
 **Counts are book-wide unless you filter.** AdLib's file covers their whole book — 523 advertisers
 and 3,235 delivering creatives on the 14 Aug drop — so it will not match a single client's

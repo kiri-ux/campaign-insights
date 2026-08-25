@@ -402,7 +402,16 @@ def fetch_device(days=None, start=None, end=None, s3=None, bucket=None, metas=No
     return _pull("device", days, start, end, s3, bucket, metas, _DEVICE_MAP, on_file)
 
 
-PREVIEW_MAX_FILES = int(os.environ.get("ADLIB_PREVIEW_MAX_FILES", "60"))
+# The previews folder holds 334 files as of Aug 2026 (160 MB total) — small,
+# incremental drops, several per day, going back to April. The cap has to clear
+# that comfortably or coverage is understated: pooling 60 of 334 is the same bug
+# as reading only the newest one, just less obvious.
+PREVIEW_MAX_FILES = int(os.environ.get("ADLIB_PREVIEW_MAX_FILES", "600"))
+
+# Pooling 160 MB on every page load is wasteful when the folder changes a few
+# times a day. Cache on what the folder actually looks like — newest file plus
+# file count — so a new drop invalidates it and nothing else does.
+_PREVIEW_CACHE = {}
 
 
 def fetch_previews(s3=None, bucket=None, metas=None, max_files=None):
@@ -429,6 +438,10 @@ def fetch_previews(s3=None, bucket=None, metas=None, max_files=None):
         return pd.DataFrame(), {"error": "no Ad Previews file in the bucket",
                                 "files_available": 0, "files_read": 0}
     cap = max_files or PREVIEW_MAX_FILES
+    ckey = (bucket, files[0]["key"], str(files[0]["modified"]), len(files), cap)
+    if ckey in _PREVIEW_CACHE:
+        df, meta = _PREVIEW_CACHE[ckey]
+        return df.copy(), dict(meta, cached=True)
     frames, read = [], []
     for m in files[:cap]:
         df = _read_csv(_get(s3, bucket, m["key"]), _PREVIEW_MAP)
@@ -446,12 +459,15 @@ def fetch_previews(s3=None, bucket=None, metas=None, max_files=None):
             r"\.0$", "", regex=True)
         sub = ["Creative ID"] + [c for c in ("Preview Image URL",) if c in out.columns]
         out = out.drop_duplicates(subset=sub, keep="first")   # newest file read first
-    return out, {"file": files[0]["name"], "modified": str(files[0]["modified"]),
-                 "files_available": len(files), "files_read": len(read),
-                 "truncated": len(files) > cap,
-                 "oldest_read": read[-1]["modified"] if read else None,
-                 "rows": int(len(out)),
-                 "creatives": int(out["Creative ID"].nunique()) if "Creative ID" in out else 0}
+    meta = {"file": files[0]["name"], "modified": str(files[0]["modified"]),
+            "files_available": len(files), "files_read": len(read),
+            "truncated": len(files) > cap, "cached": False,
+            "oldest_read": read[-1]["modified"] if read else None,
+            "rows": int(len(out)),
+            "creatives": int(out["Creative ID"].nunique()) if "Creative ID" in out else 0}
+    _PREVIEW_CACHE.clear()          # only the current folder state is worth keeping
+    _PREVIEW_CACHE[ckey] = (out.copy(), meta)
+    return out, meta
 
 
 # ------------------------------------------------------------------- CLI
