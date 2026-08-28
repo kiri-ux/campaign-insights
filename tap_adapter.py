@@ -68,6 +68,17 @@ _CANON_MAP = {_canon(k): v for k, v in _COLMAP.items()}
 _CANON_MAP.update({_canon(v): v for v in _COLMAP.values()})
 
 
+# When two source headers canonicalize to the same engine column, which one
+# should WIN is a judgement, not an accident of column order. The vendor ships
+# both 'final_app_name' and 'final_app_name_use_me'; the one they labelled "use
+# me" is the resolved name and the other is the raw value, so it wins wherever
+# both appear. Anything not listed here falls back to first-seen.
+_PREFERRED = {
+    "Final App Name": ["finalappnameuseme", "finalappname"],
+    "Creative Name": ["creativenameuseme", "creativename"],
+}
+
+
 def _normalize_headers(df, canon_map=None):
     """Rename export headers to the Title Case names the engines use, matching
     on canonical form so 'Campaign Id', 'campaign_id', 'CAMPAIGN ID' all work.
@@ -81,12 +92,30 @@ def _normalize_headers(df, canon_map=None):
     are KEPT — those are the columns carrying a name when the first is blank.
     """
     cmap = canon_map or _CANON_MAP
+
+    def rank(target, col):
+        """Lower is better. Preference list first, then column order."""
+        prefs = _PREFERRED.get(target)
+        if prefs and _canon(col) in prefs:
+            return prefs.index(_canon(col))
+        return len(prefs or []) + list(df.columns).index(col)
+
+    # Decide the winner for every target BEFORE renaming, so a preferred column
+    # takes the plain name even when a lesser one appears earlier in the file.
+    winners = {}
+    for c in df.columns:
+        name = cmap.get(_canon(c))
+        if not name:
+            continue
+        if name not in winners or rank(name, c) < rank(name, winners[name]):
+            winners[name] = c
+
     ren, used = {}, set()
     for c in df.columns:
         name = cmap.get(_canon(c))
         if not name:
             continue
-        if name in used:
+        if name in used or winners.get(name) != c:
             import re as _re
             base = _re.sub(r" \(alt(?: \d+)?\)$", "", name)
             n, cand = 1, base + " (alt)"

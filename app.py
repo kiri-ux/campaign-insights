@@ -2117,6 +2117,36 @@ def _adlib_direct_enabled():
         return False
 
 
+_DIM_CACHE = {}
+
+
+def _dimension_lookup(force=False):
+    """The Client / BU / Product / Strategy lookup, cached per file version.
+
+    Optional by design: if the export isn't configured or can't be read, the
+    frames simply keep whatever dimensions they already had. It must never be
+    able to take a report down.
+    """
+    if not os.environ.get("DIM_S3_PREFIX", "").strip() and \
+       not os.environ.get("DIM_MATCH", "").strip():
+        return None, {"configured": False}
+    try:
+        import dim_lookup
+        df, meta = dim_lookup.load_from_s3()
+        if meta.get("error") or not len(df):
+            return None, meta
+        key = (meta.get("key"), meta.get("modified"))
+        if not force and _DIM_CACHE.get("key") == key:
+            return _DIM_CACHE["lookup"], _DIM_CACHE["meta"]
+        lk = dim_lookup.build_lookup(df)
+        meta["supplies"] = lk.get("supplies", [])
+        meta["conflicts"] = int(len(lk.get("conflicts", [])))
+        _DIM_CACHE.update({"key": key, "lookup": lk, "meta": meta, "raw": df})
+        return lk, meta
+    except Exception as e:
+        return None, {"error": "%s: %s" % (type(e).__name__, e)}
+
+
 def _adlib_direct_frames(start, end):
     """Every grain straight from AdLib's bucket: (creative, device, sites, apps, note).
 
@@ -2172,6 +2202,27 @@ def _adlib_direct_frames(start, end):
                        for m in (cmeta, dmeta, smeta, ameta)), [])
         if partial:
             note += " · undersized: " + ", ".join(sorted(set(partial)))
+        # Join Vici's own dimensions on. AdLib has none of them, so without
+        # this the Creative tab's product norms and any BU attribution are blank.
+        lk, lmeta = _dimension_lookup()
+        if lk:
+            import dim_lookup
+            filled = []
+            for i, frame in enumerate((cre, dev, sit, app)):
+                if frame is not None and len(frame):
+                    f2, st = dim_lookup.enrich(frame, lk, report=True)
+                    if i == 0:
+                        cre = f2
+                    elif i == 1:
+                        dev = f2
+                    elif i == 2:
+                        sit = f2
+                    else:
+                        app = f2
+                    filled.append(st.get("match_pct", 0.0))
+            if filled:
+                note += (" · dimensions from %s (%.0f%% of rows matched)"
+                         % (lmeta.get("file", "lookup"), 100.0 * max(filled)))
         pick = lambda d: d if (d is not None and len(d)) else None
         return pick(cre), pick(dev), pick(sit), pick(app), note
     except Exception as e:
@@ -2268,6 +2319,38 @@ def previews_page():
                            rows=_cr_rows(res.get("missing"), 300),
                            by_client=_cr_rows(res.get("by_client"), 60),
                            version=_build_version())
+
+
+@app.route("/dimensions")
+def dimensions_page():
+    """The dimension export: what it supplies, and what's wrong with its naming."""
+    import dim_lookup
+    lk, meta = _dimension_lookup(force=request.args.get("refresh") == "1")
+    if not lk:
+        return jsonify({"ok": False, "meta": meta,
+                        "hint": "Set DIM_S3_PREFIX to the folder holding the export "
+                                "(same bucket as the insights reports), or DIM_MATCH "
+                                "to a filename substring."}), 200
+    raw = _DIM_CACHE.get("raw")
+    aud = dim_lookup.audit_naming(raw, lk) if raw is not None else {"summary": {}}
+    for name, tbl in (("dim_conflicts.csv", aud.get("conflicts")),
+                      ("dim_unknown_products.csv", aud.get("unknown_products")),
+                      ("dim_missing_bu.csv", aud.get("missing_bu"))):
+        if tbl is not None and len(tbl):
+            _CACHE[name] = tbl
+    _persist_download_csvs()
+    return jsonify({
+        "ok": True, "source": meta,
+        "recognised_columns": lk.get("columns", {}),
+        "ignored_columns": lk.get("ignored", [])[:40],
+        "supplies": lk.get("supplies", []),
+        "campaign_keys": int(len(lk.get("by_campaign", []))),
+        "pool_keys": int(len(lk.get("by_pool", []))),
+        "naming": aud.get("summary", {}),
+        "downloads": ["/download/dim_conflicts.csv",
+                      "/download/dim_unknown_products.csv",
+                      "/download/dim_missing_bu.csv"],
+    })
 
 
 if __name__ == "__main__":
