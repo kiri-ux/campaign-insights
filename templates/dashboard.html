@@ -242,7 +242,7 @@
       <textarea id="ai_rz_site" readonly rows="3"></textarea>
     </div>
     <div class="copybox">
-      <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App ID)</span><button class="copybtn" onclick="cp('ai_rz_app',this)">Copy</button></div>
+      <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App Id)</span><button class="copybtn" onclick="cp('ai_rz_app',this)">Copy</button></div>
       <textarea id="ai_rz_app" readonly rows="3"></textarea>
       <div class="copyhead"><span>Reporting Zone format blocking — TTD/DV360 (sites &amp; apps together, exact report strings)</span><button class="copybtn" onclick="cp('ai_rz_ttddv',this)">Copy</button></div>
       <textarea id="ai_rz_ttddv" readonly rows="3"></textarea>
@@ -449,7 +449,7 @@
     var rz=function(field,vals){return vals.map(function(v){return 'OR {'+field+'}="'+v+'"';}).join(' ');};
     var set=function(id,val){var t=document.getElementById(id); if(t) t.value=val;};
     set('ai_rz_site', rz('Site Domain',rzSites));
-    set('ai_rz_app', rz('App ID',rzApps));
+    set('ai_rz_app', rz('App Id',rzApps));   // Reporting Zone's token is 'App Id' — wrong case matches nothing
     set('ai_rz_ttddv', rz('App/URL',rzTtddv));
     // Per-blocklist DSP output
     var wrap=document.getElementById('dsp_per_blocklist');

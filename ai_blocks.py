@@ -2,7 +2,7 @@
 ai_blocks.py
 1. to_adlib_filter(): turn placement names into AdLib filter syntax:
      OR {Site Domain}="a.com" OR {Site Domain}="b.com" ...
-     OR {App Name}="App One" OR {App Name}="App Two" ...
+     OR {App Id}="com.foo.bar" OR {App Id}="1234567890" ...
 2. recommend_blocks(): send candidate placements (NOT already flagged Block) to
    Claude and get back the low-quality ones that should be added to the block list.
 
@@ -24,7 +24,11 @@ DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MAX_CANDIDATES = int(os.environ.get("AI_MAX_CANDIDATES", "200"))
 BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "50"))
 MAX_WORKERS = int(os.environ.get("AI_MAX_WORKERS", "6"))
-FIELD = {"site": "Site Domain", "app": "App ID"}
+# Field names as Reporting Zone expects them in a filter string. The app field
+# is 'App Id', not 'App ID' — Reporting Zone's token is case-sensitive and a
+# wrong case silently matches nothing rather than erroring, so the block list
+# would look applied while every app kept serving.
+FIELD = {"site": "Site Domain", "app": "App Id"}
 _COLS = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend", "ttddv", "raw_value", "category", "reason"]
 
 
