@@ -361,11 +361,13 @@ def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
                                          a.get("auto_high_ctr_site_blocks", pd.DataFrame()))
             if len(rec_site) and "impressions" in rec_site:
                 rec_site = rec_site.sort_values("impressions", ascending=False)  # sites by impr high-low
-            rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"])
+            rec_app = merge_app_blocks(rec.get("app", pd.DataFrame()), a["auto_app_blocks"],
+                                       a.get("auto_high_ctr_app_blocks", pd.DataFrame()))
             # Volume floor on QUALITY recommendations (env QUALITY_MIN_IMPR,
             # default 1000): tiny placements aren't worth review time — EXCEPT
             # gaming inventory, which stays block-by-default at any volume, and
-            # CTR flags, which carry their own >=10K pooled requirement.
+            # CTR flags, which carry their own floors (10K pooled for sites,
+            # APP_HIGH_CTR_MIN_IMPR / _MIN_CLICKS for apps).
             _qmin = float(os.environ.get("QUALITY_MIN_IMPR", "1000"))
             def _qfloor(df):
                 if df is None or not len(df) or "impressions" not in df.columns:
