@@ -369,7 +369,11 @@ def auto_high_ctr_app_blocks(allp, min_impr=None, min_clicks=None, ctr_multiple=
             "conversions", "ttddv", "raw_value", "category", "reason"]
     if allp is None or not len(allp):
         return pd.DataFrame(columns=cols)
-    app = allp[(allp["placement_type"] == "app") & (allp["impressions"] > 0)].copy()
+    # Only the columns this check reads — a full-width copy of every app row
+    # is a real memory cost on the starter instance.
+    _need = [c for c in ("placement", "app_id", "disp", "product", "impressions", "clicks",
+                         "conversions", "spend", "raw_value", "dsp", "is_block") if c in allp.columns]
+    app = allp.loc[(allp["placement_type"] == "app") & (allp["impressions"] > 0), _need].copy()
     app["product"] = app["product"].astype(str).str.strip()
     app = app[~app["product"].isin(LOW_CTR_EXCLUDED_PRODUCTS)]
     app = app[~app["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]

@@ -34,12 +34,16 @@ _ANALYSIS_LOCK = threading.Lock()  # serialize heavy runs so they can't stack in
 
 
 def _build_version():
-    """Build stamp baked into VERSION at package time; 'dev' if absent."""
+    """Build stamp baked into VERSION at package time; 'dev' if absent. On Render
+    the deployed commit is appended, so every deploy changes the stamp even when
+    VERSION wasn't bumped — that's what makes older dashboards show Sync."""
     try:
         with open(os.path.join(os.path.dirname(__file__), "VERSION"), encoding="utf-8") as f:
-            return f.read().strip() or "dev"
+            base = f.read().strip() or "dev"
     except OSError:
-        return "dev"
+        base = "dev"
+    sha = os.environ.get("RENDER_GIT_COMMIT", "").strip()[:7]
+    return f"{base} · {sha}" if sha else base
 
 
 BUILD_VERSION = _build_version()
