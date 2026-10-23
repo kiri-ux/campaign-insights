@@ -348,6 +348,67 @@ def auto_high_ctr_site_blocks(allp, min_impr=10000, ctr_multiple=3.0, ctr_floor=
     return g[cols].sort_values("spend", ascending=False).reset_index(drop=True)
 
 
+def auto_high_ctr_app_blocks(allp, min_impr=None, min_clicks=None, ctr_multiple=None,
+                             ctr_floor=None, exclude_keys=None):
+    """Apps to auto-add to the block list for ABNORMALLY HIGH CTR — the app twin of
+    auto_high_ctr_site_blocks. Keyed on App ID (not the name: many apps arrive with
+    an 'NA' name), judged per product against that product's app CTR norm.
+
+    Floors are lower than the site version on purpose. Click-fraud apps rarely
+    carry 10K impressions in a weekly window; the Oct 2026 NRF Native Video apps
+    ran 12-46% CTR on a few hundred to ~2K impressions each and never surfaced.
+    The click minimum keeps 3 clicks on 40 impressions off the list.
+    Env-tunable: APP_HIGH_CTR_MIN_IMPR, APP_HIGH_CTR_MIN_CLICKS,
+    APP_HIGH_CTR_FLOOR, APP_HIGH_CTR_MULTIPLE.
+    """
+    min_impr = min_impr if min_impr is not None else float(os.environ.get("APP_HIGH_CTR_MIN_IMPR", "500"))
+    min_clicks = min_clicks if min_clicks is not None else float(os.environ.get("APP_HIGH_CTR_MIN_CLICKS", "20"))
+    ctr_floor = ctr_floor if ctr_floor is not None else float(os.environ.get("APP_HIGH_CTR_FLOOR", "0.03"))
+    ctr_multiple = ctr_multiple if ctr_multiple is not None else float(os.environ.get("APP_HIGH_CTR_MULTIPLE", "3"))
+    cols = ["name", "app_id", "products", "impressions", "clicks", "ctr", "spend",
+            "conversions", "ttddv", "raw_value", "category", "reason"]
+    if allp is None or not len(allp):
+        return pd.DataFrame(columns=cols)
+    app = allp[(allp["placement_type"] == "app") & (allp["impressions"] > 0)].copy()
+    app["product"] = app["product"].astype(str).str.strip()
+    app = app[~app["product"].isin(LOW_CTR_EXCLUDED_PRODUCTS)]
+    app = app[~app["product"].str.lower().isin({"", "nan", "none", "(not in export)"})]
+    if app.empty:
+        return pd.DataFrame(columns=cols)
+    _aid = app["app_id"].astype(str).str.strip()
+    _bad = _aid.str.lower().isin(["", "na", "nan", "none"])
+    app = app.assign(_key=np.where(_bad, app["placement"].astype(str).str.strip(), _aid),
+                     _ttddv=_ttddv_series(app))
+    # Product norms come from ALL app delivery, blocked rows included, so the
+    # norm doesn't shift depending on what's already been blocked.
+    norms = (app.groupby("product")
+             .agg(_c=("clicks", "sum"), _i=("impressions", "sum")))
+    norms = (norms["_c"] / norms["_i"].where(norms["_i"] > 0)).fillna(0).rename("product_ctr").reset_index()
+    app = app[~app["is_block"]]
+    g = (app.groupby(["_key", "product"])
+         .agg(name=("disp", "first"), impressions=("impressions", "sum"),
+              clicks=("clicks", "sum"), conversions=("conversions", "sum"),
+              spend=("spend", "sum"), ttddv=("_ttddv", "max"), raw_value=("raw_value", "max"))
+         .reset_index())
+    g = g.merge(norms, on="product", how="left")
+    g["ctr"] = np.where(g["impressions"] > 0, g["clicks"] / g["impressions"], 0)
+    g["x_over_norm"] = np.where(g["product_ctr"] > 0, g["ctr"] / g["product_ctr"], 0)
+    flag = ((g["impressions"] >= min_impr) & (g["clicks"] >= min_clicks) &
+            (g["ctr"] >= ctr_floor) & (g["product_ctr"] > 0) & (g["x_over_norm"] >= ctr_multiple))
+    g = g[flag].copy()
+    if exclude_keys:
+        g = g[~g["_key"].astype(str).str.lower().isin(set(exclude_keys))]
+    if g.empty:
+        return pd.DataFrame(columns=cols)
+    g = g.sort_values("x_over_norm", ascending=False).drop_duplicates("_key", keep="first")
+    g = g.rename(columns={"_key": "app_id", "product": "products"})
+    g["category"] = "High CTR"
+    g["reason"] = g.apply(
+        lambda r: f"CTR {r['ctr']*100:.2f}% is {r['x_over_norm']:.1f}× the {r['products']} "
+                  f"app norm — abnormally HIGH (possible invalid traffic)", axis=1)
+    return g[cols].sort_values("spend", ascending=False).reset_index(drop=True)
+
+
 def _stream_sheet(ws):
     """Stream a worksheet in read_only mode, pulling only the columns we need.
     Keeps peak memory low (never materializes the full sheet) and avoids loading
@@ -686,6 +747,8 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
     auto_site_blocks_df = auto_site_blocks(allp, exclude_keys=_site_block_keys)
     # Abnormally HIGH CTR sites (possible invalid traffic) — also auto-block candidates.
     auto_high_ctr_site_blocks_df = auto_high_ctr_site_blocks(allp, exclude_keys=_site_block_keys)
+    _app_block_keys = set(blocklist.keys()) if blocklist else set()
+    auto_high_ctr_app_blocks_df = auto_high_ctr_app_blocks(allp, exclude_keys=_app_block_keys)
 
     # Master-blocklist check: match delivery against the external blocklist sheet
     # (by domain for sites, App ID for apps) and flag anything still serving AFTER
@@ -827,6 +890,7 @@ def audit_block_leak(path_or_buffer=None, blocklist=None, frames=None):
         "auto_app_blocks": auto_app_blocks,
         "auto_site_blocks": auto_site_blocks_df,
         "auto_high_ctr_site_blocks": auto_high_ctr_site_blocks_df,
+        "auto_high_ctr_app_blocks": auto_high_ctr_app_blocks_df,
         "top_placements": top_placements,
         "delivery_pp": delivery_pp,
         "delivery_strat": delivery_strat,

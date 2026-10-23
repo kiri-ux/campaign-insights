@@ -150,10 +150,11 @@ def _classify_batch(rows, kind, api_key, model):
     return out
 
 
-def merge_app_blocks(ai_apps, auto_apps):
-    """Combine AI-flagged apps with the deterministic auto-block apps. An app
-    caught by both shows a combined category instead of silently keeping one."""
-    frames = [df for df in (ai_apps, auto_apps) if df is not None and len(df)]
+def merge_app_blocks(ai_apps, auto_apps, auto_high_apps=None):
+    """Combine AI-flagged apps with the deterministic auto-block apps (gaming/junk/
+    unresolved and HIGH-CTR). An app caught by more than one shows a combined
+    category instead of silently keeping one."""
+    frames = [df for df in (ai_apps, auto_apps, auto_high_apps) if df is not None and len(df)]
     if not frames:
         return pd.DataFrame(columns=_COLS)
     return _merge_flagged(frames)
