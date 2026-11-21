@@ -228,3 +228,11 @@ p.note[style*="border-left"]{border-left:0 !important;border-radius:10px !import
 .pushed{font-size:11.5px;font-weight:600;color:var(--green)}
 .pusherr{font-size:11.5px;font-weight:600;color:var(--red);white-space:normal}
 .btn.sapush.go{background:var(--orange);color:#fff;border-color:var(--orange)}
+.pmodal{position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:100}
+.pmodal[hidden]{display:none}
+.pmbox{background:#fff;border-radius:14px;padding:22px 24px;width:min(420px,calc(100vw - 32px));box-shadow:0 20px 50px rgba(16,24,40,.25)}
+.pmbox h3{margin:0 0 6px;font-size:17px;color:var(--navy)}
+.pmbox .pmgroup{margin:0;font-size:13px;color:var(--muted)}
+.pmbox .pmresult{margin:8px 0 16px;font-size:13.5px;font-weight:600;color:var(--green)}
+.pmbtns{display:flex;gap:8px;justify-content:flex-end}
+.pmbtns a.btn{text-decoration:none;color:#fff}

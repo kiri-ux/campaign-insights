@@ -55,7 +55,7 @@
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
-        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}">Push</button>{% endif %}</td>
+        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-group="{{ g.id }}" data-gname="{{ g.name }}">Push</button>{% endif %}</td>
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
@@ -64,8 +64,25 @@
   </tbody></table></div>
 {% endif %}
 {% if rc and rc.groups and report_id %}
+<div class="pmodal" id="pushmodal" hidden><div class="pmbox" role="dialog" aria-modal="true" aria-labelledby="pmtitle">
+  <h3 id="pmtitle">Pushed to StackAdapt</h3>
+  <p class="pmgroup"></p><p class="pmresult"></p>
+  <div class="pmbtns"><a class="btn go" id="pmlink" target="_blank" rel="noopener">See live changes</a><button type="button" class="btn ghost" id="pmclose">Close</button></div>
+</div></div>
 <script>
+var SA_GROUP_URL = {{ (sa_group_url or 'https://www.stackadapt.com/overview/campaigns')|tojson }};
+function pushModal(result, gname, url){
+  var m=document.getElementById('pushmodal');
+  m.querySelector('.pmgroup').textContent=gname||'';
+  m.querySelector('.pmresult').textContent=result||'';
+  document.getElementById('pmlink').href=url;
+  m.hidden=false;
+}
 (function(){
+  var m=document.getElementById('pushmodal');
+  document.getElementById('pmclose').onclick=function(){ m.hidden=true; };
+  m.addEventListener('click', function(e){ if(e.target===m) m.hidden=true; });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') m.hidden=true; });
   document.querySelectorAll('button.sapush').forEach(function(b){
     b.addEventListener('click', function(){
       if(b.dataset.state!=='confirm'){
@@ -79,7 +96,9 @@
           var s=document.createElement('span');
           s.className = j.ok ? 'pushed' : 'pusherr';
           s.textContent = j.ok ? j.result : (j.error || 'Push failed');
+          var gid=b.dataset.group, gname=b.dataset.gname;
           b.replaceWith(s);
+          if(j.ok) pushModal(j.result, gname, SA_GROUP_URL.replace('{id}', encodeURIComponent(gid)));
         })
         .catch(function(e){ b.disabled=false; b.dataset.state=''; b.textContent='Push'; console.log(e); });
     });
