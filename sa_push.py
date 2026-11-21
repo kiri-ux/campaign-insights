@@ -1,5 +1,5 @@
-"""Push a Campaign recs row to StackAdapt (write calls). Needs
-STACKADAPT_WRITE_TOKEN (falls back to STACKADAPT_TOKEN, which is usually read-only).
+"""Push a Campaign recs row to StackAdapt (write calls). Uses STACKADAPT_TOKEN
+(the write key on adlib-insights); STACKADAPT_WRITE_TOKEN overrides it if set.
 
 Every write reads the current value first and adds to it, so nothing already set
 in StackAdapt is dropped:
@@ -33,7 +33,7 @@ def token():
 
 
 def configured():
-    return bool(os.environ.get("STACKADAPT_WRITE_TOKEN", "").strip())
+    return bool(token())
 
 
 def _gql(query, variables=None):
@@ -134,7 +134,7 @@ def push(rec):
     if not spec:
         raise RuntimeError("This rec can't be pushed")
     if not configured():
-        raise RuntimeError("Add STACKADAPT_WRITE_TOKEN to the adlib-insights service on Render")
+        raise RuntimeError("Add STACKADAPT_TOKEN to the adlib-insights service on Render")
     t = spec["type"]
     if t == "group_exclude":
         return _group_exclude(spec)

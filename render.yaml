@@ -12,5 +12,3 @@ services:
         sync: false
       - key: STACKADAPT_TOKEN
         sync: false
-      - key: STACKADAPT_WRITE_TOKEN
-        sync: false

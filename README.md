@@ -55,8 +55,8 @@ ad and audience. Rules are in the module docstring. Thresholds:
 `SA_REC_DAYS` 30 (lookback), `SA_REC_MIN_CAMP_IMPR` 10000 (per group), `SA_REC_MIN_SITE_IMPR` 2500, `SA_REC_MIN_AD_IMPR` 2500. One row per campaign group: group-wide recs ("All campaigns") from the combined breakdowns, campaign recs only where the group rec doesn't cover it, live SA pacing, and last 7 days vs prior 7.
 Re-render a saved report with `?sa=1` to add recs to it.
 
-**Push** on a rec row writes it to StackAdapt (`sa_push.py`, needs
-`STACKADAPT_WRITE_TOKEN`). Group-wide site excludes go on the campaign group's domain
+**Push** on a rec row writes it to StackAdapt (`sa_push.py`, uses
+`STACKADAPT_TOKEN`, which is the write key). Group-wide site excludes go on the campaign group's domain
 exclusions; device, OS, audience and campaign-level site recs become bid factors on
 each campaign (`factorPercent` 100 = no change, 0 = no bids, named "Insights: ...");
 creative pauses use `pauseAds`. Each write reads the current setting first and adds
