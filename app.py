@@ -1981,6 +1981,40 @@ def reports_rerender(date):
     return jsonify({"ok": True}), 200
 
 
+@app.route("/reports/<date>/sa_push", methods=["POST"])
+def reports_sa_push(date):
+    """Push one Campaign recs row to StackAdapt. Only rows saved in this report's
+    snapshot can be pushed; the page sends the row id, never the change itself."""
+    import re
+    import sa_push
+    if not re.fullmatch(_REPORT_ID_RE, date or ""):
+        return jsonify({"ok": False, "error": "Bad report id."}), 400
+    rid = str((request.get_json(silent=True) or {}).get("rid") or "")
+    ctx = _load_ctx(date)
+    groups = (((ctx or {}).get("sa") or {}).get("recs") or {}).get("groups") or []
+    rec = next((r for g in groups for r in g.get("recs") or [] if r.get("rid") == rid), None)
+    if rec is None:
+        return jsonify({"ok": False, "error": "Rec not found in this report."}), 404
+    if rec.get("pushed"):
+        return jsonify({"ok": True, "result": rec["pushed"]["result"], "already": True})
+    try:
+        result = sa_push.push(rec)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    import datetime as _dt
+    rec["pushed"] = {"result": result, "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
+    _save_ctx(date, ctx)
+    try:  # keep the saved page in step so the row stays marked after a reload
+        path = os.path.join(REPORTS_DIR, f"insights-{date}.html")
+        st = os.stat(path)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(_render_dash(ctx))
+        os.utime(path, (st.st_atime, st.st_mtime))
+    except Exception:
+        pass
+    return jsonify({"ok": True, "result": result})
+
+
 @app.route("/reports/<date>/delete", methods=["POST"])
 def reports_delete(date):
     """Delete a saved dashboard and every file that rides with it."""
