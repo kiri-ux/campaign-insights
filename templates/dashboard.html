@@ -274,8 +274,8 @@
     <div class="blkbar"><button class="copybtn" type="button" onclick="cp('sa_excl',this)">Copy for exclusion list</button></div>
     <textarea id="sa_excl" readonly rows="3">{% for r in sa.blocked %}{% if r.type == 'site' %}{{ r.key }}{% elif r.key.isdigit() %}apps.apple.com/us/app/id{{ r.key }}{% else %}play.google.com/store/apps/details?id={{ r.key }}{% endif %}
 {% endfor %}</textarea>
-    <div class="tblwrap" style="margin-top:10px"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Block list</th><th>SA products</th><th class="num">Advertisers</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
-    {% for r in sa.blocked %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td>{{ r.block_lists }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.advertisers }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act sa">Add to SA list</span></td></tr>{% endfor %}
+    <div class="tblwrap" style="margin-top:10px"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Block list</th><th>Blocked</th><th>SA products</th><th class="num">Advertisers</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
+    {% for r in sa.blocked %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td>{{ r.block_lists }}</td><td>{{ r.date_added or '—' }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.advertisers }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act sa">Add to SA list</span></td></tr>{% endfor %}
     </tbody></table></div>
     {% else %}<p class="note">None.</p>{% endif %}
 
