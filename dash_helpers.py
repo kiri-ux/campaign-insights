@@ -201,6 +201,7 @@ def build_block_rows(ctx):
             "why": f"CTR {num(p.get('x_norm')):.1f}x normal",
             "impressions": n0(p.get("impressions")), "clicks": n0(p.get("clicks")),
             "ctr": pct(p.get("ctr")), "spend": money(p.get("spend")), "cpm": money2(p.get("cpm")),
+            "sa_impressions": num(p.get("impressions")),
         })
     return rows
 
@@ -266,6 +267,12 @@ def enrich(ctx):
     ctx["block_rows"] = build_block_rows(ctx)
     ctx["leak_rows"] = build_leak_rows(ctx)
     ctx["actions"] = build_actions(ctx)
+    br, lr = ctx["block_rows"], ctx["leak_rows"]
+    ctx["splits"] = {
+        "block_adlib": sum(1 for r in br if r.get("adlib")), "block_sa": sum(1 for r in br if r.get("sa")),
+        "block_sa_impr": sum(num(r.get("sa_impressions")) for r in br),
+        "leak_adlib": sum(1 for r in lr if r.get("dsp") == "adlib"), "leak_sa": sum(1 for r in lr if r.get("dsp") == "sa"),
+    }
     return ctx
 
 

@@ -42,12 +42,12 @@
   {% set ti = t.impressions + sai %}
   <div class="cards">
     <div class="kpi"><div class="n">{{ ti|n0 }}</div><div class="l">Impressions</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ t.impressions|n0 }}</span><span><span class="dsp sa">SA</span> {{ sai|n0 }}</span></div>{% endif %}</div>
-    <div class="kpi"><div class="n">{{ '{:.3f}%'.format(((t.ctr * t.impressions + sac) / ti * 100) if ti else 0) }}</div><div class="l">CTR</div></div>
+    <div class="kpi"><div class="n">{{ '{:.3f}%'.format(((t.ctr * t.impressions + sac) / ti * 100) if ti else 0) }}</div><div class="l">CTR</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ '{:.3f}%'.format((t.ctr or 0) * 100) }}</span><span><span class="dsp sa">SA</span> {{ '{:.3f}%'.format((sac / sai * 100) if sai else 0) }}</span></div>{% endif %}</div>
     <div class="kpi"><div class="n">{{ (t.internal_cost + sas)|money }}</div><div class="l">Cost</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ t.internal_cost|money }}</span><span><span class="dsp sa">SA</span> {{ sas|money }}</span></div>{% endif %}</div>
-    <div class="kpi"><div class="n">{{ (t.placements + (sa.summary.publishers if sa_ok else 0))|n0 }}</div><div class="l">Publishers</div></div>
-    <div class="kpi warn"><div class="n">{{ block_rows|length }}</div><div class="l">To block</div></div>
-    <div class="kpi warn"><div class="n">{{ (t.rec_impr or 0)|n0 }} <span>{{ '{:.1f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">AdLib impressions to block</div></div>
-    <div class="kpi warn"><div class="n">{{ leak_rows|length }}</div><div class="l">Blocked, still serving</div></div>
+    <div class="kpi"><div class="n">{{ (t.placements + (sa.summary.publishers if sa_ok else 0))|n0 }}</div><div class="l">Publishers</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ t.placements|n0 }}</span><span><span class="dsp sa">SA</span> {{ (sa.summary.publishers if sa_ok else 0)|n0 }}</span></div>{% endif %}</div>
+    <div class="kpi warn"><div class="n">{{ block_rows|length }}</div><div class="l">To block</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ splits.block_adlib|n0 }}</span><span><span class="dsp sa">SA</span> {{ splits.block_sa|n0 }}</span></div>{% endif %}</div>
+    <div class="kpi warn"><div class="n">{{ ((t.rec_impr or 0) + splits.block_sa_impr)|n0 }}</div><div class="l">Impressions to block</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ (t.rec_impr or 0)|n0 }} ({{ '{:.1f}%'.format((t.rec_impr_pct or 0)*100) }})</span><span><span class="dsp sa">SA</span> {{ splits.block_sa_impr|n0 }} ({{ '{:.1f}%'.format((splits.block_sa_impr / sai * 100) if sai else 0) }})</span></div>{% endif %}</div>
+    <div class="kpi warn"><div class="n">{{ leak_rows|length }}</div><div class="l">Blocked, still serving</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ splits.leak_adlib|n0 }}</span><span><span class="dsp sa">SA</span> {{ splits.leak_sa|n0 }}</span></div>{% endif %}</div>
   </div>
   {% endif %}
 
