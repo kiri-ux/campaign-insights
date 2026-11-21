@@ -1926,11 +1926,7 @@ def _send_weekly_email(date_str, view_url, xlsx=None, bl_xlsx=None, sheet_links=
 
 @app.route("/reports")
 def reports_index():
-    dates = _list_reports()
-    links = "".join(f'<li><a href="/reports/{d}">{_fmt_report_name(d)}</a></li>' for d in dates)
-    body = f"<h2>Saved insights dashboards</h2><p>{len(dates)} report(s).</p><ul>{links}</ul>" \
-        if dates else "<h2>Saved insights dashboards</h2><p>None yet.</p>"
-    return f"<!doctype html><meta charset='utf-8'><title>Reports</title><body style='font-family:sans-serif;max-width:700px;margin:40px auto'>{body}</body>"
+    return render_template("reports.html", dates=_list_reports())
 
 
 @app.route("/reports/latest")

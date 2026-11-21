@@ -28,7 +28,7 @@
   <span class="syncalert" id="syncAlert">Newer build <span id="syncCur"></span> <button type="button" id="syncBtn">Sync</button></span>
   {% if sheet_links and sheet_links.watchlists %}<a class="btn-ghost" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer watchlists</a>{% endif %}
   {% if sheet_links and sheet_links.blocked_clients %}<a class="btn-ghost" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener">Serving block list</a>{% endif %}
-  {% if partner or clients or low_ctr_sites or blocked_site_clients %}<a class="btn-create" href="/download_watchlists.xlsx">&#8595; Excel</a>{% endif %}
+  {% if low_ctr_sites or block_rows %}<a class="btn-create" href="/download_watchlists.xlsx">&#8595; Excel</a>{% endif %}
 </div>
 
 <div class="wrap">
@@ -36,28 +36,27 @@
   {% if sa and sa.error %}<div class="err">{{ sa.error }}</div>{% endif %}
 
   {% if t %}
+  {% set sai = sa.summary.impressions if sa_ok else 0 %}
+  {% set sac = sa.summary.clicks if sa_ok else 0 %}
+  {% set sas = sa.summary.spend if sa_ok else 0 %}
+  {% set ti = t.impressions + sai %}
   <div class="cards">
-    <div class="kpi"><div class="n">{{ t.impressions|n0 }}</div><div class="l">AdLib impressions</div></div>
-    {% if sa_ok %}<div class="kpi"><div class="n">{{ sa.summary.impressions|n0 }}</div><div class="l">SA impressions</div></div>{% endif %}
-    <div class="kpi"><div class="n">{{ '{:.3f}%'.format(t.ctr*100) }}</div><div class="l">AdLib CTR</div></div>
-    <div class="kpi"><div class="n">{{ t.internal_cost|money }}</div><div class="l">AdLib cost</div></div>
-    <div class="kpi"><div class="n">{{ t.placements|n0 }}</div><div class="l">Publishers</div></div>
-    <div class="kpi warn"><div class="n">{{ t.rec_placements|n0 }}</div><div class="l">To block</div></div>
-    <div class="kpi warn"><div class="n">{{ (t.rec_impr or 0)|n0 }} <span>{{ '{:.1f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">Impressions to block</div></div>
-    <div class="kpi warn"><div class="n">{{ t.rec_spend|money }}</div><div class="l">Spend to block</div></div>
+    <div class="kpi"><div class="n">{{ ti|n0 }}</div><div class="l">Impressions</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ t.impressions|n0 }}</span><span><span class="dsp sa">SA</span> {{ sai|n0 }}</span></div>{% endif %}</div>
+    <div class="kpi"><div class="n">{{ '{:.3f}%'.format(((t.ctr * t.impressions + sac) / ti * 100) if ti else 0) }}</div><div class="l">CTR</div></div>
+    <div class="kpi"><div class="n">{{ (t.internal_cost + sas)|money }}</div><div class="l">Cost</div>{% if sa_ok %}<div class="split"><span><span class="dsp adlib">AdLib</span> {{ t.internal_cost|money }}</span><span><span class="dsp sa">SA</span> {{ sas|money }}</span></div>{% endif %}</div>
+    <div class="kpi"><div class="n">{{ (t.placements + (sa.summary.publishers if sa_ok else 0))|n0 }}</div><div class="l">Publishers</div></div>
+    <div class="kpi warn"><div class="n">{{ block_rows|length }}</div><div class="l">To block</div></div>
+    <div class="kpi warn"><div class="n">{{ (t.rec_impr or 0)|n0 }} <span>{{ '{:.1f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">AdLib impressions to block</div></div>
+    <div class="kpi warn"><div class="n">{{ leak_rows|length }}</div><div class="l">Blocked, still serving</div></div>
   </div>
   {% endif %}
 
-  {% set n_pub = (ai.site_count + ai.app_count) if ai else 0 %}
-  {% set n_acc = (partner|length if partner else 0) + (clients_total or 0) + ((insights.strategy_flags|length) if insights and insights.strategy_flags else 0) %}
-  {% set n_sa = (sa.summary.blocked_serving + sa.summary.high_ctr) if sa_ok else 0 %}
+  {% set n_pub = block_rows|length %}
   {% set n_cr = (creative.summary.blank_campaigns + (creative.summary.sm_display_size_creatives or 0)) if creative else 0 %}
   {% set n_dv = (device.recon.summary.clients_mismatched if device and device.recon else 0) %}
   <nav class="tabbar" role="tablist">
     <button class="tabbtn active" data-tab="actions" type="button">Actions{% if actions %}<span class="ct bad">{{ actions|length }}</span>{% endif %}</button>
     <button class="tabbtn" data-tab="publishers" type="button">Publishers{% if n_pub %}<span class="ct">{{ n_pub }}</span>{% endif %}</button>
-    <button class="tabbtn" data-tab="accounts" type="button">Partners &amp; clients{% if n_acc %}<span class="ct">{{ n_acc }}</span>{% endif %}</button>
-    <button class="tabbtn" data-tab="stackadapt" type="button">StackAdapt{% if n_sa %}<span class="ct bad">{{ n_sa }}</span>{% endif %}</button>
     <button class="tabbtn" data-tab="creative" type="button">Creative{% if n_cr %}<span class="ct bad">{{ n_cr }}</span>{% endif %}</button>
     <button class="tabbtn" data-tab="device" type="button">Device{% if n_dv %}<span class="ct bad">{{ n_dv }}</span>{% endif %}</button>
   </nav>
@@ -67,7 +66,7 @@
   <div class="tabpane" id="tab-actions">
     {% if actions %}
     <ul class="actions">
-      {% for a in actions %}<li class="{{ a.tone }}"><a href="#{{ a.tab }}/{{ a.anchor }}" data-go="{{ a.tab }}" data-anchor="{{ a.anchor }}"><span class="dot"></span><span class="what">{{ a.text }}</span><span class="where">{{ {'publishers':'Publishers','accounts':'Partners & clients','stackadapt':'StackAdapt','creative':'Creative','device':'Device'}[a.tab] }} &#8250;</span></a></li>{% endfor %}
+      {% for a in actions %}<li class="{{ a.tone }}"><a href="#{{ a.tab }}/{{ a.anchor }}" data-go="{{ a.tab }}" data-anchor="{{ a.anchor }}"><span class="dot"></span><span class="what">{{ a.text }}</span><span class="where">{{ {'publishers':'Publishers','creative':'Creative','device':'Device'}[a.tab] }} &#8250;</span></a></li>{% endfor %}
     </ul>
     {% else %}
     <div class="allclear">Nothing to do.</div>
@@ -110,10 +109,10 @@
     </tbody></table></div>
   {% endif %}
 
-  {% if ai %}
-    <h2 id="pub-block">To block <span class="count">{{ ai.site_count + ai.app_count }}</span></h2>
-    {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
-    {% if ai.sites or ai.apps %}
+  {% if ai or block_rows %}
+    <h2 id="pub-block">To block <span class="count">{{ block_rows|length }}</span></h2>
+    {% if ai and ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
+    {% if block_rows %}
     <div class="blkbar">
       {% if has_blocklist %}<button class="btn go" id="pushbtn" type="button" onclick="pushBlocklist()">Push checked to block sheet</button>{% endif %}
       <button class="btn ghost" type="button" onclick="downloadSelected()">Download CSV</button>
@@ -127,21 +126,24 @@
       <button type="button" class="fbtn" data-f="quality">Quality</button>
       <button type="button" class="fbtn" data-f="site">Sites</button>
       <button type="button" class="fbtn" data-f="app">Apps</button>
+      <button type="button" class="fbtn" data-f="adlib">AdLib</button>
+      {% if sa_ok %}<button type="button" class="fbtn" data-f="sa">StackAdapt</button>{% endif %}
     </div>
-    <div class="tblwrap"><table id="blkgrid" class="lalign paginate pgbottom"><thead><tr><th>&#10003;</th><th>Publisher</th><th>Type</th><th>Flag</th><th>Products</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr></thead><tbody>
-    {% for kind, rows in [('site', ai.sites or []), ('app', ai.apps or [])] %}{% for r in rows %}
+    <div class="tblwrap"><table id="blkgrid" class="lalign paginate pgbottom"><thead><tr><th>&#10003;</th><th>Publisher</th><th>Type</th><th>DSP</th><th>Flag</th><th>Products</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr></thead><tbody>
+    {% for r in block_rows %}
     {% set fl = r.flag or 'Quality' %}
-    <tr data-tags="{{ kind }}{% if 'High CTR' in fl %} high{% endif %}{% if 'Low CTR' in fl %} low{% endif %}{% if 'Quality' in fl %} quality{% endif %}">
-      <td><input type="checkbox" class="blkchk" data-kind="{{ kind }}" data-val="{{ r.name if kind == 'site' else r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" data-raw="{{ r.raw_value or '' }}" data-ttddv="{{ 1 if r.ttddv else 0 }}" checked></td>
-      <td class="wc">{{ r.name }}{% if kind == 'app' and r.app_id and r.app_id != r.name %}<div class="muted" style="font-size:11.5px">{{ r.app_id }}</div>{% endif %}</td>
-      <td>{{ tpill(kind) }}</td>
+    <tr data-tags="{{ r.kind }}{% if 'High CTR' in fl %} high{% endif %}{% if 'Low CTR' in fl %} low{% endif %}{% if 'Quality' in fl %} quality{% endif %}{% if r.adlib %} adlib{% endif %}{% if r.sa %} sa{% endif %}">
+      <td><input type="checkbox" class="blkchk" data-kind="{{ r.kind }}" data-val="{{ r.val }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" data-raw="{{ r.raw_value or '' }}" data-ttddv="{{ 1 if r.ttddv else 0 }}" checked></td>
+      <td class="wc">{{ r.name }}{% if r.kind == 'app' and r.app_id and r.app_id != r.name %}<div class="muted" style="font-size:11.5px">{{ r.app_id }}</div>{% endif %}</td>
+      <td>{{ tpill(r.kind) }}</td>
+      <td>{% if r.adlib %}<span class="dsp adlib">AdLib</span>{% endif %}{% if r.sa %}<span class="dsp sa"{% if r.adlib %} data-tip="{{ r.sa_impressions|n0 }} impr in StackAdapt"{% endif %}>SA</span>{% endif %}</td>
       <td>{{ flags(r.flag) }}{% if r.ttddv %}<span class="flag lo">TTD/DV360</span>{% endif %}</td>
       <td>{{ pills(r.products) }}</td>
-      <td class="wc">{{ (r.reason|short_reason) or r.category }}</td>
+      <td class="wc">{{ r.why }}</td>
       <td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td>
-    </tr>{% endfor %}{% endfor %}
+    </tr>{% endfor %}
     </tbody></table></div>
-    {% if not ai.has_app_id %}<p class="note">No App ID column in this export. Apps use App Name.</p>{% endif %}
+    {% if ai and not ai.has_app_id %}<p class="note">No App ID column in this export. Apps use App Name.</p>{% endif %}
 
     <details class="more">
       <summary>Copy for Reporting Zone and DSPs</summary>
@@ -158,34 +160,34 @@
         <div id="dsp_per_blocklist"></div>
       </div>
     </details>
-    {% elif not ai.error %}<p class="note">Nothing to block.</p>{% endif %}
+    {% elif not (ai and ai.error) %}<p class="note">Nothing to block.</p>{% endif %}
   {% endif %}
 
-  {% if blocklist_check and blocklist_check.leaking_count %}
-    <h2 id="pub-leak">Blocked but still serving <span class="count">{{ blocklist_check.leaking_count }}</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ blocklist_check.matched|n0 }}</div><div class="l">Blocked publishers in report</div></div>
-      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count|n0 }}</div><div class="l">Served after block date</div></div>
-      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_spend|money }}</div><div class="l">Spend after block date</div></div>
+  {% if leak_rows %}
+    {% set sa_leaks = leak_rows|selectattr('dsp', 'equalto', 'sa')|list %}
+    <h2 id="pub-leak">Blocked but still serving <span class="count">{{ leak_rows|length }}</span> <a class="dl" href="/download/blocklist_check.csv">AdLib CSV</a></h2>
+    <div class="seg" data-filter-for="leakgrid">
+      <button type="button" class="fbtn active" data-f="">All</button>
+      <button type="button" class="fbtn" data-f="adlib">AdLib</button>
+      {% if sa_leaks %}<button type="button" class="fbtn" data-f="sa">StackAdapt</button>{% endif %}
     </div>
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Products</th><th>Block list</th><th>Blocked</th><th>Last served</th><th class="num">Impr after</th><th class="num">Spend after</th><th class="num">CPM</th></tr></thead><tbody>
-    {% for r in blocklist_check.rows if r.leaking %}<tr><td class="wc">{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
+    <div class="tblwrap"><table id="leakgrid" class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>DSP</th><th>Products</th><th>Block list</th><th>Blocked</th><th>Last served</th><th class="num">Impr after</th><th class="num">Spend after</th><th>Action</th></tr></thead><tbody>
+    {% for r in leak_rows %}<tr data-tags="{{ r.dsp }}"><td class="wc">{{ r.name }}{% if r.sub %}<div class="muted" style="font-size:11.5px">{{ r.sub }}</div>{% endif %}</td><td>{{ tpill(r.placement_type) }}</td><td><span class="dsp {{ r.dsp }}">{{ 'AdLib' if r.dsp == 'adlib' else 'SA' }}</span></td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served or '—' }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td><td>{% if r.dsp == 'sa' %}<span class="act sa">Add to SA list</span>{% else %}<span class="act fix">Check block settings</span>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
-  {% endif %}
-
-  {% if blocked_site_clients %}
-    <h2 id="pub-clients">Clients serving blocked publishers <span class="count">{{ blocked_site_clients|length }}</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
-    {% if bsc_no_sid %}<div class="warnbar amber">No Campaign ID column in this export. Strategy ID is blank.</div>{% endif %}
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Strategy</th><th>Strategy ID</th><th>Products</th><th>Blocked publishers</th><th class="num">Impr</th><th class="num">Spend</th><th class="num">Impr after block</th><th class="num">Spend after block</th><th>Action</th></tr></thead><tbody>
-    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td class="wc">{{ r['Strategy Name'] if r['Strategy Name'] and r['Strategy Name'] not in ('(not in export)', 'nan') else '—' }}{% if r['TTD/DV360'] %} <span class="flag lo">TTD/DV360</span>{% endif %}</td><td>{{ r['Strategy ID'] if r['Strategy ID'] and r['Strategy ID'] != 'nan' else '—' }}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {% if r.n_site and r.n_site != '0' %}{{ r.n_site }} site{{ 's' if r.n_site != '1' }}{% endif %}{% if r.n_site and r.n_site != '0' and r.n_app and r.n_app != '0' %} &middot; {% endif %}{% if r.n_app and r.n_app != '0' %}{{ r.n_app }} app{{ 's' if r.n_app != '1' }}{% endif %}{% if (not r.n_site or r.n_site == '0') and (not r.n_app or r.n_app == '0') %}{{ r.n_sites }} publisher{{ 's' if r.n_sites != '1' }}{% endif %}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td><td>{% if r.leaking %}<span class="act fix">Fix block settings</span>{% endif %}</td></tr>
-    <tr class="sitedetail" style="display:none"><td colspan="20"><div class="sitegrid">{% for s in r.sites_list %}<div>{{ s }}</div>{% endfor %}</div></td></tr>{% endfor %}
-    </tbody></table></div>
+    {% if sa_leaks %}
+    <details class="more">
+      <summary>Copy for the StackAdapt exclusion list ({{ sa_leaks|length }})</summary>
+      <div class="copyhead"><span>One per line</span><button class="copybtn" type="button" onclick="cp('sa_excl',this)">Copy</button></div>
+      <textarea id="sa_excl" readonly rows="4">{% for r in sa_leaks %}{% if r.placement_type == 'site' %}{{ r.key }}{% elif r.key.isdigit() %}apps.apple.com/us/app/id{{ r.key }}{% else %}play.google.com/store/apps/details?id={{ r.key }}{% endif %}
+{% endfor %}</textarea>
+    </details>
+    {% endif %}
   {% endif %}
 
   {% if low_ctr_sites %}
     <h2 id="pub-lowctr">Low CTR by client <span class="count">{{ low_ctr_sites_total }}</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h2>
     <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Publisher</th><th>Product</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Conv</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">Spend</th><th>Action</th></tr></thead><tbody>
-    {% for r in low_ctr_sites %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td class="wc">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.product_ctr }}</td><td class="num">{{ r.spend }}</td><td>{% if r.acct_blocked %}<span class="acctbadge">On block list</span>{% else %}<span class="act review">Add client block</span>{% endif %}</td></tr>{% endfor %}
+    {% for r in low_ctr_sites %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td class="wc">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.product_ctr }}</td><td class="num">{{ r.spend }}</td><td>{% if r.acct_blocked %}<span class="act block lcbadge" data-site="{{ r.site }}">Block</span>{% else %}<span class="act review">Add client block</span>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   {% endif %}
 
@@ -214,119 +216,7 @@
     </details>
   {% endif %}
 
-  {% if not (publishers or ai or blocklist_check or blocked_site_clients or low_ctr_sites) %}<p class="note">No publisher data.</p>{% endif %}
-  </div>
-
-  <!-- ========================= PARTNERS & CLIENTS ========================= -->
-  <div class="tabpane" id="tab-accounts" style="display:none">
-  {% if not (partner or clients or (insights and insights.strategy_flags)) %}<p class="note">No high CTR partners, clients or strategies.</p>{% endif %}
-
-  {% if partner %}
-    <h2 id="acc-partners">Partners with high CTR <span class="count">{{ partner|length }}</span> <a class="dl" href="/download/partner_summary.csv">CSV</a></h2>
-    <div class="tblwrap"><table class="sortgrid paginate"><thead><tr>
-      <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
-      {% set o = 1 if has_buyer else 0 %}
-      <th class="sortable num" data-col="{{ 1 + o }}" data-type="num">Impr</th>
-      <th class="sortable num" data-col="{{ 2 + o }}" data-type="num">Clicks</th>
-      <th class="sortable num" data-col="{{ 3 + o }}" data-type="pct">CTR</th>
-      <th class="sortable num" data-col="{{ 4 + o }}" data-type="pct">CTR after blocks</th>
-      <th class="sortable num" data-col="{{ 5 + o }}" data-type="num">Conv</th>
-      <th class="sortable num" data-col="{{ 6 + o }}" data-type="money">Cost</th>
-      <th class="sortable num" data-col="{{ 7 + o }}" data-type="money">CPM</th>
-      <th class="sortable num" data-col="{{ 8 + o }}" data-type="num">Blocked impr</th>
-    </tr></thead><tbody>
-    {% for r in partner %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.adj_ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.blocked_impr }}</td></tr>{% endfor %}
-    </tbody></table></div>
-  {% endif %}
-
-  {% if clients %}
-    <h2 id="acc-clients">Clients with high CTR <span class="count">{{ clients_total }}</span> <a class="dl" href="/download/client_flags.csv">CSV</a></h2>
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">vs normal</th><th class="num">CTR after blocks</th></tr></thead><tbody>
-    {% for r in clients %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td>{{ pills(r.product) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.product_ctr }}</td><td class="num">{{ '{:.1f}x'.format(r.x_over_norm) }}</td><td class="num">{{ r.adj_ctr }}</td></tr>{% endfor %}
-    </tbody></table></div>
-  {% endif %}
-
-  {% if insights and insights.strategy_flags %}
-    <h2 id="acc-strategies">Strategies with high CTR <span class="count">{{ insights.strategy_flags|length }}</span> <a class="dl" href="/download/strategy_flags.csv">CSV</a></h2>
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th><th>Client</th><th>Strategy</th><th>Type</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">vs normal</th><th class="num">CTR after blocks</th></tr></thead><tbody>
-    {% for r in insights.strategy_flags %}<tr><td class="wc">{{ r.business_unit }}</td><td class="wc">{{ r.Client }}</td><td class="wc">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.type_ctr }}</td><td class="num">{{ '{:.1f}x'.format(r.x_over_norm) }}</td><td class="num">{{ r.adj_ctr }}</td></tr>{% endfor %}
-    </tbody></table></div>
-  {% endif %}
-  </div>
-
-  <!-- ============================= STACKADAPT ============================= -->
-  <div class="tabpane" id="tab-stackadapt" style="display:none">
-  {% if sa_ok %}
-    {% set s = sa.summary %}
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ s.impressions|n0 }}</div><div class="l">Impressions</div></div>
-      <div class="kpi"><div class="n">{{ s.clicks|n0 }}</div><div class="l">Clicks</div></div>
-      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(s.ctr*100) }}</div><div class="l">CTR</div></div>
-      <div class="kpi"><div class="n">{{ s.spend|money }}</div><div class="l">Cost</div></div>
-      <div class="kpi"><div class="n">{{ s.cpm|money2 }}</div><div class="l">CPM</div></div>
-      <div class="kpi"><div class="n">{{ s.campaigns|n0 }}</div><div class="l">Campaigns</div></div>
-      <div class="kpi"><div class="n">{{ s.publishers|n0 }}</div><div class="l">Publishers</div></div>
-      <div class="kpi{% if s.blocked_serving %} warn{% endif %}"><div class="n">{{ s.blocked_serving|n0 }}</div><div class="l">Blocked, still serving</div></div>
-    </div>
-
-    <h2 id="sa-blocked">On the block sheet, served in StackAdapt <span class="count">{{ s.blocked_serving }}</span></h2>
-    {% if sa.blocked %}
-    <div class="blkbar"><button class="copybtn" type="button" onclick="cp('sa_excl',this)">Copy for exclusion list</button></div>
-    <textarea id="sa_excl" readonly rows="3">{% for r in sa.blocked %}{% if r.type == 'site' %}{{ r.key }}{% elif r.key.isdigit() %}apps.apple.com/us/app/id{{ r.key }}{% else %}play.google.com/store/apps/details?id={{ r.key }}{% endif %}
-{% endfor %}</textarea>
-    <div class="tblwrap" style="margin-top:10px"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Block list</th><th>Blocked</th><th>SA products</th><th class="num">Advertisers</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
-    {% for r in sa.blocked %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td>{{ r.block_lists }}</td><td>{{ r.date_added or '—' }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.advertisers }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act sa">Add to SA list</span></td></tr>{% endfor %}
-    </tbody></table></div>
-    {% else %}<p class="note">None.</p>{% endif %}
-
-    <h2 id="sa-high">High CTR publishers <span class="count">{{ s.high_ctr }}</span></h2>
-    {% if sa.high_ctr %}
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>SA products</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">vs normal</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
-    {% for r in sa.high_ctr %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct }}</td><td class="num">{{ '{:.1f}x'.format(r.x_norm) }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act block">Block</span></td></tr>{% endfor %}
-    </tbody></table></div>
-    {% else %}<p class="note">None.</p>{% endif %}
-
-    {% if sa.to_block %}
-    <h2 id="sa-toblock">To block in AdLib, serving in StackAdapt <span class="count">{{ sa.to_block|length }}</span></h2>
-    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>SA products</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th></tr></thead><tbody>
-    {% for r in sa.to_block %}<tr><td class="wc">{{ r.title or r.name }}</td><td>{{ tpill(r.type) }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct }}</td><td class="num">{{ r.spend|money2 }}</td></tr>{% endfor %}
-    </tbody></table></div>
-    {% endif %}
-
-    <h2>By product</h2>
-    <div class="tblwrap"><table><thead><tr><th>Product</th><th class="num">Campaigns</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th><th class="num">CPM</th></tr></thead><tbody>
-    {% for r in sa.products %}<tr><td>{{ r.product }}</td><td class="num">{{ r.campaigns }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
-    </tbody></table></div>
-
-    <h2>By advertiser <span class="count">{{ sa.advertisers|length }}</span></h2>
-    <div class="tblwrap"><table class="sortgrid paginate"><thead><tr><th>Advertiser</th><th>Products</th>
-      <th class="sortable num" data-col="2" data-type="num">Campaigns</th>
-      <th class="sortable num" data-col="3" data-type="num">Impr</th>
-      <th class="sortable num" data-col="4" data-type="num">Clicks</th>
-      <th class="sortable num" data-col="5" data-type="pct">CTR</th>
-      <th class="sortable num" data-col="6" data-type="num">Conv</th>
-      <th class="sortable num" data-col="7" data-type="money">Cost</th>
-      <th class="sortable num" data-col="8" data-type="money">CPM</th></tr></thead><tbody>
-    {% for r in sa.advertisers %}<tr><td class="wc">{{ r.advertiser }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.campaigns }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.conversions|n0 }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
-    </tbody></table></div>
-
-    <details class="more">
-      <summary>Campaigns ({{ sa.campaigns|length }})</summary>
-      <div class="tblwrap"><table class="sortgrid paginate"><thead><tr><th>Campaign</th><th>Product</th><th>Line</th>
-        <th class="sortable num" data-col="3" data-type="num">Impr</th>
-        <th class="sortable num" data-col="4" data-type="num">Clicks</th>
-        <th class="sortable num" data-col="5" data-type="pct">CTR</th>
-        <th class="sortable num" data-col="6" data-type="money">Cost</th>
-        <th class="sortable num" data-col="7" data-type="money">CPM</th></tr></thead><tbody>
-      {% for r in sa.campaigns %}<tr><td class="wc">{{ r.name }}</td><td>{{ r.product }}</td><td>{{ r.line or '—' }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.spend|money2 }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
-      </tbody></table></div>
-    </details>
-    <p class="note">{{ sa.start }} to {{ sa.end }}</p>
-  {% elif sa and sa.error %}
-    <p class="note">No StackAdapt data.</p>
-  {% else %}
-    <p class="note">No StackAdapt data for this report.</p>
-  {% endif %}
+  {% if not (publishers or block_rows or leak_rows or low_ctr_sites) %}<p class="note">No publisher data.</p>{% endif %}
   </div>
 
   <!-- ============================== CREATIVE ============================== -->
@@ -477,6 +367,18 @@
       wrap.innerHTML=html || '<p class="note">Nothing checked.</p>';
     }
   }
+  // Low CTR rows on the block list follow that row's checkbox
+  function syncLowCtr(){
+    document.querySelectorAll('.lcbadge').forEach(function(b){
+      var site=(b.dataset.site||'').trim().toLowerCase(), on=null;
+      document.querySelectorAll('.blkchk[data-kind="site"]').forEach(function(cb){
+        if(String(cb.dataset.val||'').trim().toLowerCase()===site) on=cb.checked;
+      });
+      if(on===false){ b.className='act review lcbadge'; b.textContent='Add client block'; }
+      else { b.className='act block lcbadge'; b.textContent='Block'; }
+    });
+  }
+  var _rb=rebuildBlocks; rebuildBlocks=function(){ _rb(); syncLowCtr(); };
   document.querySelectorAll('.blkchk').forEach(function(cb){cb.addEventListener('change',rebuildBlocks);});
   if(document.querySelector('.blkchk')) rebuildBlocks();
 
