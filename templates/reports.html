@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>adtini · Reports</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/static/insights.css?v={{ build_version|urlencode }}">
+</head>
+<body>
+<nav class="rail">
+  <a href="/" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg></a>
+  <a href="/reports/latest" title="Insights" aria-label="Insights" class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16v2H4z"/><path d="M6 15h3v3H6zm5-6h3v9h-3zm5-5h3v14h-3z"/></svg></a>
+  <a href="/reports" title="All reports" aria-label="All reports" class="mark on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zm2 2v14h10V8h-3V5zm2 6h6v2H9zm0 4h6v2H9z"/></svg></a>
+</nav>
+<div class="pagehead"><h2>Reports</h2><span class="range">{{ dates|length }} saved</span><span class="build">build {{ build_version }}</span></div>
+<div class="wrap" style="max-width:720px">
+  {% if dates %}
+  <div class="tblwrap"><table><thead><tr><th>Delivery week</th><th></th></tr></thead><tbody>
+  {% for d in dates %}<tr><td><a href="/reports/{{ d }}" style="color:var(--text);font-weight:500">{{ d|report_name }}</a>{% if loop.first %} <span class="flag ok" style="margin-left:6px">Latest</span>{% endif %}</td><td class="num"><a class="dl" href="/reports/{{ d }}">Open &#8250;</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="note">No reports yet.</p>{% endif %}
+</div>
+</body>
+</html>

@@ -70,6 +70,32 @@ def _key(name):
     return (s[4:] if s.startswith("www.") else s).rstrip(".")
 
 
+_SA_PROD = {"social mirror ads": "Social Mirror", "audio": "Online Audio", "b2b display": "Display",
+            "restricted ctv": "CTV", "restricted social mirror ctv": "Social Mirror CTV",
+            "ctv + video": "CTV, Video", "native": "Native Display"}
+
+
+def sa_products(prodstr):
+    """SA product names (from campaign group names) in AdLib's product names."""
+    out = []
+    for p in str(prodstr or "").split(", "):
+        p = p.strip()
+        if not p:
+            continue
+        for q in _SA_PROD.get(p.lower(), p).split(", "):
+            if q not in out:
+                out.append(q)
+    return ", ".join(out)
+
+
+def _merge_products(a, b):
+    out = [x for x in str(a or "").split(", ") if x]
+    for x in str(b or "").split(", "):
+        if x and x not in out:
+            out.append(x)
+    return ", ".join(out)
+
+
 def build_publishers(ctx, limit=500):
     """One row per publisher across AdLib and StackAdapt."""
     rows = {}
@@ -97,6 +123,7 @@ def build_publishers(ctx, limit=500):
                 "action": "",
             }
         row["sa"] = True
+        row["products"] = _merge_products(row["products"], sa_products(p.get("products")))
         row["sa_impressions"] = num(p.get("impressions"))
         row["impressions"] += num(p.get("impressions"))
         row["clicks"] += num(p.get("clicks"))
@@ -117,6 +144,63 @@ def build_publishers(ctx, limit=500):
     return out
 
 
+def _sa_value(p):
+    """What goes on the block sheet for an SA publisher: domain, bundle ID or iOS ID."""
+    return p.get("key") or p.get("name") or ""
+
+
+def build_block_rows(ctx):
+    """The To block list: AdLib recommendations plus SA high CTR publishers,
+    each tagged with the DSPs it served on."""
+    ai = ctx.get("ai") or {}
+    sa = ctx.get("sa") or {}
+    sa_by_key = {_key(p.get("key") or p.get("name")): p for p in sa.get("publishers") or []}
+    rows, seen = [], set()
+    for kind, src in (("site", ai.get("sites") or []), ("app", ai.get("apps") or [])):
+        for r in src:
+            val = r.get("name") if kind == "site" else (r.get("app_id") or r.get("name"))
+            k = _key(val)
+            seen.add(k)
+            p = sa_by_key.get(k)
+            rows.append(dict(r, kind=kind, val=val, adlib=True, sa=bool(p),
+                             why=short_reason(r.get("reason")) or r.get("category") or "",
+                             sa_impressions=num(p.get("impressions")) if p else 0))
+    for p in sa.get("high_ctr") or []:
+        k = _key(p.get("key") or p.get("name"))
+        if k in seen:
+            continue
+        seen.add(k)
+        rows.append({
+            "kind": p.get("type") or "site", "val": _sa_value(p),
+            "name": p.get("title") or p.get("name"), "app_id": p.get("name") if p.get("type") == "app" else "",
+            "products": sa_products(p.get("products")), "flag": "High CTR", "raw_value": _sa_value(p),
+            "ttddv": False, "adlib": False, "sa": True,
+            "why": f"CTR {num(p.get('x_norm')):.1f}x normal",
+            "impressions": n0(p.get("impressions")), "clicks": n0(p.get("clicks")),
+            "ctr": pct(p.get("ctr")), "spend": money(p.get("spend")), "cpm": money2(p.get("cpm")),
+        })
+    return rows
+
+
+def build_leak_rows(ctx):
+    """Blocked publishers that still served: AdLib after the block date, SA in a
+    week that started after the block date."""
+    rows = []
+    for r in ((ctx.get("blocklist_check") or {}).get("rows") or []):
+        if r.get("leaking"):
+            rows.append(dict(r, dsp="adlib"))
+    for p in ((ctx.get("sa") or {}).get("blocked") or []):
+        rows.append({
+            "dsp": "sa", "name": p.get("title") or p.get("name"),
+            "sub": p.get("name") if p.get("title") else "", "key": p.get("key"),
+            "placement_type": p.get("type") or "site", "products": sa_products(p.get("products")),
+            "lists": p.get("block_lists"), "date_added_str": p.get("date_added") or "—",
+            "last_served": "", "post_impr": n0(p.get("impressions")), "post_spend": money(p.get("spend")),
+            "cpm": money2(p.get("cpm")),
+        })
+    return rows
+
+
 def _pl(n, one, many=None):
     return one if n == 1 else (many or one + "s")
 
@@ -130,32 +214,20 @@ def build_actions(ctx):
         if n > 0:
             acts.append({"n": n, "text": text(n), "tab": tab, "anchor": anchor, "tone": tone})
 
-    ai = ctx.get("ai") or {}
-    add((ai.get("site_count") or 0) + (ai.get("app_count") or 0),
-        lambda n: f"Block {n:,} {_pl(n, 'publisher')}", "publishers", "pub-block")
+    blk = ctx.get("block_rows") or []
+    add(len(blk), lambda n: f"Block {n:,} {_pl(n, 'publisher')}", "publishers", "pub-block")
     bc = ctx.get("blocklist_check") or {}
     add(bc.get("leaking_count"),
-        lambda n: f"Check DSP block settings: {n:,} blocked {_pl(n, 'publisher')} still serving",
+        lambda n: f"Check AdLib block settings: {n:,} blocked {_pl(n, 'publisher')} still serving",
         "publishers", "pub-leak")
-    bsc = ctx.get("blocked_site_clients") or []
-    add(sum(1 for r in bsc if r.get("leaking")),
-        lambda n: f"Fix block settings for {n:,} {_pl(n, 'client')}", "publishers", "pub-clients")
     ss = (ctx.get("sa") or {}).get("summary") or {}
     add(ss.get("blocked_serving"),
-        lambda n: f"Add {n:,} {_pl(n, 'publisher')} to the StackAdapt exclusion list", "stackadapt", "sa-blocked")
-    add(ss.get("high_ctr"),
-        lambda n: f"Review {n:,} high CTR {_pl(n, 'publisher')} in StackAdapt", "stackadapt", "sa-high", "warn")
+        lambda n: f"Add {n:,} {_pl(n, 'publisher')} to the StackAdapt exclusion list", "publishers", "pub-leak")
     add(len(ctx.get("sheet_audit") or []),
         lambda n: f"Fix {n:,} block sheet {_pl(n, 'entry', 'entries')}", "publishers", "pub-sheet", "warn")
     lcs = ctx.get("low_ctr_sites") or []
     add(sum(1 for r in lcs if not r.get("acct_blocked")),
         lambda n: f"Add client blocks for {n:,} low CTR {_pl(n, 'publisher')}", "publishers", "pub-lowctr", "warn")
-    add(len(ctx.get("partner") or []),
-        lambda n: f"Review {n:,} {_pl(n, 'partner')} with high CTR", "accounts", "acc-partners", "warn")
-    add(ctx.get("clients_total") or len(ctx.get("clients") or []),
-        lambda n: f"Review {n:,} {_pl(n, 'client')} with high CTR", "accounts", "acc-clients", "warn")
-    add(len(((ctx.get("insights") or {}).get("strategy_flags")) or []),
-        lambda n: f"Review {n:,} {_pl(n, 'strategy', 'strategies')} with high CTR", "accounts", "acc-strategies", "warn")
     cr = (ctx.get("creative") or {}).get("summary") or {}
     add(cr.get("blank_campaigns"),
         lambda n: f"Tell AdLib: blank creative names in {n:,} {_pl(n, 'campaign')}", "creative", "cq-blank")
@@ -170,6 +242,8 @@ def build_actions(ctx):
 def enrich(ctx):
     ctx.setdefault("sa", None)
     ctx["publishers"] = build_publishers(ctx)
+    ctx["block_rows"] = build_block_rows(ctx)
+    ctx["leak_rows"] = build_leak_rows(ctx)
     ctx["actions"] = build_actions(ctx)
     return ctx
 
