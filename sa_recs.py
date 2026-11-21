@@ -318,7 +318,7 @@ def push_spec(r, group_id, campaign_ids, group_wide):
         return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": 0,
                 "rule": {"domainRule": {"domains": [key]}}}
     if kind == "Creative" and action == "Pause":
-        return {"type": "pause_ads", "ad_ids": [key]}
+        return {"type": "pause_ads", "ad_ids": [key], "campaign_ids": campaign_ids}
     f = _factor(action or "")
     if f is None:
         return None
