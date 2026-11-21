@@ -10,3 +10,5 @@ services:
         value: "3.12.4"
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: STACKADAPT_TOKEN
+        sync: false

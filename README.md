@@ -26,6 +26,26 @@ Proactive oversight layer for AdLib delivery. Four inputs:
    CTV/Video delivering off a TV screen, and the cross-grain reconciliation
    described below.
 
+## Dashboard layout (Nov 2026)
+
+Tabs: **Actions** (plain next steps, each links to its list), **Publishers** (every
+site and app across AdLib and StackAdapt, the block list, blocked-but-serving,
+clients on blocked publishers, low CTR by client, block sheet fixes),
+**Partners & clients** (high CTR watchlists), **StackAdapt**, **Creative**, **Device**.
+Styling matches adtini-pacing (`static/insights.css`).
+
+## StackAdapt
+
+`sa_insights.py` pulls StackAdapt delivery for the report window from the GraphQL
+API (`campaignDelivery` for campaigns, `campaignInsight(attributes: [APP])` for
+sites and apps). Needs `STACKADAPT_TOKEN` on the Render service. Flags:
+publishers on the block sheet that still served in SA (SA has one global
+exclusion list, so Social Mirror-only blocks are skipped), publishers the AdLib
+analysis says to block, and high CTR publishers (`SA_HIGH_CTR_X` default 3x the
+product norm, `SA_HIGH_CTR_MIN_IMPR` 1000, `SA_HIGH_CTR_MIN_CLICKS` 10).
+Campaigns named `test_` are left out. Restyling a saved report pulls SA for it
+when it has none.
+
 ## Device insights & reconciliation
 
 Device-grain delivery, plus the check that exists because of the July 2026 dispute:

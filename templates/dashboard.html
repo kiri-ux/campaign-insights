@@ -2,383 +2,403 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BARCK+ Insights — Results</title>
+<title>adtini · Insights</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-<style>
-  /* Vici / adtini palette */
-  :root{--atlas:#002D58;--velocity:#0066B3;--gold:#F1B434;--parchment:#FDFBF7;
-        --ink:#16283B;--muted:#5B6B7C;--line:#D9DFE6;--brand:#0066B3;--bg:#FDFBF7;--card:#FFFFFF;
-        --ok:#1F7A4D;--ok-bg:#E7F4ED;--warnc:#9A6A00;--warnc-bg:#FBF1D9;--info-bg:#E8F1F8;--warn:#B42318;--warnbg:#fbeeea;
-        --font-head:'Barlow Condensed',Arial,sans-serif;--font-body:'Barlow',Arial,sans-serif;}
-  header.brand{background:var(--atlas);color:#fff;padding:16px 24px;border-bottom:4px solid var(--gold);position:sticky;top:0;z-index:95;}
-  header.brand .hrow{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:16px;}
-  header.brand h1{margin:0;font-family:var(--font-head);font-weight:700;font-size:24px;letter-spacing:.04em;text-transform:uppercase;color:#fff;}
-  header.brand h1 span{font-family:var(--font-body);text-transform:none;letter-spacing:0;color:#7E93A8;font-size:11px;font-weight:400;}
-  header.brand .ver{font-size:11px;color:#7E93A8;font-weight:400;letter-spacing:.02em;margin-left:auto;font-family:var(--font-body);}
-  *{box-sizing:border-box}
-  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);margin:0;padding:0 0 40px;}
-  .brandbar{max-width:min(1680px,96vw);margin:0 auto;display:flex;align-items:center;gap:10px;padding:18px 0 6px;border-bottom:2px solid var(--gold);}
-  .brandbar .mark{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--atlas);letter-spacing:-.01em;}
-  .brandbar .mark span{color:var(--velocity);}
-  .brandbar .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
-  .brandbar .ver{font-size:11px;color:var(--muted);opacity:.7;font-weight:500;letter-spacing:.02em;}
-  .syncalert{display:none;align-items:center;gap:8px;font-size:11px;font-weight:600;color:#b3402a;background:#ffe9e4;border:1px solid #f3c4b8;border-radius:7px;padding:3px 8px;margin-left:10px;}
-  .syncalert button{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-body);}
-  .syncalert button:disabled{opacity:.6;cursor:default;}
-  .wrap{max-width:min(1680px,96vw);margin:0 auto;padding:14px 12px 0;}
-  a.back{color:var(--velocity);text-decoration:none;font-size:14px;font-weight:500;}
-  h1{font-family:var(--font-head);font-size:24px;margin:8px 0 18px;color:var(--atlas);text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
-  h2{font-family:var(--font-head);font-size:17px;margin:28px 0 10px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
-  h3{font-family:var(--font-head);font-size:15.5px;color:var(--atlas);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
-  .tabhead{font-size:22px;}
-  h1 .sub,h2 .sub,h3 .sub{font-family:var(--font-body);text-transform:none;letter-spacing:0;}
-  h2 .sub{font-family:var(--font-body);font-weight:400;color:var(--muted);font-size:13px;}
-  .cards{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
-  .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
-  .kpi .n{font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--atlas);}
-  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px;}
-  .kpi.warn{background:var(--warnbg);border-color:#f3cfc9;}
-  .kpi.warn .n{color:var(--warn);}
-  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
-  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
-  th:first-child,td:first-child{text-align:left;}
-  th{background:#F3F6F9;color:var(--atlas);font-family:var(--font-head);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
-  tr:last-child td{border-bottom:0;}
-  .dl{font-size:13px;color:var(--velocity);text-decoration:none;margin-left:10px;font-weight:500;}
-  .pillgroup{margin-left:auto;display:flex;gap:8px;align-items:center;}
-  .pilllink{display:inline-flex;align-items:center;padding:4px 14px;border-radius:999px;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:.01em;transition:background .15s,color .15s;}
-  .pill-blue{background:#eef4fc;color:var(--velocity);border:1px solid #cfe0f5;}
-  .pill-blue:hover{background:var(--velocity);color:#fff;}
-  .pill-gold{background:#fdf3d9;color:#8a6410;border:1px solid #f1dfae;}
-  .pill-gold:hover{background:var(--gold);color:#332500;}
-  .err{background:var(--warnbg);border:1px solid #f3cfc9;color:var(--warn);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:14px;}
-  .note{color:var(--muted);font-size:13px;margin:6px 0 0;}
-  .copybox{margin:12px 0;}
-  .copyhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:13px;font-weight:600;color:var(--muted);}
-  .copybtn{background:var(--velocity);color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;}
-  .copybtn.done{background:#177245;}
-  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfaf5;color:var(--ink);resize:vertical;}
-  .pill{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin:1px 2px 1px 0;letter-spacing:.02em;cursor:default;}
-  .tp{display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;letter-spacing:.03em;text-transform:uppercase;}
-  .tp.site{background:#e3edfb;color:#1a4f9c;}
-  .tp.app{background:#e7f6ec;color:#1c7a43;}
-  .lalign th,.lalign td{text-align:left;}
-  .lalign td.num,.lalign th.num{text-align:right;}
-  .tblwrap{overflow-x:auto;}
-  .blkchk{width:16px;height:16px;cursor:pointer;accent-color:var(--velocity);}
-  tr.hot{background:#fff6e0;}
-  tr.hot td{border-bottom-color:#f0e2b8;}
-  tr.coral{background:#ffe9e4;}
-  tr.coral td{border-bottom-color:#f6cfc5;}
-  th.sortable{cursor:pointer;user-select:none;}
-  th.sortable:hover{color:var(--velocity);}
-  th.sortable::after{content:' ⇅';opacity:.4;font-size:10px;}
-  .btnrow{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;}
-  .fbtn{background:#fff;border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);font-family:var(--font-body);}
-  .fbtn.active{background:var(--velocity);color:#fff;border-color:var(--velocity);}
-  /* CTR insight tabs */
-  .tabbar{display:flex;align-items:center;gap:4px;border-bottom:2px solid var(--line);margin:10px 0 6px;flex-wrap:wrap;}
-  .tabbtn{background:none;border:0;border-bottom:3px solid transparent;padding:10px 18px;font-family:var(--font-head);font-weight:600;font-size:16px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer;margin-bottom:-2px;}
-  .tabbtn:hover{color:var(--atlas);}
-  .tabbtn.active{color:var(--atlas);border-bottom-color:var(--gold);}
-  .tabbtn .ct{font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);margin-left:6px;}
-  /* Expandable "blocked sites" drawer */
-  td > details{max-width:360px;}
-  td > details > summary{cursor:pointer;color:var(--velocity);font-weight:600;font-size:12px;white-space:nowrap;}
-  td > details[open] > summary{margin-bottom:4px;}
-  td > details .sitelist{white-space:normal;font-size:12px;color:var(--ink);line-height:1.5;}
-  /* Clients-serving-blocked-sites: wrap long text so the table keeps its width */
-  table.cbs td.wrapcell, table.cbs th{white-space:normal;}
-  table.cbs td.wrapcell{max-width:220px;word-break:break-word;}
-  .drawer-toggle{cursor:pointer;color:var(--velocity);font-weight:600;white-space:nowrap;user-select:none;}
-  .drawer-toggle:hover{text-decoration:underline;}
-  tr.sitedetail > td{background:#fbfaf5;padding:8px 12px;}
-  .sitegrid{columns:210px auto;column-gap:26px;white-space:normal;font-size:12px;line-height:1.7;}
-  .sitegrid > div{break-inside:avoid;color:var(--ink);overflow-wrap:anywhere;word-break:break-word;}
-  /* Recommended-block CTR flags + account-level low-CTR block highlight */
-  .flag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;}
-  .flag.hi{background:#fff1d6;color:#8a5a00;}
-  .flag.lo{background:#e3edfb;color:#1a4f9c;}
-  .flag.q{background:#ece8f6;color:#5b3fa3;}
-  .pager{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:2px 0 8px;font-size:13px;color:var(--muted);}
-  .pager.pgleft{justify-content:flex-start;margin:8px 0 2px;}
-  .pager button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--velocity);font-family:var(--font-body);}
-  .pager button:disabled{color:var(--muted);cursor:default;opacity:.5;}
-  tr.lowctrblock{background:#eef4fc;}
-  tr.lowctrblock td{border-bottom-color:#d5e3f5;}
-  .cq td:nth-child(-n+3),.cq th:nth-child(-n+3){text-align:left;}
-  .cqwrap{white-space:normal;max-width:340px;word-break:break-word;text-align:left;}
-  .cqsec{scroll-margin-top:90px;}
-  .cqlead{color:#5B6B7C;font-size:13px;margin:4px 0 10px;max-width:1100px;}
-  .acctbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#ffe9e4;color:#b42318;letter-spacing:.02em;}
-</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/static/insights.css?v={{ build_version|urlencode }}">
 </head>
 <body>
-<header class="brand"><div class="hrow"><h1>adtini · BARCK+ Insights</h1><span class="ver">build {{ build_version }}</span><span class="syncalert" id="syncAlert">&#9888; Out of date — current build is <span id="syncCur"></span><button type="button" id="syncBtn">Sync</button></span></div></header>
-{% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" title="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#c9ccd1;color:#12213a" title="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
+{% macro pills(prodstr) %}{% if prodstr %}{% for p in prodstr.split(', ') if p %}{% set m = pmap.get(p) if pmap else none %}{% if m %}<span class="pill" style="background:{{ m.hex }};color:{{ m.fg }}" data-tip="{{ m.full }}">{{ m.abbr }}</span>{% else %}<span class="pill" style="background:#DDE2E8;color:#1A2330" data-tip="{{ p }}">{{ p[:3]|upper }}</span>{% endif %}{% endfor %}{% endif %}{% endmacro %}
 {% macro tpill(t) %}<span class="tp {{ t }}">{{ t }}</span>{% endmacro %}
+{% macro flags(f) %}{% for x in (f or 'Quality').split(' + ') %}<span class="flag {{ 'hi' if x == 'High CTR' else ('lo' if x == 'Low CTR' else 'q') }}">{{ x }}</span>{% endfor %}{% endmacro %}
+{% set t = topcards %}
+{% set sa_ok = sa and sa.summary %}
+
+<nav class="rail">
+  <a href="/" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg></a>
+  <a href="/reports/latest" title="Insights" aria-label="Insights" class="mark on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16v2H4z"/><path d="M6 15h3v3H6zm5-6h3v9h-3zm5-5h3v14h-3z"/></svg></a>
+  <a href="/reports" title="All reports" aria-label="All reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zm2 2v14h10V8h-3V5zm2 6h6v2H9zm0 4h6v2H9z"/></svg></a>
+</nav>
+
+<div class="pagehead">
+  <h2>Insights</h2>
+  {% if t %}<span class="range">{{ t.date_range }}</span>{% endif %}
+  <span class="build">build {{ build_version }}</span>
+  <span class="syncalert" id="syncAlert">Newer build <span id="syncCur"></span> <button type="button" id="syncBtn">Sync</button></span>
+  {% if sheet_links and sheet_links.watchlists %}<a class="btn-ghost" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer watchlists</a>{% endif %}
+  {% if sheet_links and sheet_links.blocked_clients %}<a class="btn-ghost" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener">Serving block list</a>{% endif %}
+  {% if partner or clients or low_ctr_sites or blocked_site_clients %}<a class="btn-create" href="/download_watchlists.xlsx">&#8595; Excel</a>{% endif %}
+</div>
+
 <div class="wrap">
-  {% if topcards %}
-    {% set t = topcards %}
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ t.date_range }}</div><div class="l">Insights date range</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(t.impressions) }}</div><div class="l">Impressions</div></div>
-      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(t.ctr*100) }}</div><div class="l">CTR</div></div>
-      <div class="kpi"><div class="n">${{ '{:,.0f}'.format(t.internal_cost) }}</div><div class="l">Internal cost (book)</div></div>
-      <div class="kpi"><div class="n">{{ '{:,.0f}'.format(t.placements) }}</div><div class="l">Placements</div></div>
-      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(t.rec_placements) }}</div><div class="l">Recommended-block placements</div></div>
-      <div class="kpi warn"><div class="n">{{ '{:,.0f}'.format(t.rec_impr or 0) }}<span style="font-size:14px;font-weight:600;color:#b3402a;"> · {{ '{:.2f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">Impressions on recommended blocks (share of all impr)</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(t.rec_spend) }}</div><div class="l">Spend on recommended-block placements</div></div>
-    </div>
+  {% for e in errors %}<div class="err">{{ e }}</div>{% endfor %}
+  {% if sa and sa.error %}<div class="err">{{ sa.error }}</div>{% endif %}
+
+  {% if t %}
+  <div class="cards">
+    <div class="kpi"><div class="n">{{ t.impressions|n0 }}</div><div class="l">AdLib impressions</div></div>
+    {% if sa_ok %}<div class="kpi"><div class="n">{{ sa.summary.impressions|n0 }}</div><div class="l">SA impressions</div></div>{% endif %}
+    <div class="kpi"><div class="n">{{ '{:.3f}%'.format(t.ctr*100) }}</div><div class="l">AdLib CTR</div></div>
+    <div class="kpi"><div class="n">{{ t.internal_cost|money }}</div><div class="l">AdLib cost</div></div>
+    <div class="kpi"><div class="n">{{ t.placements|n0 }}</div><div class="l">Publishers</div></div>
+    <div class="kpi warn"><div class="n">{{ t.rec_placements|n0 }}</div><div class="l">To block</div></div>
+    <div class="kpi warn"><div class="n">{{ (t.rec_impr or 0)|n0 }} <span>{{ '{:.1f}%'.format((t.rec_impr_pct or 0)*100) }}</span></div><div class="l">Impressions to block</div></div>
+    <div class="kpi warn"><div class="n">{{ t.rec_spend|money }}</div><div class="l">Spend to block</div></div>
+  </div>
   {% endif %}
 
-  <a class="back" href="/">&larr; New analysis</a>
-  <h1>BARCK+ Insights</h1>
+  {% set n_pub = (ai.site_count + ai.app_count) if ai else 0 %}
+  {% set n_acc = (partner|length if partner else 0) + (clients_total or 0) + ((insights.strategy_flags|length) if insights and insights.strategy_flags else 0) %}
+  {% set n_sa = (sa.summary.blocked_serving + sa.summary.high_ctr) if sa_ok else 0 %}
+  {% set n_cr = (creative.summary.blank_campaigns + (creative.summary.sm_display_size_creatives or 0)) if creative else 0 %}
+  {% set n_dv = (device.recon.summary.clients_mismatched if device and device.recon else 0) %}
+  <nav class="tabbar" role="tablist">
+    <button class="tabbtn active" data-tab="actions" type="button">Actions{% if actions %}<span class="ct bad">{{ actions|length }}</span>{% endif %}</button>
+    <button class="tabbtn" data-tab="publishers" type="button">Publishers{% if n_pub %}<span class="ct">{{ n_pub }}</span>{% endif %}</button>
+    <button class="tabbtn" data-tab="accounts" type="button">Partners &amp; clients{% if n_acc %}<span class="ct">{{ n_acc }}</span>{% endif %}</button>
+    <button class="tabbtn" data-tab="stackadapt" type="button">StackAdapt{% if n_sa %}<span class="ct bad">{{ n_sa }}</span>{% endif %}</button>
+    <button class="tabbtn" data-tab="creative" type="button">Creative{% if n_cr %}<span class="ct bad">{{ n_cr }}</span>{% endif %}</button>
+    <button class="tabbtn" data-tab="device" type="button">Device{% if n_dv %}<span class="ct bad">{{ n_dv }}</span>{% endif %}</button>
+  </nav>
+  <div class="tabbody">
 
-  {% for e in errors %}<div class="err">{{ e }}</div>{% endfor %}
-
-  <!-- Tabs: All Placements · High-CTR (possible invalid traffic) · Low-CTR (waste & blocking) -->
-  <div class="tabbar">
-    <button class="tabbtn active" data-tab="all" type="button">All Placements</button>
-    <button class="tabbtn" data-tab="high" type="button">High CTR insights</button>
-    <button class="tabbtn" data-tab="low" type="button">Low CTR insights</button>
-    <button class="tabbtn" data-tab="device" type="button">Device{% set _dm = (device.recon.summary.clients_mismatched if device and device.recon else 0) %}{% if _dm %}<span class="ct" style="background:#ffe9e4;color:#b42318;font-weight:700;padding:1px 7px;border-radius:99px">{{ _dm }} to check</span>{% endif %}</button>
-    <button class="tabbtn" data-tab="creative" type="button">Creative{% set _cf = (creative.summary.blank_campaigns if creative else 0) + (creative.summary.sm_display_size_creatives if creative else 0) %}{% if _cf %}<span class="ct" style="background:#ffe9e4;color:#b42318;font-weight:700;padding:1px 7px;border-radius:99px">{{ _cf }} to review</span>{% endif %}</button>
-    {% if partner or clients or low_ctr_sites or blocked_site_clients or (insights and insights.strategy_flags) %}
-    <span class="pillgroup">
-      {% if sheet_links and sheet_links.watchlists %}<a class="pilllink pill-blue" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer Watchlists</a>{% endif %}
-      {% if sheet_links and sheet_links.blocked_clients %}<a class="pilllink pill-blue" href="{{ sheet_links.blocked_clients }}" target="_blank" rel="noopener">Serving Block List</a>{% endif %}
-      <a class="pilllink pill-gold" href="/download_watchlists.xlsx">Excel Download</a>
-    </span>
+  <!-- ============================== ACTIONS ============================== -->
+  <div class="tabpane" id="tab-actions">
+    {% if actions %}
+    <ul class="actions">
+      {% for a in actions %}<li class="{{ a.tone }}"><a href="#{{ a.tab }}/{{ a.anchor }}" data-go="{{ a.tab }}" data-anchor="{{ a.anchor }}"><span class="dot"></span><span class="what">{{ a.text }}</span><span class="where">{{ {'publishers':'Publishers','accounts':'Partners & clients','stackadapt':'StackAdapt','creative':'Creative','device':'Device'}[a.tab] }} &#8250;</span></a></li>{% endfor %}
+    </ul>
+    {% else %}
+    <div class="allclear">Nothing to do.</div>
     {% endif %}
   </div>
 
-  <!-- ==================== ALL PLACEMENTS TAB ==================== -->
-  <div class="tabpane" id="tab-all">
-  {% if audit %}
-    {% set a = audit.summary %}
-    {% if a.truncated_sheets %}<p class="note">⚠ {{ a.truncated_sheets|join(', ') }} hit the 100k-row export cap — figures are a floor; pull a shorter date range for the complete picture.</p>{% endif %}
+  <!-- ============================= PUBLISHERS ============================= -->
+  <div class="tabpane" id="tab-publishers" style="display:none">
+  {% if audit and audit.summary.truncated_sheets %}<div class="warnbar amber">{{ audit.summary.truncated_sheets|join(', ') }} hit the 100K row export cap.</div>{% endif %}
 
-    <h2>Placements <span class="sub">(all delivery — click a column to sort; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = on the recommended-block list)</span> <a class="dl" href="/download/top_placements.csv">CSV</a></h2>
-    <table id="topgrid" class="paginate"><thead><tr>
-      <th>Placement</th><th>Type</th><th>Products</th>
-      <th class="sortable num" data-col="3" data-type="num">Impr</th>
-      <th class="sortable num" data-col="4" data-type="pct">% of impr</th>
-      <th class="sortable num" data-col="5" data-type="num">Clicks</th>
-      <th class="sortable num" data-col="6" data-type="pct">CTR</th>
-      {% if audit.has_conv %}<th class="sortable num" data-col="7" data-type="num">Conv</th>{% endif %}
-      <th class="sortable num" data-col="{% if audit.has_conv %}8{% else %}7{% endif %}" data-type="money">Spend</th>
-      <th class="sortable num" data-col="{% if audit.has_conv %}9{% else %}8{% endif %}" data-type="money">CPM</th>
-      <th>Last served</th><th>Serving</th>
-    </tr></thead><tbody>
-    {% for r in top %}<tr{% if r.rec %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.pct_impr }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td>{% if audit.has_conv %}<td class="num">{{ r.conversions }}</td>{% endif %}<td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td><td>{{ r.last_served }}</td><td>{% if r.serving == 'serving' %}<span style="color:var(--warn);font-weight:600">serving</span>{% elif r.serving == 'stopped' %}<span style="color:var(--muted)">stopped</span>{% else %}—{% endif %}</td></tr>{% endfor %}
-    </tbody></table>
-    <p class="note">Showing top 100 by impressions; download the CSV for the full set. "% of impr" is each placement's share of all delivery in this report. Sort by any metric column. <span class="tp site">site</span>/<span class="tp app">app</span> pills mark placement type; product pills are abbreviations — hover for the full name. Coral rows are on the recommended-block list (Low CTR tab).</p>
-  {% endif %}
-
-  {% if blocklist_check %}
-    <h2>Master blocklist check <span class="sub">(placements on your block sheet still appearing in this report)</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
-    <div class="cards">
-      <div class="kpi"><div class="n">{{ blocklist_check.matched }}</div><div class="l">Blocked placements seen in report</div></div>
-      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count }}</div><div class="l">&#9888; Serving AFTER their block date</div></div>
-      <div class="kpi warn"><div class="n">${{ '{:,.0f}'.format(blocklist_check.leaking_spend) }}</div><div class="l">Spend after block date (leak)</div></div>
+  {% if publishers %}
+    <h2 id="pub-all">All publishers <span class="count">{{ publishers|length }}</span> <a class="dl" href="/download/top_placements.csv">AdLib CSV</a></h2>
+    <div class="seg" data-filter-for="pubgrid">
+      <button type="button" class="fbtn active" data-f="">All</button>
+      <button type="button" class="fbtn" data-f="site">Sites</button>
+      <button type="button" class="fbtn" data-f="app">Apps</button>
+      <button type="button" class="fbtn" data-f="adlib">AdLib</button>
+      {% if sa_ok %}<button type="button" class="fbtn" data-f="sa">StackAdapt</button>{% endif %}
+      <button type="button" class="fbtn" data-f="act">Needs action</button>
     </div>
-    <p class="note">Cross-checked against your master blocklist sheet, <strong>per product</strong>: a <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> row served <strong>after</strong> its block date <em>on a product it's actually blocked on</em> &mdash; a real leak worth verifying in the DSP. A placement on the CTV list that only served on Display is not flagged. The <strong>Block list(s)</strong> column shows which tabs it's on.</p>
-    <table class="paginate"><tr><th>Placement</th><th>Type</th><th>Products seen</th><th>Block list(s)</th><th>Date added</th><th>Last served</th><th>Impr after block</th><th>Spend after block</th><th>CPM</th></tr>
-    {% for r in blocklist_check.rows %}<tr{% if r.leaking %} class="coral"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td>{{ r.post_impr }}</td><td>{{ r.post_spend }}</td><td>{{ r.cpm }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if blocked_site_clients %}
-    <h2>Clients serving blocked sites <span class="sub">(any client running placements on your master blocklist — verify these clients' block settings)</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
-    <p class="note">One row per client &amp; strategy. Click the count in <strong>Blocked</strong> to expand the blocklisted sites &amp; apps served, listed across the full width; <span style="background:#ffe9e4;padding:1px 6px;border-radius:4px">coral</span> = still serving <strong>after</strong> the block date (a real settings gap to fix). Also included as the <strong>Clients on blocked sites</strong> tab in the watchlist Excel.{% if bsc_no_sid %} <strong style="color:#b3402a;">Strategy ID is blank for every row — no Campaign ID column was found in this export.</strong>{% endif %}</p>
-    <table class="cbs paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Strategy Name</th><th>Strategy ID</th><th>DSP</th><th>Products</th><th>Blocked</th><th>Impr</th><th>CTR</th><th>Spend</th><th>CPM</th><th>Impr after block</th><th>Spend after block</th></tr>
-    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wrapcell">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wrapcell">{{ r.Client }}</td><td class="wrapcell">{{ r['Strategy Name'] if r['Strategy Name'] and r['Strategy Name'] not in ('(not in export)', 'nan') else '—' }}</td><td>{{ r['Strategy ID'] if r['Strategy ID'] and r['Strategy ID'] != 'nan' else '—' }}</td><td>{% if r['TTD/DV360'] %}<span class="flag hi" style="background:#e8f1f8;color:#0066B3;">TTD/DV360</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {% if r.n_site and r.n_site != '0' %}{{ r.n_site }} site{{ 's' if r.n_site != '1' }}{% endif %}{% if r.n_site and r.n_site != '0' and r.n_app and r.n_app != '0' %} &middot; {% endif %}{% if r.n_app and r.n_app != '0' %}{{ r.n_app }} app{{ 's' if r.n_app != '1' }}{% endif %}{% if (not r.n_site or r.n_site == '0') and (not r.n_app or r.n_app == '0') %}{{ r.n_sites }} placement{{ 's' if r.n_sites != '1' }}{% endif %}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td></tr>
-    <tr class="sitedetail" style="display:none"><td colspan="20"><div class="sitegrid">{% for s in r.sites_list %}<div>{{ s }}</div>{% endfor %}</div></td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if block_impact %}
-    <h2>Block impact by product <span class="sub">(if you applied the recommended blocks, how much of each product's serve is removed)</span> <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h2>
-    <p class="note">Based on the <strong>recommended block list</strong> below. "% impr blocked" is the share of each product's serve that would be removed if you applied the recommendations. A very high % means the recommendations would cut a large chunk of that product — review before enforcing.</p>
-    <table><tr><th>Product</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if block_impact_strategy %}
-    <h2>Block impact by strategy <span class="sub">(if you applied the recommended blocks, how much of each strategy type's serve is removed)</span> <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h2>
-    <table><tr><th>Strategy type</th><th>Total placements</th><th>Total impr</th><th>CPM</th><th>Blocked impr</th><th>% impr blocked</th><th>% spend blocked</th><th>Blocked placements</th></tr>
-    {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td>{{ r.total_placements }}</td><td>{{ r.total_impr }}</td><td>{{ r.cpm }}</td><td>{{ r.blocked_impr }}</td><td>{{ r.pct_impr_blocked }}</td><td>{{ r.pct_spend_blocked }}</td><td>{{ r.blocked_placements }}</td></tr>{% endfor %}
-    </table>
+    <div class="tblwrap"><table id="pubgrid" class="sortgrid paginate"><thead><tr>
+      <th>Publisher</th><th>Type</th><th>DSP</th><th>Products</th>
+      <th class="sortable num" data-col="4" data-type="num">Impr</th>
+      <th class="sortable num" data-col="5" data-type="pct">Share</th>
+      <th class="sortable num" data-col="6" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="7" data-type="pct">CTR</th>
+      <th class="sortable num" data-col="8" data-type="money">Spend</th>
+      <th class="sortable num" data-col="9" data-type="money">CPM</th>
+      <th>Last served</th><th>Action</th>
+    </tr></thead><tbody>
+    {% for r in publishers %}<tr data-tags="{{ r.type }}{% if r.adlib %} adlib{% endif %}{% if r.sa %} sa{% endif %}{% if r.action %} act{% endif %}"{% if r.action %} class="coral"{% endif %}>
+      <td class="wc">{{ r.name }}</td><td>{{ tpill(r.type) }}</td>
+      <td>{% if r.adlib %}<span class="dsp adlib">AdLib</span>{% endif %}{% if r.sa %}<span class="dsp sa" data-tip="{{ r.sa_impressions|n0 }} impr in StackAdapt">SA</span>{% endif %}</td>
+      <td>{{ pills(r.products) }}</td>
+      <td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.share|pct }}</td><td class="num">{{ r.clicks|n0 }}</td>
+      <td class="num">{{ r.ctr|pct }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td>
+      <td>{{ r.last_served or '—' }}</td>
+      <td>{% if r.action == 'block' %}<span class="act block">Block</span>{% elif r.action == 'leak' %}<span class="act fix">Still serving</span>{% elif r.action == 'sa_list' %}<span class="act sa">Add to SA list</span>{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
   {% endif %}
 
   {% if ai %}
-    <h2>Recommended block list <span style="font-weight:normal;color:var(--muted);font-size:13px">(<span class="flag hi">High CTR</span> = possible invalid traffic, <span class="flag lo">Low CTR</span> = low-value/no-conversion, <span class="flag q">Quality</span> = MFA / junk / brand-safety)</span></h2>
+    <h2 id="pub-block">To block <span class="count">{{ ai.site_count + ai.app_count }}</span></h2>
     {% if ai.error %}<div class="err">{{ ai.error }}</div>{% endif %}
-    {% if ai.site_count or ai.app_count %}
+    {% if ai.sites or ai.apps %}
+    <div class="blkbar">
+      {% if has_blocklist %}<button class="btn go" id="pushbtn" type="button" onclick="pushBlocklist()">Push checked to block sheet</button>{% endif %}
+      <button class="btn ghost" type="button" onclick="downloadSelected()">Download CSV</button>
+      <span id="pushmsg" class="note"></span>
+      <span id="reviewstate" class="note"></span>
+    </div>
+    <div class="seg" data-filter-for="blkgrid">
+      <button type="button" class="fbtn active" data-f="">All</button>
+      <button type="button" class="fbtn" data-f="high">High CTR</button>
+      <button type="button" class="fbtn" data-f="low">Low CTR</button>
+      <button type="button" class="fbtn" data-f="quality">Quality</button>
+      <button type="button" class="fbtn" data-f="site">Sites</button>
+      <button type="button" class="fbtn" data-f="app">Apps</button>
+    </div>
+    <div class="tblwrap"><table id="blkgrid" class="lalign paginate pgbottom"><thead><tr><th>&#10003;</th><th>Publisher</th><th>Type</th><th>Flag</th><th>Products</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr></thead><tbody>
+    {% for kind, rows in [('site', ai.sites or []), ('app', ai.apps or [])] %}{% for r in rows %}
+    {% set fl = r.flag or 'Quality' %}
+    <tr data-tags="{{ kind }}{% if 'High CTR' in fl %} high{% endif %}{% if 'Low CTR' in fl %} low{% endif %}{% if 'Quality' in fl %} quality{% endif %}">
+      <td><input type="checkbox" class="blkchk" data-kind="{{ kind }}" data-val="{{ r.name if kind == 'site' else r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" data-raw="{{ r.raw_value or '' }}" data-ttddv="{{ 1 if r.ttddv else 0 }}" checked></td>
+      <td class="wc">{{ r.name }}{% if kind == 'app' and r.app_id and r.app_id != r.name %}<div class="muted" style="font-size:11.5px">{{ r.app_id }}</div>{% endif %}</td>
+      <td>{{ tpill(kind) }}</td>
+      <td>{{ flags(r.flag) }}{% if r.ttddv %}<span class="flag lo">TTD/DV360</span>{% endif %}</td>
+      <td>{{ pills(r.products) }}</td>
+      <td class="wc">{{ (r.reason|short_reason) or r.category }}</td>
+      <td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td>
+    </tr>{% endfor %}{% endfor %}
+    </tbody></table></div>
+    {% if not ai.has_app_id %}<p class="note">No App ID column in this export. Apps use App Name.</p>{% endif %}
+
+    <details class="more">
+      <summary>Copy for Reporting Zone and DSPs</summary>
+      <div class="copybox">
+        <div class="copyhead"><span>Reporting Zone: sites</span><button class="copybtn" type="button" onclick="cp('ai_rz_site',this)">Copy</button></div>
+        <textarea id="ai_rz_site" readonly rows="3"></textarea>
+        <div class="copyhead"><span>Reporting Zone: apps (App Id)</span><button class="copybtn" type="button" onclick="cp('ai_rz_app',this)">Copy</button></div>
+        <textarea id="ai_rz_app" readonly rows="3"></textarea>
+        <div class="copyhead"><span>Reporting Zone: TTD/DV360</span><button class="copybtn" type="button" onclick="cp('ai_rz_ttddv',this)">Copy</button></div>
+        <textarea id="ai_rz_ttddv" readonly rows="3"></textarea>
+      </div>
+      <div class="copybox">
+        <div class="copyhead"><span>DSP block lists</span></div>
+        <div id="dsp_per_blocklist"></div>
+      </div>
+    </details>
+    {% elif not ai.error %}<p class="note">Nothing to block.</p>{% endif %}
+  {% endif %}
+
+  {% if blocklist_check and blocklist_check.leaking_count %}
+    <h2 id="pub-leak">Blocked but still serving <span class="count">{{ blocklist_check.leaking_count }}</span> <a class="dl" href="/download/blocklist_check.csv">CSV</a></h2>
     <div class="cards">
-      <div class="kpi"><div class="n">{{ ai.site_count }}</div><div class="l">Sites recommended</div></div>
-      <div class="kpi"><div class="n">{{ ai.app_count }}</div><div class="l">Apps recommended</div></div>
-      <div class="kpi"><div class="n">{{ ai.total_impr }}</div><div class="l">Impressions on rec blocks</div></div>
-      <div class="kpi"><div class="n">{{ ai.total_clicks }}</div><div class="l">Clicks on rec blocks</div></div>
+      <div class="kpi"><div class="n">{{ blocklist_check.matched|n0 }}</div><div class="l">Blocked publishers in report</div></div>
+      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_count|n0 }}</div><div class="l">Served after block date</div></div>
+      <div class="kpi warn"><div class="n">{{ blocklist_check.leaking_spend|money }}</div><div class="l">Spend after block date</div></div>
     </div>
-    <p class="note">{% if blocklist_check and blocklist_check.matched %}<strong>{{ blocklist_check.matched }} placements already on your block sheet are excluded from these recommendations</strong> — they're tracked in Master blocklist check instead. {% endif %}<span class="flag hi">High CTR</span> and <span class="flag lo">Low CTR</span> site blocks require <strong>≥10,000 pooled impressions</strong>; High CTR app blocks require <strong>≥500 impressions and ≥20 clicks</strong>; <span class="flag q">Quality</span> blocks have <strong>no impression minimum</strong>. <span style="background:#eef4fc;padding:1px 6px;border-radius:4px">Blue-highlighted</span> rows are account-level low-CTR/no-conversion blocks. Every row is <strong>checked by default</strong>; uncheck any to drop it from the copy blocks and export. {% if not ai.has_app_id %}<strong>Note:</strong> no App ID column in this export yet, so apps key on App Name for now.{% endif %}
-       <span id="reviewstate" class="note" style="margin-right:10px"></span><button class="copybtn" style="margin-left:6px" onclick="downloadSelected()">Download selected (CSV)</button>{% if has_blocklist %} <button class="copybtn" id="pushbtn" style="margin-left:6px;background:#177245" onclick="pushBlocklist()">Push selected to blocklist sheet</button> <span id="pushmsg" class="note" style="margin-left:8px"></span>{% endif %}</p>
-    {% if ai.sites %}
-    <h2 style="font-size:14px">Recommended site blocks</h2>
-    <div class="tblwrap"><table class="lalign paginate pgbottom"><tr><th>✓</th><th>Site</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in ai.sites %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td><input type="checkbox" class="blkchk" data-kind="site" data-val="{{ r.name }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" data-raw="{{ r.raw_value or '' }}" data-ttddv="{{ 1 if r.ttddv else 0 }}" checked></td><td>{{ r.name }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}{% if r.ttddv %}<span class="flag" style="background:#e8f1f8;color:#0066B3;margin-right:3px">TTD/DV360</span>{% endif %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
-    </table></div>{% endif %}
-    {% if ai.apps %}
-    <h2 style="font-size:14px">Recommended app blocks</h2>
-    <div class="tblwrap"><table class="lalign paginate pgbottom"><tr><th>✓</th><th>App</th><th>App ID</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in ai.apps %}<tr><td><input type="checkbox" class="blkchk" data-kind="app" data-val="{{ r.app_id }}" data-name="{{ r.name }}" data-products="{{ r.products }}" data-flag="{{ r.flag }}" data-raw="{{ r.raw_value or '' }}" data-ttddv="{{ 1 if r.ttddv else 0 }}" checked></td><td>{{ r.name }}</td><td>{{ r.app_id }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}{% if r.ttddv %}<span class="flag" style="background:#e8f1f8;color:#0066B3;margin-right:3px">TTD/DV360</span>{% endif %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
-    </table></div>{% endif %}
-    <div class="copybox">
-      <div class="copyhead"><span>Reporting Zone format blocking — sites</span><button class="copybtn" onclick="cp('ai_rz_site',this)">Copy</button></div>
-      <textarea id="ai_rz_site" readonly rows="3"></textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>Reporting Zone format blocking — apps (uses App Id)</span><button class="copybtn" onclick="cp('ai_rz_app',this)">Copy</button></div>
-      <textarea id="ai_rz_app" readonly rows="3"></textarea>
-      <div class="copyhead"><span>Reporting Zone format blocking — TTD/DV360 (sites &amp; apps together, exact report strings)</span><button class="copybtn" onclick="cp('ai_rz_ttddv',this)">Copy</button></div>
-      <textarea id="ai_rz_ttddv" readonly rows="3"></textarea>
-    </div>
-    <div class="copybox">
-      <div class="copyhead"><span>DSP format blocking — per blocklist (routed by product: All Products / CTV / Audio / Social Mirror)</span></div>
-      <p class="note" style="margin:2px 0 6px">Each checked placement is grouped into the blocklist it routes to, split into sites and apps, so you can paste the right set into each DSP list.</p>
-      <div id="dsp_per_blocklist"></div>
-    </div>
-    {% elif not ai.error %}<p class="note">No additional placements flagged to block — your list looks clean for this window.</p>{% endif %}
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Products</th><th>Block list</th><th>Blocked</th><th>Last served</th><th class="num">Impr after</th><th class="num">Spend after</th><th class="num">CPM</th></tr></thead><tbody>
+    {% for r in blocklist_check.rows if r.leaking %}<tr><td class="wc">{{ r.name }}</td><td>{{ tpill(r.placement_type) }}</td><td>{{ pills(r.products) }}</td><td>{{ r.lists }}</td><td>{{ r.date_added_str }}</td><td>{{ r.last_served }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
+    </tbody></table></div>
   {% endif %}
 
-  {% if not (audit or blocklist_check or blocked_site_clients or block_impact or block_impact_strategy or ai) %}
-    <p class="note">No placement data for this window.</p>
-  {% endif %}
-  
-
-  {% if sheet_audit %}
-    <h2>Block sheet audit <span class="sub">(sheet entries that can't match delivery — fix these on the Google Sheet)</span> <a class="dl" href="/download/sheet_audit.csv">CSV</a></h2>
-    <p class="note">These rows on your block sheet are malformed or misfiled, so they silently do nothing: composite values pushed before value-cleaning, values whose normalized form matches delivery while the raw doesn't, and app inventory filed in domain form. Apply the suggested fix directly on the sheet — the audit disappears once the entries are corrected.</p>
-    <table class="lalign paginate"><tr><th>Sheet value</th><th>On list(s)</th><th>Issue</th><th>Suggested fix</th></tr>
-    {% for r in sheet_audit %}<tr><td style="overflow-wrap:anywhere">{{ r.value }}</td><td>{{ r.tabs }}</td><td><span class="flag q">{{ r.issue }}</span></td><td>{{ r.suggestion }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-  </div><!-- /tab-all -->
-
-  <!-- ==================== HIGH CTR TAB ==================== -->
-  <div class="tabpane" id="tab-high" style="display:none">
-  {% if partner or clients or rec_high or (insights and insights.strategy_flags) %}
-    <h2 class="tabhead">High-CTR watchlists <span class="sub">(partners, clients &amp; strategies with abnormally HIGH CTR — possible invalid traffic — and what the recommendations would do to each)</span></h2>
-  {% else %}
-    <p class="note">No high-CTR anomalies flagged for this window.</p>
-  {% endif %}
-
-  {% if partner %}
-    <h3 style="margin:8px 0 4px">Partner watchlist</h3>
-    <table class="sortgrid paginate"><thead><tr>
-      <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
-      <th class="sortable num" data-col="{% if has_buyer %}2{% else %}1{% endif %}" data-type="num">Impr</th>
-      <th class="sortable num" data-col="{% if has_buyer %}3{% else %}2{% endif %}" data-type="num">Clicks</th>
-      <th class="sortable num" data-col="{% if has_buyer %}4{% else %}3{% endif %}" data-type="pct">CTR</th>
-      <th class="sortable num" data-col="{% if has_buyer %}5{% else %}4{% endif %}" data-type="num">Conv</th>
-      <th class="sortable num" data-col="{% if has_buyer %}6{% else %}5{% endif %}" data-type="money">Cost</th>
-      <th class="sortable num" data-col="{% if has_buyer %}7{% else %}6{% endif %}" data-type="money">CPM</th>
-      <th class="sortable num" data-col="{% if has_buyer %}8{% else %}7{% endif %}" data-type="money">Cost/conv</th>
-      <th class="sortable num" data-col="{% if has_buyer %}9{% else %}8{% endif %}" data-type="num">Blocked impr</th>
-      <th class="sortable num" data-col="{% if has_buyer %}10{% else %}9{% endif %}" data-type="num">Blocked plmts</th>
-      <th>CTR after recs</th><th>% on recs</th>
-    </tr></thead><tbody>
-    {% for r in partner %}<tr{% if r.flagged %} class="hot"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.cost_per_conv }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.blocked_placements }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
-    </tbody></table>
-    <p class="note">Only partners meeting the tiered CTR-vs-volume flag are listed: <strong>≥10K impr &amp; CTR &gt;2.5%</strong>, or <strong>≥30K &amp; &gt;1%</strong>. <strong>CTR after recs</strong> recomputes CTR once delivery on recommended-block placements is removed — if it drops below the flag line, the flag is largely driven by junk the recommendations would remove. Showing up to 60.</p>
-  {% endif %}
-
-  {% if clients %}
-    <h3 style="margin:18px 0 4px">Client watchlist <span class="sub" style="font-weight:normal">(abnormally high CTR vs the product's own norm — by client &amp; product)</span></h3>
-    <p class="note">CTR is judged <em>per product</em>. Showing {% if clients_total > 50 %}the top 50 of {{ clients_total }}{% else %}all {{ clients_total }}{% endif %}. <strong>CTR after recs</strong> = CTR once delivery on recommended-block placements is removed; <strong>% on recs</strong> = share of impressions from those placements.</p>
-    <table class="paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th>Impr</th><th>CPM</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
-    {% for r in clients %}<tr><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.cpm }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if insights and insights.strategy_flags %}
-    <h3 style="margin:18px 0 4px">Strategy watchlist <span class="sub" style="font-weight:normal">(strategy names with abnormally high CTR for their strategy type)</span></h3>
-    <table class="paginate"><tr><th>Partner</th><th>Client</th><th>Strategy name</th><th>Type</th><th>Impr</th><th>CPM</th><th>CTR</th><th>Type norm</th><th>vs norm</th><th>CTR after recs</th><th>% on recs</th></tr>
-    {% for r in insights.strategy_flags %}<tr><td>{{ r.business_unit }}</td><td>{{ r.Client }}</td><td style="white-space:normal">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td>{{ r.impressions }}</td><td>{{ r.cpm }}</td><td>{{ r.ctr }}</td><td>{{ r.type_ctr }}</td><td>{{ '{:.1f}×'.format(r.x_over_norm) }}</td><td>{{ r.adj_ctr }}</td><td>{{ r.rec_pct }}</td></tr>{% endfor %}
-    </table>
-  {% endif %}
-
-  {% if rec_high %}
-    <h3 style="margin:18px 0 4px">Recommended blocks — high CTR <span class="sub" style="font-weight:normal">(abnormally high CTR — possible invalid traffic; sites &amp; apps combined)</span></h3>
-    <p class="note">Only <span class="flag hi">High CTR</span> blocks — sites and apps whose CTR is ≥3× their product norm (sites <strong>≥10,000 impressions</strong>, apps <strong>≥500 impressions, ≥20 clicks, ≥3% CTR</strong>). Select &amp; push these from the full recommended block list on the <strong>All Placements</strong> tab.</p>
-    <div class="tblwrap"><table class="lalign paginate"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in rec_high %}<tr><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}{% if r.ttddv %}<span class="flag" style="background:#e8f1f8;color:#0066B3;margin-right:3px">TTD/DV360</span>{% endif %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
-    </table></div>
-  {% endif %}
-  </div><!-- /tab-high -->
-
-  <!-- ==================== LOW CTR TAB ==================== -->
-  <div class="tabpane" id="tab-low" style="display:none">
-  {% if not (low_ctr_sites or rec_low) %}
-    <p class="note">No low-CTR / blocking insights for this window.</p>
+  {% if blocked_site_clients %}
+    <h2 id="pub-clients">Clients serving blocked publishers <span class="count">{{ blocked_site_clients|length }}</span> <a class="dl" href="/download/clients_on_blocked_sites.csv">CSV</a></h2>
+    {% if bsc_no_sid %}<div class="warnbar amber">No Campaign ID column in this export. Strategy ID is blank.</div>{% endif %}
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Strategy</th><th>Strategy ID</th><th>Products</th><th>Blocked publishers</th><th class="num">Impr</th><th class="num">Spend</th><th class="num">Impr after block</th><th class="num">Spend after block</th><th>Action</th></tr></thead><tbody>
+    {% for r in blocked_site_clients %}<tr{% if r.leaking %} class="coral"{% endif %}><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td class="wc">{{ r['Strategy Name'] if r['Strategy Name'] and r['Strategy Name'] not in ('(not in export)', 'nan') else '—' }}{% if r['TTD/DV360'] %} <span class="flag lo">TTD/DV360</span>{% endif %}</td><td>{{ r['Strategy ID'] if r['Strategy ID'] and r['Strategy ID'] != 'nan' else '—' }}</td><td>{{ pills(r.products) }}</td><td><a class="drawer-toggle" onclick="toggleSites(this)">&#9656; {% if r.n_site and r.n_site != '0' %}{{ r.n_site }} site{{ 's' if r.n_site != '1' }}{% endif %}{% if r.n_site and r.n_site != '0' and r.n_app and r.n_app != '0' %} &middot; {% endif %}{% if r.n_app and r.n_app != '0' %}{{ r.n_app }} app{{ 's' if r.n_app != '1' }}{% endif %}{% if (not r.n_site or r.n_site == '0') and (not r.n_app or r.n_app == '0') %}{{ r.n_sites }} publisher{{ 's' if r.n_sites != '1' }}{% endif %}</a></td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.post_impr }}</td><td class="num">{{ r.post_spend }}</td><td>{% if r.leaking %}<span class="act fix">Fix block settings</span>{% endif %}</td></tr>
+    <tr class="sitedetail" style="display:none"><td colspan="20"><div class="sitegrid">{% for s in r.sites_list %}<div>{{ s }}</div>{% endfor %}</div></td></tr>{% endfor %}
+    </tbody></table></div>
   {% endif %}
 
   {% if low_ctr_sites %}
-    <h2>Low-CTR site watchlist <span class="sub">(sites both far below their product's CTR norm <em>and</em> under the 0.07% floor — by client &amp; site)</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h2>
-    <p class="note">A site is flagged only when it's <strong>both</strong> ≤⅓ of its product's pooled CTR <strong>and</strong> below an absolute 0.07% floor, at ≥5K impressions. <strong>CTV, Social Mirror CTV &amp; Online Audio are excluded</strong> — a low CTR is expected there. Sites converting efficiently are never flagged. Showing {% if low_ctr_sites_total > 100 %}the top 100 of {{ low_ctr_sites_total }}{% else %}all {{ low_ctr_sites_total }}{% endif %}, by wasted spend.</p>
-    <p class="note" style="background:#eef4fc;border-radius:8px;padding:8px 12px"><strong>How to act on this list:</strong> rows tagged <span class="acctbadge">blocked account-wide</span> are already on the Recommended block list (All Placements tab) — applying that list blocks them for every client, so no extra action is needed{% if low_ctr_sites_acct_blocked %} ({{ low_ctr_sites_acct_blocked }} here){% endif %}. <strong>Untagged rows are low for this client only</strong> — they are not auto-recommended, so if you want to stop delivery there, add a <strong>client-level block</strong> for that campaign in the DSP yourself.</p>
-    <table class="paginate"><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Site</th><th>Account block?</th><th>Product</th><th>Impr</th><th>Clicks</th><th>Conv</th><th>CTR</th><th>Product norm</th><th>vs norm</th><th>Spend</th><th>CPM</th></tr>
-    {% for r in low_ctr_sites %}<tr{% if r.acct_blocked %} class="lowctrblock"{% endif %}><td>{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td>{{ r.Client }}</td><td style="white-space:normal">{{ r.site }}</td><td>{% if r.acct_blocked %}<span class="acctbadge">blocked account-wide</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td><td>{{ pills(r.product) }}</td><td>{{ r.impressions }}</td><td>{{ r.clicks }}</td><td>{{ r.conversions }}</td><td>{{ r.ctr }}</td><td>{{ r.product_ctr }}</td><td>{{ '{:.2f}×'.format(r.x_over_norm) }}</td><td>{{ r.spend }}</td><td>{{ r.cpm }}</td></tr>{% endfor %}
-    </table>
+    <h2 id="pub-lowctr">Low CTR by client <span class="count">{{ low_ctr_sites_total }}</span> <a class="dl" href="/download/low_ctr_sites_by_client.csv">CSV</a></h2>
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Publisher</th><th>Product</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Conv</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">Spend</th><th>Action</th></tr></thead><tbody>
+    {% for r in low_ctr_sites %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td class="wc">{{ r.site }}</td><td>{{ pills(r.product) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.product_ctr }}</td><td class="num">{{ r.spend }}</td><td>{% if r.acct_blocked %}<span class="acctbadge">On block list</span>{% else %}<span class="act review">Add client block</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
   {% endif %}
 
-  {% if rec_low %}
-    <h2>Recommended blocks — low CTR <span class="sub">(across-the-board low-CTR / no-conversion sites; sites &amp; apps combined)</span></h2>
-    <p class="note">Only <span class="flag lo">Low CTR</span> blocks — sites that are low-CTR with little-to-no conversions across <strong>all</strong> clients, at <strong>≥10,000 impressions</strong> (quality/junk blocks live on the All Placements list, not here). Select &amp; push from the full list on the <strong>All Placements</strong> tab.</p>
-    <div class="tblwrap"><table class="lalign paginate"><tr><th>Placement</th><th>Type</th><th>Flag</th><th>Products</th><th>Category</th><th>Why</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th><th class="num">CPM</th></tr>
-    {% for r in rec_low %}<tr{% if r.is_low_ctr_block %} class="lowctrblock"{% endif %}><td>{{ r.name }}</td><td>{{ tpill(r.kind) }}</td><td>{% for f in r.flag.split(' + ') %}<span class="flag {{ 'hi' if f == 'High CTR' else ('lo' if f == 'Low CTR' else 'q') }}" style="margin-right:3px">{{ f }}</span>{% endfor %}{% if r.ttddv %}<span class="flag" style="background:#e8f1f8;color:#0066B3;margin-right:3px">TTD/DV360</span>{% endif %}</td><td>{{ pills(r.products) }}</td><td>{{ r.category }}</td><td style="white-space:normal">{{ r.reason }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.spend }}</td><td class="num">{{ r.cpm }}</td></tr>{% endfor %}
-    </table></div>
+  {% if sheet_audit %}
+    <h2 id="pub-sheet">Block sheet fixes <span class="count">{{ sheet_audit|length }}</span> <a class="dl" href="/download/sheet_audit.csv">CSV</a></h2>
+    <div class="tblwrap"><table class="lalign paginate"><thead><tr><th>Sheet value</th><th>Tab</th><th>Issue</th><th>Change to</th></tr></thead><tbody>
+    {% for r in sheet_audit %}<tr><td class="wc">{{ r.value }}</td><td>{{ r.tabs }}</td><td><span class="flag q">{{ r.issue }}</span></td><td class="wc">{{ r.suggestion }}</td></tr>{% endfor %}
+    </tbody></table></div>
   {% endif %}
-  </div><!-- /tab-low -->
 
-  <!-- ==================== CREATIVE QA TAB ==================== -->
+  {% if block_impact or block_impact_strategy %}
+    <details class="more">
+      <summary>What blocking removes, by product and strategy</summary>
+      {% if block_impact %}
+      <h3>By product <a class="dl" href="/download/block_impact_by_product.csv">CSV</a></h3>
+      <div class="tblwrap"><table><thead><tr><th>Product</th><th class="num">Publishers</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">Impr to block</th><th class="num">% impr</th><th class="num">% spend</th></tr></thead><tbody>
+      {% for r in block_impact %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ pills(r.product) }} {{ r.product }}</td><td class="num">{{ r.total_placements }}</td><td class="num">{{ r.total_impr }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.pct_impr_blocked }}</td><td class="num">{{ r.pct_spend_blocked }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% endif %}
+      {% if block_impact_strategy %}
+      <h3>By strategy <a class="dl" href="/download/block_impact_by_strategy.csv">CSV</a></h3>
+      <div class="tblwrap"><table><thead><tr><th>Strategy</th><th class="num">Publishers</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">Impr to block</th><th class="num">% impr</th><th class="num">% spend</th></tr></thead><tbody>
+      {% for r in block_impact_strategy %}<tr{% if r.hot %} class="hot"{% endif %}><td>{{ r.strategy }}</td><td class="num">{{ r.total_placements }}</td><td class="num">{{ r.total_impr }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.blocked_impr }}</td><td class="num">{{ r.pct_impr_blocked }}</td><td class="num">{{ r.pct_spend_blocked }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% endif %}
+    </details>
+  {% endif %}
+
+  {% if not (publishers or ai or blocklist_check or blocked_site_clients or low_ctr_sites) %}<p class="note">No publisher data.</p>{% endif %}
+  </div>
+
+  <!-- ========================= PARTNERS & CLIENTS ========================= -->
+  <div class="tabpane" id="tab-accounts" style="display:none">
+  {% if not (partner or clients or (insights and insights.strategy_flags)) %}<p class="note">No high CTR partners, clients or strategies.</p>{% endif %}
+
+  {% if partner %}
+    <h2 id="acc-partners">Partners with high CTR <span class="count">{{ partner|length }}</span> <a class="dl" href="/download/partner_summary.csv">CSV</a></h2>
+    <div class="tblwrap"><table class="sortgrid paginate"><thead><tr>
+      <th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}
+      {% set o = 1 if has_buyer else 0 %}
+      <th class="sortable num" data-col="{{ 1 + o }}" data-type="num">Impr</th>
+      <th class="sortable num" data-col="{{ 2 + o }}" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="{{ 3 + o }}" data-type="pct">CTR</th>
+      <th class="sortable num" data-col="{{ 4 + o }}" data-type="pct">CTR after blocks</th>
+      <th class="sortable num" data-col="{{ 5 + o }}" data-type="num">Conv</th>
+      <th class="sortable num" data-col="{{ 6 + o }}" data-type="money">Cost</th>
+      <th class="sortable num" data-col="{{ 7 + o }}" data-type="money">CPM</th>
+      <th class="sortable num" data-col="{{ 8 + o }}" data-type="num">Blocked impr</th>
+    </tr></thead><tbody>
+    {% for r in partner %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="num">{{ r.impressions }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.adj_ctr }}</td><td class="num">{{ r.conversions }}</td><td class="num">{{ r.internal_cost }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.blocked_impr }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% endif %}
+
+  {% if clients %}
+    <h2 id="acc-clients">Clients with high CTR <span class="count">{{ clients_total }}</span> <a class="dl" href="/download/client_flags.csv">CSV</a></h2>
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th>{% if has_buyer %}<th>Buyer</th>{% endif %}<th>Client</th><th>Product</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">vs normal</th><th class="num">CTR after blocks</th></tr></thead><tbody>
+    {% for r in clients %}<tr><td class="wc">{{ r.business_unit }}</td>{% if has_buyer %}<td>{{ r.buyer }}</td>{% endif %}<td class="wc">{{ r.Client }}</td><td>{{ pills(r.product) }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.product_ctr }}</td><td class="num">{{ '{:.1f}x'.format(r.x_over_norm) }}</td><td class="num">{{ r.adj_ctr }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% endif %}
+
+  {% if insights and insights.strategy_flags %}
+    <h2 id="acc-strategies">Strategies with high CTR <span class="count">{{ insights.strategy_flags|length }}</span> <a class="dl" href="/download/strategy_flags.csv">CSV</a></h2>
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Partner</th><th>Client</th><th>Strategy</th><th>Type</th><th class="num">Impr</th><th class="num">CPM</th><th class="num">CTR</th><th class="num">Normal CTR</th><th class="num">vs normal</th><th class="num">CTR after blocks</th></tr></thead><tbody>
+    {% for r in insights.strategy_flags %}<tr><td class="wc">{{ r.business_unit }}</td><td class="wc">{{ r.Client }}</td><td class="wc">{{ r['Strategy Name'] }}</td><td>{{ r['Strategy Type'] }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.cpm }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.type_ctr }}</td><td class="num">{{ '{:.1f}x'.format(r.x_over_norm) }}</td><td class="num">{{ r.adj_ctr }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% endif %}
+  </div>
+
+  <!-- ============================= STACKADAPT ============================= -->
+  <div class="tabpane" id="tab-stackadapt" style="display:none">
+  {% if sa_ok %}
+    {% set s = sa.summary %}
+    <div class="cards">
+      <div class="kpi"><div class="n">{{ s.impressions|n0 }}</div><div class="l">Impressions</div></div>
+      <div class="kpi"><div class="n">{{ s.clicks|n0 }}</div><div class="l">Clicks</div></div>
+      <div class="kpi"><div class="n">{{ '{:.3f}%'.format(s.ctr*100) }}</div><div class="l">CTR</div></div>
+      <div class="kpi"><div class="n">{{ s.spend|money }}</div><div class="l">Cost</div></div>
+      <div class="kpi"><div class="n">{{ s.cpm|money2 }}</div><div class="l">CPM</div></div>
+      <div class="kpi"><div class="n">{{ s.campaigns|n0 }}</div><div class="l">Campaigns</div></div>
+      <div class="kpi"><div class="n">{{ s.publishers|n0 }}</div><div class="l">Publishers</div></div>
+      <div class="kpi{% if s.blocked_serving %} warn{% endif %}"><div class="n">{{ s.blocked_serving|n0 }}</div><div class="l">Blocked, still serving</div></div>
+    </div>
+
+    <h2 id="sa-blocked">On the block sheet, served in StackAdapt <span class="count">{{ s.blocked_serving }}</span></h2>
+    {% if sa.blocked %}
+    <div class="blkbar"><button class="copybtn" type="button" onclick="cp('sa_excl',this)">Copy for exclusion list</button></div>
+    <textarea id="sa_excl" readonly rows="3">{% for r in sa.blocked %}{% if r.type == 'site' %}{{ r.key }}{% elif r.key.isdigit() %}apps.apple.com/us/app/id{{ r.key }}{% else %}play.google.com/store/apps/details?id={{ r.key }}{% endif %}
+{% endfor %}</textarea>
+    <div class="tblwrap" style="margin-top:10px"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>Block list</th><th>SA products</th><th class="num">Advertisers</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
+    {% for r in sa.blocked %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td>{{ r.block_lists }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.advertisers }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act sa">Add to SA list</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<p class="note">None.</p>{% endif %}
+
+    <h2 id="sa-high">High CTR publishers <span class="count">{{ s.high_ctr }}</span></h2>
+    {% if sa.high_ctr %}
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>SA products</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">vs normal</th><th class="num">Cost</th><th>Action</th></tr></thead><tbody>
+    {% for r in sa.high_ctr %}<tr><td class="wc">{{ r.title or r.name }}{% if r.title %}<div class="muted" style="font-size:11.5px">{{ r.name }}</div>{% endif %}</td><td>{{ tpill(r.type) }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct }}</td><td class="num">{{ '{:.1f}x'.format(r.x_norm) }}</td><td class="num">{{ r.spend|money2 }}</td><td><span class="act block">Block</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<p class="note">None.</p>{% endif %}
+
+    {% if sa.to_block %}
+    <h2 id="sa-toblock">To block in AdLib, serving in StackAdapt <span class="count">{{ sa.to_block|length }}</span></h2>
+    <div class="tblwrap"><table class="paginate"><thead><tr><th>Publisher</th><th>Type</th><th>SA products</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th></tr></thead><tbody>
+    {% for r in sa.to_block %}<tr><td class="wc">{{ r.title or r.name }}</td><td>{{ tpill(r.type) }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct }}</td><td class="num">{{ r.spend|money2 }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% endif %}
+
+    <h2>By product</h2>
+    <div class="tblwrap"><table><thead><tr><th>Product</th><th class="num">Campaigns</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th><th class="num">CPM</th></tr></thead><tbody>
+    {% for r in sa.products %}<tr><td>{{ r.product }}</td><td class="num">{{ r.campaigns }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
+    </tbody></table></div>
+
+    <h2>By advertiser <span class="count">{{ sa.advertisers|length }}</span></h2>
+    <div class="tblwrap"><table class="sortgrid paginate"><thead><tr><th>Advertiser</th><th>Products</th>
+      <th class="sortable num" data-col="2" data-type="num">Campaigns</th>
+      <th class="sortable num" data-col="3" data-type="num">Impr</th>
+      <th class="sortable num" data-col="4" data-type="num">Clicks</th>
+      <th class="sortable num" data-col="5" data-type="pct">CTR</th>
+      <th class="sortable num" data-col="6" data-type="num">Conv</th>
+      <th class="sortable num" data-col="7" data-type="money">Cost</th>
+      <th class="sortable num" data-col="8" data-type="money">CPM</th></tr></thead><tbody>
+    {% for r in sa.advertisers %}<tr><td class="wc">{{ r.advertiser }}</td><td class="wc">{{ r.products }}</td><td class="num">{{ r.campaigns }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.conversions|n0 }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
+    </tbody></table></div>
+
+    <details class="more">
+      <summary>Campaigns ({{ sa.campaigns|length }})</summary>
+      <div class="tblwrap"><table class="sortgrid paginate"><thead><tr><th>Campaign</th><th>Product</th><th>Line</th>
+        <th class="sortable num" data-col="3" data-type="num">Impr</th>
+        <th class="sortable num" data-col="4" data-type="num">Clicks</th>
+        <th class="sortable num" data-col="5" data-type="pct">CTR</th>
+        <th class="sortable num" data-col="6" data-type="money">Cost</th>
+        <th class="sortable num" data-col="7" data-type="money">CPM</th></tr></thead><tbody>
+      {% for r in sa.campaigns %}<tr><td class="wc">{{ r.name }}</td><td>{{ r.product }}</td><td>{{ r.line or '—' }}</td><td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.clicks|n0 }}</td><td class="num">{{ r.ctr|pct(3) }}</td><td class="num">{{ r.spend|money2 }}</td><td class="num">{{ r.cpm|money2 }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+    <p class="note">{{ sa.start }} to {{ sa.end }}</p>
+  {% elif sa and sa.error %}
+    <p class="note">No StackAdapt data.</p>
+  {% else %}
+    <p class="note">No StackAdapt data for this report.</p>
+  {% endif %}
+  </div>
+
+  <!-- ============================== CREATIVE ============================== -->
   <div class="tabpane" id="tab-creative" style="display:none">
-    <h2 class="tabhead">Creative
-      <span class="sub">(creative-grain export — data quality, trafficking, and per-creative performance)</span></h2>
     {% include "_creative_qa.html" %}
-  </div><!-- /tab-creative -->
+  </div>
 
-  <!-- ============================== DEVICE TAB =============================== -->
+  <!-- =============================== DEVICE =============================== -->
   <div class="tabpane" id="tab-device" style="display:none">
-    <h2 class="tabhead">Device
-      <span class="sub">(device-grain delivery — mix, performance, and reconciliation against the creative export)</span></h2>
     {% include "_device.html" %}
-  </div><!-- /tab-device -->
+  </div>
 
+  </div><!-- /tabbody -->
 </div>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
 <script>
-  // Tab switching (All Placements / High CTR / Low CTR)
+  // ---- Tabs (hash: #tab or #tab/section) --------------------------------
+  function showTab(tab, anchor){
+    var btn=document.querySelector('.tabbtn[data-tab="'+tab+'"]');
+    if(!btn) return;
+    document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.toggle('active', x===btn);});
+    document.querySelectorAll('.tabpane').forEach(function(p){ p.style.display=(p.id==='tab-'+tab)?'':'none'; });
+    if(anchor){
+      var el=document.getElementById(anchor);
+      if(el){
+        var d=el.closest('details'); if(d) d.open=true;
+        setTimeout(function(){ el.scrollIntoView({behavior:'smooth', block:'start'}); }, 30);
+      }
+    }
+  }
   document.querySelectorAll('.tabbtn').forEach(function(b){
     b.addEventListener('click',function(){
-      document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.remove('active');});
-      b.classList.add('active');
-      var tab=b.dataset.tab;
-      document.querySelectorAll('.tabpane').forEach(function(p){
-        p.style.display = (p.id==='tab-'+tab) ? '' : 'none';
-      });
+      showTab(b.dataset.tab);
+      try{ history.replaceState(null,'','#'+b.dataset.tab); }catch(e){}
     });
   });
-  // Expand/collapse the full-width blocked-sites list for a client row
+  document.querySelectorAll('a[data-go]').forEach(function(a){
+    a.addEventListener('click',function(e){
+      e.preventDefault(); showTab(a.dataset.go, a.dataset.anchor);
+      try{ history.replaceState(null,'','#'+a.dataset.go+'/'+a.dataset.anchor); }catch(_e){}
+    });
+  });
+  (function(){
+    var h=(location.hash||'').replace(/^#/,'');
+    if(h){ var p=h.split('/'); showTab(p[0], p[1]); }
+  })();
+
+  // ---- Instant tooltips --------------------------------------------------
+  (function(){
+    var tip=document.getElementById('tip'), cur=null;
+    function show(el){
+      cur=el; tip.textContent=el.dataset.tip; tip.hidden=false;
+      var r=el.getBoundingClientRect(), w=tip.offsetWidth, h=tip.offsetHeight;
+      var left=Math.min(Math.max(8, r.left+r.width/2-w/2), window.innerWidth-w-8), top=r.bottom+6;
+      if(top+h>window.innerHeight-8) top=r.top-h-6;
+      tip.style.left=left+'px'; tip.style.top=top+'px';
+    }
+    function hide(){ cur=null; tip.hidden=true; }
+    document.addEventListener('mouseover',function(e){
+      var el=e.target.closest ? e.target.closest('[data-tip]') : null;
+      if(el && el!==cur) show(el); else if(!el && cur) hide();
+    });
+    window.addEventListener('scroll',hide,true);
+  })();
+
+  // ---- Blocked-publisher drawer -----------------------------------------
   function toggleSites(el){
-    var row=el.closest('tr');
-    var detail=row.nextElementSibling;
+    var row=el.closest('tr'), detail=row.nextElementSibling;
     if(!detail || !detail.classList.contains('sitedetail')) return;
     var open=detail.style.display!=='none';
-    detail.style.display = open ? 'none' : '';
+    detail.style.display=open?'none':'';
     var label=el.getAttribute('data-label');
     if(!label){ label=el.textContent.replace(/^[^0-9]*/,''); el.setAttribute('data-label',label); }
     el.innerHTML=(open?'&#9656; ':'&#9662; ')+label;
@@ -387,15 +407,13 @@
   function cp(id, btn){
     var t=document.getElementById(id);
     t.select(); t.setSelectionRange(0, t.value.length);
-    var done=function(){ btn.textContent='Copied'; btn.classList.add('done'); setTimeout(function(){btn.textContent='Copy';btn.classList.remove('done');},1500); };
+    var old=btn.textContent;
+    var done=function(){ btn.textContent='Copied'; btn.classList.add('done'); setTimeout(function(){btn.textContent=old;btn.classList.remove('done');},1500); };
     if(navigator.clipboard){ navigator.clipboard.writeText(t.value).then(done, function(){document.execCommand('copy');done();}); }
     else { document.execCommand('copy'); done(); }
   }
-  // Route a placement to its destination blocklist(s) — same rules as the push.
-  // QUALITY blocks (gaming / junk / MFA — anything about the placement itself)
-  // always go to All Products, even when delivery was CTV/Audio/SM-only: the
-  // content category is universally blockable. Only pure CTR-anomaly blocks
-  // keep delivery-based routing to the product-specific tabs.
+  // Route a publisher to its block list(s), same rules as the push. Quality
+  // blocks always go to All Products; CTR blocks route by where they served.
   function routeTabs(products, flag){
     if((flag||'').indexOf('Quality')>=0) return ['All Products'];
     var prods=(products||'').split(',').map(function(s){return s.trim();}).filter(function(s){return s.length;});
@@ -407,130 +425,101 @@
   }
   var TAB_ORDER=['All Products','CTV','Audio','Social Mirror'];
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  // Recommended-block checkboxes: rebuild copy formats live from checked rows
-  // Copy-block value cleaning: sites go out as bare URLs, apps as the pure app
-  // ID — AdLib's App ID field sometimes carries "Name - Android (bundle.id)",
-  // so extract the trailing parenthetical when it looks like an id. The sheet
-  // PUSH keeps the raw value untouched (blocklist-check matches on it).
+  // Sites go out as bare domains, apps as the pure app ID. The sheet push keeps
+  // the raw value (the block check matches on it).
   function cleanSiteVal(v){ return String(v||'').trim(); }
   function cleanAppVal(v){
-    v = String(v||'').trim();
-    var m = v.match(/\(([^()]+)\)\s*$/);
-    if(m){
-      var id = m[1].trim();
-      if(id.indexOf('.') >= 0 || /^\d{6,}$/.test(id)) return id;
-    }
+    v=String(v||'').trim();
+    var m=v.match(/\(([^()]+)\)\s*$/);
+    if(m){ var id=m[1].trim(); if(id.indexOf('.')>=0 || /^\d{6,}$/.test(id)) return id; }
     return v;
   }
   function uniq(a){ var seen={}; return a.filter(function(x){ if(seen[x]) return false; seen[x]=true; return true; }); }
   function rebuildBlocks(){
-    // RZ blocks carry the EXACT source-report string (RZ matches verbatim,
-    // composites and all); the AdLib per-blocklist lists use the cleaned
-    // URL-only / app-id-only values.
-    var rzSites=[], rzApps=[], rzTtddv=[], sites=[], apps=[], perTab={};
+    var rzSites=[], rzApps=[], rzTtddv=[], perTab={};
     TAB_ORDER.forEach(function(t){perTab[t]={sites:[],apps:[]};});
     document.querySelectorAll('.blkchk').forEach(function(cb){
       if(!cb.checked) return;
-      var kind=cb.dataset.kind;
-      var val=(kind==='site'?cleanSiteVal:cleanAppVal)(cb.dataset.val);
+      var kind=cb.dataset.kind, val=(kind==='site'?cleanSiteVal:cleanAppVal)(cb.dataset.val);
       if(!val) return;
       var raw=(cb.dataset.raw||'').trim();
-      if(!raw || raw.toLowerCase()==='nan' || raw.toLowerCase()==='none'){ raw = String(cb.dataset.val||'').trim() || val; }
-      (kind==='site'?sites:apps).push(val);
-      if(cb.dataset.ttddv==='1'){ rzTtddv.push(raw); }
-      else { (kind==='site'?rzSites:rzApps).push(raw); }
+      if(!raw || raw.toLowerCase()==='nan' || raw.toLowerCase()==='none'){ raw=String(cb.dataset.val||'').trim() || val; }
+      if(cb.dataset.ttddv==='1'){ rzTtddv.push(raw); } else { (kind==='site'?rzSites:rzApps).push(raw); }
       routeTabs(cb.dataset.products, cb.dataset.flag).forEach(function(tab){
         if(!perTab[tab]) perTab[tab]={sites:[],apps:[]};
         perTab[tab][kind==='site'?'sites':'apps'].push(val);
       });
     });
-    sites=uniq(sites); apps=uniq(apps); rzSites=uniq(rzSites); rzApps=uniq(rzApps); rzTtddv=uniq(rzTtddv);
-    TAB_ORDER.forEach(function(t){ if(perTab[t]){ perTab[t].sites=uniq(perTab[t].sites); perTab[t].apps=uniq(perTab[t].apps); } });
+    rzSites=uniq(rzSites); rzApps=uniq(rzApps); rzTtddv=uniq(rzTtddv);
     var rz=function(field,vals){return vals.map(function(v){return 'OR {'+field+'}="'+v+'"';}).join(' ');};
     var set=function(id,val){var t=document.getElementById(id); if(t) t.value=val;};
     set('ai_rz_site', rz('Site Domain',rzSites));
-    set('ai_rz_app', rz('App Id',rzApps));   // Reporting Zone's token is 'App Id' — wrong case matches nothing
+    set('ai_rz_app', rz('App Id',rzApps));   // RZ's token is 'App Id'; other casing matches nothing
     set('ai_rz_ttddv', rz('App/Url',rzTtddv));
-    // Per-blocklist DSP output
     var wrap=document.getElementById('dsp_per_blocklist');
     if(wrap){
       var html='';
       TAB_ORDER.forEach(function(tab){
-        var d=perTab[tab]; if(!d || (!d.sites.length && !d.apps.length)) return;
+        var d=perTab[tab]; if(!d) return;
+        d.sites=uniq(d.sites); d.apps=uniq(d.apps);
+        if(!d.sites.length && !d.apps.length) return;
         var idb='dsp_'+tab.replace(/[^A-Za-z]/g,'');
-        html+='<div style="margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px">';
-        html+='<div style="font-weight:600;margin-bottom:4px">'+tab+'</div>';
+        html+='<h3>'+tab+'</h3>';
         if(d.sites.length){
-          html+='<div class="copyhead"><span>Sites ('+d.sites.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_s\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(d.sites.length ? ', '+d.sites.join(', ') : '')+'</textarea>';
+          html+='<div class="copyhead"><span>Sites ('+d.sites.length+')</span><button class="copybtn" type="button" onclick="cp(\''+idb+'_s\',this)">Copy</button></div>';
+          html+='<textarea id="'+idb+'_s" readonly rows="2">'+esc(', '+d.sites.join(', '))+'</textarea>';
         }
         if(d.apps.length){
-          html+='<div class="copyhead"><span>Apps ('+d.apps.length+')</span><button class="copybtn" onclick="cp(\''+idb+'_a\',this)">Copy</button></div>';
-          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(d.apps.length ? ', '+d.apps.join(', ') : '')+'</textarea>';
+          html+='<div class="copyhead"><span>Apps ('+d.apps.length+')</span><button class="copybtn" type="button" onclick="cp(\''+idb+'_a\',this)">Copy</button></div>';
+          html+='<textarea id="'+idb+'_a" readonly rows="2">'+esc(', '+d.apps.join(', '))+'</textarea>';
         }
-        html+='</div>';
       });
-      wrap.innerHTML = html || '<p class="note">Nothing selected.</p>';
+      wrap.innerHTML=html || '<p class="note">Nothing checked.</p>';
     }
   }
   document.querySelectorAll('.blkchk').forEach(function(cb){cb.addEventListener('change',rebuildBlocks);});
   if(document.querySelector('.blkchk')) rebuildBlocks();
 
-  // ---- Persistent block review ------------------------------------------
-  // One person reviews (unchecks exclusions); a different person later does
-  // the RZ copy blocks / sheet push. Checkbox state saves to the server per
-  // report and is re-applied for whoever opens this dashboard next.
+  // ---- Saved block review (unchecked rows persist per report) ------------
   (function(){
-    var rid = {{ (report_id or none)|tojson }};
-    var el = document.getElementById('reviewstate');
+    var rid={{ (report_id or none)|tojson }}, el=document.getElementById('reviewstate');
     if(!rid || !document.querySelector('.blkchk')) return;
-    function key(cb){ return cb.dataset.kind + '|' + cb.dataset.val; }
-    function note(t, ok){ if(el){ el.textContent = t; el.style.color = ok ? '#177245' : 'var(--muted)'; } }
-    var saveT = null;
+    function key(cb){ return cb.dataset.kind+'|'+cb.dataset.val; }
+    function note(t, ok){ if(el){ el.textContent=t; el.style.color=ok?'var(--green)':'var(--muted)'; } }
+    var saveT=null;
     function save(){
-      var excluded = Array.prototype.filter.call(document.querySelectorAll('.blkchk'),
-        function(cb){ return !cb.checked; }).map(key);
-      note('Saving review…', false);
-      fetch('/reports/' + encodeURIComponent(rid) + '/selections', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({excluded: excluded})
-      }).then(function(r){ return r.json(); }).then(function(d){
-        note(d && d.ok ? ('Review saved ✓ ' + (d.count||0) + ' excluded') : 'Review save failed — toggle any box to retry', !!(d && d.ok));
-      }).catch(function(){ note('Review save failed — offline?', false); });
+      var excluded=Array.prototype.filter.call(document.querySelectorAll('.blkchk'),function(cb){return !cb.checked;}).map(key);
+      note('Saving…', false);
+      fetch('/reports/'+encodeURIComponent(rid)+'/selections',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({excluded:excluded})}).then(function(r){return r.json();}).then(function(d){
+        note(d && d.ok ? ('Saved. '+(d.count||0)+' unchecked') : 'Not saved. Toggle a box to retry', !!(d && d.ok));
+      }).catch(function(){ note('Not saved. Offline?', false); });
     }
     document.querySelectorAll('.blkchk').forEach(function(cb){
-      cb.addEventListener('change', function(){ clearTimeout(saveT); saveT = setTimeout(save, 600); });
+      cb.addEventListener('change',function(){ clearTimeout(saveT); saveT=setTimeout(save,600); });
     });
-    fetch('/reports/' + encodeURIComponent(rid) + '/selections')
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(!(d && d.ok && d.excluded && d.excluded.length)) return;
-        var set = {};
-        d.excluded.forEach(function(k){ set[k] = true; });
-        var hits = 0;
-        document.querySelectorAll('.blkchk').forEach(function(cb){
-          if(set[key(cb)]){ cb.checked = false; hits++; }
-        });
-        if(hits){ rebuildBlocks(); note('Loaded saved review — ' + hits + ' excluded', true); }
-      }).catch(function(){});
+    fetch('/reports/'+encodeURIComponent(rid)+'/selections').then(function(r){return r.json();}).then(function(d){
+      if(!(d && d.ok && d.excluded && d.excluded.length)) return;
+      var set={}; d.excluded.forEach(function(k){set[k]=true;});
+      var hits=0;
+      document.querySelectorAll('.blkchk').forEach(function(cb){ if(set[key(cb)]){ cb.checked=false; hits++; } });
+      if(hits){ rebuildBlocks(); note(hits+' unchecked', true); }
+    }).catch(function(){});
   })();
   function downloadSelected(){
     var rows=[['type','name','block_value','checked']];
-    document.querySelectorAll('.blkchk').forEach(function(cb){
-      rows.push([cb.dataset.kind, cb.dataset.name, cb.dataset.val, cb.checked?'yes':'no']);
-    });
+    document.querySelectorAll('.blkchk').forEach(function(cb){ rows.push([cb.dataset.kind, cb.dataset.name, cb.dataset.val, cb.checked?'yes':'no']); });
     var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
     var a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download='recommended_blocks_selected.csv'; document.body.appendChild(a); a.click(); a.remove();
+    a.download='to_block.csv'; document.body.appendChild(a); a.click(); a.remove();
   }
   window.downloadSelected=downloadSelected;
   function pushBlocklist(){
     var placements=[], excluded=[];
     document.querySelectorAll('.blkchk').forEach(function(cb){
-      var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val,
-             products:cb.dataset.products||'', flag:cb.dataset.flag||'',
-             tabs:routeTabs(cb.dataset.products, cb.dataset.flag)};
+      var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||'',
+             flag:cb.dataset.flag||'', tabs:routeTabs(cb.dataset.products, cb.dataset.flag)};
       (cb.checked?placements:excluded).push(p);
     });
     var msg=document.getElementById('pushmsg'), btn=document.getElementById('pushbtn');
@@ -541,25 +530,43 @@
       body:JSON.stringify({placements:placements, excluded:excluded})})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(msg) msg.textContent = d.ok ? ('Added '+(d.added!=null?d.added:placements.length)+' to blocklist, skipped '+(d.skipped||0)+' already listed; '+(d.excluded!=null?d.excluded:excluded.length)+' saved to Excluded.')
-                                       : ('Error: '+(d.error||'push failed'));
-        if(msg) msg.style.color = d.ok ? '#177245' : 'var(--warn)';
+        if(msg){
+          msg.textContent = d.ok ? ('Added '+(d.added!=null?d.added:placements.length)+'. Already listed '+(d.skipped||0)+'. Excluded '+(d.excluded!=null?d.excluded:excluded.length)+'.')
+                                 : ('Error: '+(d.error||'push failed'));
+          msg.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+        }
       })
-      .catch(function(e){ if(msg){msg.textContent='Error: '+e; msg.style.color='var(--warn)';} })
-      .finally(function(){ if(btn){ btn.disabled=false; btn.textContent='Push selected to blocklist sheet'; } });
+      .catch(function(e){ if(msg){ msg.textContent='Error: '+e; msg.style.color='var(--red)'; } })
+      .finally(function(){ if(btn){ btn.disabled=false; btn.textContent='Push checked to block sheet'; } });
   }
   window.pushBlocklist=pushBlocklist;
-  // Sortable grids (top placements + partner)
-  document.querySelectorAll('table#topgrid, table.sortgrid').forEach(function(t){
+
+  // ---- Filters (data-tags on rows) ---------------------------------------
+  document.querySelectorAll('.seg[data-filter-for]').forEach(function(seg){
+    var tbl=document.getElementById(seg.dataset.filterFor); if(!tbl) return;
+    seg.querySelectorAll('.fbtn').forEach(function(b){
+      b.addEventListener('click',function(){
+        seg.querySelectorAll('.fbtn').forEach(function(x){x.classList.toggle('active', x===b);});
+        var f=b.dataset.f;
+        tbl.querySelectorAll('tbody tr').forEach(function(tr){
+          var tags=(' '+(tr.dataset.tags||'')+' ');
+          tr.classList.toggle('filtered', !!f && tags.indexOf(' '+f+' ')<0);
+        });
+        if(tbl._repaginate) tbl._repaginate(); else tbl.querySelectorAll('tbody tr').forEach(function(tr){ tr.style.display=tr.classList.contains('filtered')?'none':''; });
+      });
+    });
+  });
+
+  // ---- Sortable grids -----------------------------------------------------
+  document.querySelectorAll('table.sortgrid').forEach(function(t){
     var parse=function(txt,type){
-      var v=txt.replace(/[$,%\s]/g,'');
+      var v=txt.replace(/[$,%\sx]/g,'');
       return type==='money'||type==='num'||type==='pct' ? (parseFloat(v)||0) : txt.toLowerCase();
     };
     t.querySelectorAll('th.sortable').forEach(function(th){
       var asc=false;
       th.addEventListener('click',function(){
-        var col=+th.dataset.col, type=th.dataset.type;
-        var tb=t.querySelector('tbody');
+        var col=+th.dataset.col, type=th.dataset.type, tb=t.querySelector('tbody');
         var rows=Array.prototype.slice.call(tb.querySelectorAll('tr'));
         rows.sort(function(a,b){
           var x=parse(a.children[col].textContent,type), y=parse(b.children[col].textContent,type);
@@ -571,38 +578,28 @@
     });
   });
 
-  // Client-side pagination: show 25 rows per page on big grids (class="paginate").
-  // Handles header rows (thead or all-TH) and the paired blocked-sites detail rows.
+  // ---- Pagination: 25 rows a page on .paginate tables ---------------------
   (function(){
     var PAGE=25;
-    function isHeader(tr){
-      if(tr.parentNode && tr.parentNode.tagName==='THEAD') return true;
-      return tr.cells.length>0 && Array.prototype.every.call(tr.cells,function(c){return c.tagName==='TH';});
-    }
     document.querySelectorAll('table.paginate').forEach(function(tbl){
       function units(){
         var u=[], cur=null;
-        Array.prototype.slice.call(tbl.rows).forEach(function(tr){
-          if(isHeader(tr)) return;
-          if(tr.classList.contains('sitedetail')){ if(cur) cur.rows.push(tr); }
-          else { cur={rows:[tr]}; u.push(cur); }
+        Array.prototype.slice.call(tbl.tBodies.length ? tbl.tBodies[0].rows : tbl.rows).forEach(function(tr){
+          if(tr.parentNode.tagName==='THEAD') return;
+          if(tr.classList.contains('sitedetail')){ if(cur) cur.rows.push(tr); return; }
+          if(tr.classList.contains('filtered')){ tr.style.display='none'; cur=null; return; }
+          cur={rows:[tr]}; u.push(cur);
         });
         return u;
       }
-      if(units().length<=PAGE) return;
-      var page=0;
-      var bar=document.createElement('div'); bar.className='pager';
+      var page=0, bar=document.createElement('div'); bar.className='pager';
       var prev=document.createElement('button'); prev.type='button'; prev.innerHTML='&#8249; Prev';
       var next=document.createElement('button'); next.type='button'; next.innerHTML='Next &#8250;';
       var label=document.createElement('span');
       bar.appendChild(prev); bar.appendChild(label); bar.appendChild(next);
-      var anchor = tbl.parentNode.classList && tbl.parentNode.classList.contains('tblwrap') ? tbl.parentNode : tbl;
-      if(tbl.classList.contains('pgbottom')){
-        bar.classList.add('pgleft');
-        anchor.parentNode.insertBefore(bar, anchor.nextSibling);
-      } else {
-        anchor.parentNode.insertBefore(bar, anchor);
-      }
+      var anchor=tbl.parentNode.classList && tbl.parentNode.classList.contains('tblwrap') ? tbl.parentNode : tbl;
+      anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      if(!tbl.classList.contains('pgbottom')) bar.classList.add('pgleft');
       function render(){
         var U=units(), pages=Math.max(1,Math.ceil(U.length/PAGE));
         if(page>=pages) page=pages-1; if(page<0) page=0;
@@ -610,7 +607,8 @@
           var vis=(i>=page*PAGE && i<(page+1)*PAGE);
           unit.rows.forEach(function(tr,j){ tr.style.display=(vis && j===0)?'':'none'; });
         });
-        label.textContent='Page '+(page+1)+' of '+pages+' · '+U.length+' rows';
+        bar.style.display = pages>1 ? '' : 'none';
+        label.textContent=(page+1)+' of '+pages+' · '+U.length+' rows';
         prev.disabled=(page===0); next.disabled=(page>=pages-1);
       }
       prev.onclick=function(){page--;render();};
@@ -620,45 +618,26 @@
     });
   })();
 
-  // Build-freshness check: this page was rendered by the baked-in build below;
-  // ask the server what's live now. If they differ (new deploy since this report
-  // was generated), show the out-of-date alert with a one-click re-sync that
-  // re-pulls + re-analyzes and jumps to the fresh report.
+  // ---- Build check: offer a re-sync when a newer build is live ------------
   (function(){
-    var baked = {{ build_version|tojson }};
+    var baked={{ build_version|tojson }};
     fetch('/version').then(function(r){return r.json();}).then(function(v){
-      if(v && v.build && v.build !== baked){
-        var el=document.getElementById('syncAlert');
+      if(v && v.build && v.build!==baked){
         document.getElementById('syncCur').textContent=v.build;
-        el.style.display='inline-flex';
+        document.getElementById('syncAlert').style.display='inline-flex';
       }
-    }).catch(function(){ /* offline copy or endpoint unavailable — stay quiet */ });
+    }).catch(function(){});
     var btn=document.getElementById('syncBtn');
     if(btn) btn.onclick=function(){
-      btn.disabled=true; btn.textContent='Syncing\u2026';
+      btn.disabled=true; btn.textContent='Syncing…';
       fetch('/ui/pull',{method:'POST'}).then(function(r){
-        // The server can return an HTML error page (worker restarted or ran out
-        // of memory mid-analysis) — parse defensively instead of assuming JSON.
-        return r.text().then(function(t){
-          var d=null; try{ d=JSON.parse(t); }catch(_e){}
-          return {status:r.status, data:d};
-        });
+        return r.text().then(function(t){ var d=null; try{ d=JSON.parse(t); }catch(_e){} return {status:r.status, data:d}; });
       }).then(function(res){
         var d=res.data;
-        if(d && d.ok && d.view_url){ window.location.href=d.view_url; }
-        else if(d){
-          alert(d.error || d.message || 'Sync failed.');
-          btn.disabled=false; btn.textContent='Sync';
-        } else {
-          alert('The server returned an error page (HTTP '+res.status+') instead of a result. '
-                +'This usually means the service restarted or ran out of memory during the analysis — '
-                +'wait a minute and try Sync again. If it happens repeatedly, the Render instance likely needs more memory.');
-          btn.disabled=false; btn.textContent='Sync';
-        }
-      }).catch(function(e){
-        alert('Sync failed: '+e);
+        if(d && d.ok && d.view_url){ window.location.href=d.view_url; return; }
+        alert(d ? (d.error || d.message || 'Sync failed.') : ('Server error (HTTP '+res.status+'). Try again in a minute.'));
         btn.disabled=false; btn.textContent='Sync';
-      });
+      }).catch(function(e){ alert('Sync failed: '+e); btn.disabled=false; btn.textContent='Sync'; });
     };
   })();
 </script>
