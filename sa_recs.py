@@ -12,6 +12,7 @@ Rules (all on the report window):
     ad's; flag campaigns running one ad, and display campaigns missing core sizes.
   - Audiences: same split as devices: "Remove" or "Shift budget to".
 """
+import hashlib
 import os
 import re
 import time
@@ -118,7 +119,8 @@ def _pull(pages, d, gql, page, wanted):
                 continue
             m = n.get("metrics") or {}
             r = rows.setdefault(cid, {}).setdefault(key, {"name": name, "impressions": 0.0, "clicks": 0.0,
-                                                          "spend": 0.0, "size": ""})
+                                                          "spend": 0.0, "size": "",
+                                                          "type": (a.get("audience") or {}).get("__typename") or ""})
             r["impressions"] += _num(m.get("impressions"))
             r["clicks"] += _num(m.get("clicks"))
             r["spend"] += _num(m.get("cost"))
@@ -143,13 +145,13 @@ def _slices(kind, rows, c, goal):
     """Device / OS / audience recs for one campaign or group."""
     recs = []
     ci, cctr = c["impressions"], c["ctr"]
-    for r in sorted(rows.values(), key=lambda r: -r["impressions"]):
+    for key, r in sorted(rows.items(), key=lambda kv: -kv[1]["impressions"]):
         i = r["impressions"]
         if i <= 0:
             continue
         share, ctr = i / ci, _rate(r["clicks"], i)
         base = {"kind": kind, "target": r["name"], "impressions": i, "clicks": r["clicks"],
-                "ctr": ctr, "share": share}
+                "ctr": ctr, "share": share, "key": key, "aud_type": r.get("type", "")}
         if share > 0.5:
             continue  # most of the campaign; cutting it isn't a tweak
         if share >= 0.10 and i >= MIN_SITE_IMPR and ctr < cctr * 0.5:
@@ -166,11 +168,11 @@ def _slices(kind, rows, c, goal):
 
 
 def _site_recs(sites, ci, cctr, goal):
-    bad = [x for x in sites.values()
+    bad = [dict(x, key=k) for k, x in sites.items()
            if x["impressions"] >= MIN_SITE_IMPR
            and _rate(x["clicks"], x["impressions"]) < min(goal * 0.25, cctr * 0.5)]
     bad.sort(key=lambda x: -x["impressions"])
-    return [{"kind": "Site", "target": x["name"], "action": "Exclude", "tone": "bad",
+    return [{"kind": "Site", "target": x["name"], "action": "Exclude", "tone": "bad", "key": x["key"],
              "impressions": x["impressions"], "clicks": x["clicks"],
              "ctr": _rate(x["clicks"], x["impressions"]), "share": _rate(x["impressions"], ci)}
             for x in bad[:10]]
@@ -182,7 +184,7 @@ def _merge(dicts):
     for d in dicts:
         for k, r in (d or {}).items():
             o = out.setdefault(k, {"name": r["name"], "impressions": 0.0, "clicks": 0.0, "spend": 0.0,
-                                   "size": r.get("size", "")})
+                                   "size": r.get("size", ""), "type": r.get("type", "")})
             o["impressions"] += r["impressions"]
             o["clicks"] += r["clicks"]
             o["spend"] += r.get("spend", 0.0)
@@ -191,7 +193,7 @@ def _merge(dicts):
 
 def _creative_recs(ads_d, c):
     recs = []
-    ads = [a for a in (ads_d or {}).values() if a["impressions"] > 0]
+    ads = [dict(a, key=k) for k, a in (ads_d or {}).items() if a["impressions"] > 0]
     big = [a for a in ads if a["impressions"] >= MIN_AD_IMPR]
     if len(big) > 1:
         best = max(_rate(a["clicks"], a["impressions"]) for a in big)
@@ -199,7 +201,7 @@ def _creative_recs(ads_d, c):
             ctr = _rate(a["clicks"], a["impressions"])
             share = _rate(a["impressions"], c["impressions"])
             if best > 0 and ctr < best * 0.5 and share <= 0.5:
-                recs.append({"kind": "Creative", "target": a["name"], "action": "Pause", "tone": "warn",
+                recs.append({"kind": "Creative", "target": a["name"], "action": "Pause", "tone": "warn", "key": a["key"],
                              "impressions": a["impressions"], "clicks": a["clicks"], "ctr": ctr, "share": share})
     if len(ads) == 1:
         recs.append({"kind": "Creative", "target": "1 ad running", "action": "Add creatives", "tone": "warn",
@@ -275,6 +277,75 @@ def _trend(load_camps, end, gids):
         ws["d_ctr"] = _rate(l["ctr"] - p["ctr"], p["ctr"]) if p["ctr"] else None
         ws["d_spend"] = _rate(l["spend"] - p["spend"], p["spend"]) if p["spend"] else None
     return out
+
+
+# Insight device -> bid factor rule (device type + supply type)
+DEVICE_RULES = {
+    "MOBILE_APP": (["PHONE"], ["IN_APP"]), "MOBILE_WEB": (["PHONE"], ["MOBILE_WEB"]),
+    "TABLET_APP": (["TABLET"], ["IN_APP"]), "TABLET_WEB": (["TABLET"], ["MOBILE_WEB"]),
+    "DESKTOP": (["DESKTOP"], None), "CONNECTED_TV": (["CONNECTED_TV"], None),
+    "SET_TOP": (["SET_TOP"], None), "CONNECTED_DEVICE": (["CONNECTED_DEVICE"], None),
+    "APP": (None, ["IN_APP"]),
+}
+BID_OS = {"ANDROID", "IOS", "LINUX", "MACINTOSH", "PLAYSTATION", "ROKU", "TIZEN", "WEBOS",
+          "WINDOWS", "WINDOWS_PHONE"}
+
+
+def _factor(action):
+    if action in ("Exclude", "Remove"):
+        return 0
+    m = re.search(r"([+-]?)(\d+)%", action)
+    if action.startswith("Bid down") and m:
+        return 100 - int(m.group(2))
+    if action.startswith("Bid up") and m:
+        return 100 + int(m.group(2))
+    if action.startswith("Shift budget"):
+        return 120
+    return None
+
+
+def push_spec(r, group_id, campaign_ids, group_wide):
+    """What the Push button does for a rec, or None when it can't be pushed.
+      group_exclude: add domains to the campaign group's domain exclusions
+      bid_factor:    add a bid factor (100 = no change, 0 = no bids) to each campaign
+      pause_ads:     pause ads"""
+    kind, action, key = r.get("kind"), r.get("action"), r.get("key")
+    if not key:
+        return None
+    if kind == "Site":
+        if group_wide:
+            return {"type": "group_exclude", "group_id": group_id, "domains": [key]}
+        return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": 0,
+                "rule": {"domainRule": {"domains": [key]}}}
+    if kind == "Creative" and action == "Pause":
+        return {"type": "pause_ads", "ad_ids": [key]}
+    f = _factor(action or "")
+    if f is None:
+        return None
+    if kind == "Device":
+        dev = DEVICE_RULES.get(key)
+        if not dev:
+            return None
+        rule = {}
+        if dev[0]:
+            rule["deviceTypeRule"] = {"deviceTypes": dev[0]}
+        if dev[1]:
+            rule["supplyTypeRule"] = {"supplyTypes": dev[1]}
+    elif kind == "OS":
+        if key not in BID_OS:
+            return None
+        rule = {"deviceOsRule": {"deviceOses": [key]}}
+    elif kind == "Audience":
+        t = r.get("aud_type") or ""
+        if t == "RetargetingPixel":
+            rule = {"retargetingPixelRule": {"retargetingPixelIds": [key]}}
+        elif t.endswith("CustomSegment"):
+            rule = {"customSegmentRule": {"customSegmentIds": [key]}}
+        else:
+            return None
+    else:
+        return None
+    return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": f, "rule": rule}
 
 
 def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
@@ -353,6 +424,13 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
             recs = [r for r in recs if r["tone"] == "ok"]
         order = {"Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4}
         recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
+        by_short = {_short(camps[i]["name"], camps[i]["advertiser"]): i for i in ids}
+        for r in recs:
+            wide = r["scope"] in ("", "All campaigns")
+            cids = list(ids) if wide else [by_short.get(r["scope"])]
+            r["push"] = push_spec(r, gid, [c for c in cids if c], wide) if all(cids) else None
+            r["rid"] = hashlib.sha1("|".join(str(x) for x in (gid, r["scope"], r["kind"], r.get("key"),
+                                                               r["action"])).encode()).hexdigest()[:12]
         g["recs"], g["campaigns"] = recs, camp_rows
         out.append(g)
 

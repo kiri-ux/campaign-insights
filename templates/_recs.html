@@ -47,7 +47,7 @@
       </tbody></table>
       {% endif %}
       {% if g.recs %}
-      <table class="rcinner"><thead><tr><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th></tr></thead><tbody>
+      <table class="rcinner"><thead><tr><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th><th></th></tr></thead><tbody>
       {% for r in g.recs %}<tr>
         <td><span class="act rc-{{ r.tone }}">{{ r.action }}</span></td>
         <td class="wc">{% if r.scope == 'All campaigns' or not r.scope %}<b>All campaigns</b>{% else %}{{ r.scope }}{% endif %}</td>
@@ -55,10 +55,35 @@
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
+        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}">Push</button>{% endif %}</td>
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
     </td></tr>
   {% endfor %}
   </tbody></table></div>
+{% endif %}
+{% if rc and rc.groups and report_id %}
+<script>
+(function(){
+  document.querySelectorAll('button.sapush').forEach(function(b){
+    b.addEventListener('click', function(){
+      if(b.dataset.state!=='confirm'){
+        document.querySelectorAll('button.sapush[data-state="confirm"]').forEach(function(x){ x.dataset.state=''; x.textContent='Push'; x.classList.remove('go'); });
+        b.dataset.state='confirm'; b.textContent='Confirm'; b.classList.add('go'); return;
+      }
+      b.disabled=true; b.textContent='Pushing...';
+      fetch('/reports/{{ report_id }}/sa_push', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rid: b.dataset.rid})})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          var s=document.createElement('span');
+          s.className = j.ok ? 'pushed' : 'pusherr';
+          s.textContent = j.ok ? j.result : (j.error || 'Push failed');
+          b.replaceWith(s);
+        })
+        .catch(function(e){ b.disabled=false; b.dataset.state=''; b.textContent='Push'; console.log(e); });
+    });
+  });
+})();
+</script>
 {% endif %}

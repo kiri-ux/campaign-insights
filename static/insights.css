@@ -223,3 +223,8 @@ p.note[style*="border-left"]{border-left:0 !important;border-radius:10px !import
 .rctrend{display:flex;gap:24px;font-size:12.5px;color:var(--muted);margin:2px 0 8px}
 .rctrend b{color:var(--text);font-weight:600;margin-right:4px}
 .rccamps{margin-bottom:10px}
+.pushcell{white-space:nowrap;text-align:right}
+.btn.sapush{padding:3px 12px;font-size:11.5px}
+.pushed{font-size:11.5px;font-weight:600;color:var(--green)}
+.pusherr{font-size:11.5px;font-weight:600;color:var(--red);white-space:normal}
+.btn.sapush.go{background:var(--orange);color:#fff;border-color:var(--orange)}
