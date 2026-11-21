@@ -216,12 +216,10 @@ def build_actions(ctx):
 
     blk = ctx.get("block_rows") or []
     add(len(blk), lambda n: f"Block {n:,} {_pl(n, 'publisher')}", "publishers", "pub-block")
-    bc = ctx.get("blocklist_check") or {}
-    add(bc.get("leaking_count"),
+    add(sum(1 for r in ctx.get("leak_rows") or [] if r.get("dsp") == "adlib"),
         lambda n: f"Check AdLib block settings: {n:,} blocked {_pl(n, 'publisher')} still serving",
         "publishers", "pub-leak")
-    ss = (ctx.get("sa") or {}).get("summary") or {}
-    add(ss.get("blocked_serving"),
+    add(sum(1 for r in ctx.get("leak_rows") or [] if r.get("dsp") == "sa"),
         lambda n: f"Add {n:,} {_pl(n, 'publisher')} to the StackAdapt exclusion list", "publishers", "pub-leak")
     add(len(ctx.get("sheet_audit") or []),
         lambda n: f"Fix {n:,} block sheet {_pl(n, 'entry', 'entries')}", "publishers", "pub-sheet", "warn")
