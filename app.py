@@ -24,6 +24,8 @@ from ai_blocks import recommend_blocks, to_adlib_filter, merge_app_blocks, merge
 from product_map import build_pmap
 from buyer_map import load_buyer_map, buyer_for
 from blocklist_read import load_blocklist
+import dash_helpers
+import sa_insights
 
 PMAP = build_pmap()
 
@@ -107,6 +109,39 @@ def _fmt_report_name(d):
 
 
 app.jinja_env.filters["report_name"] = _fmt_report_name
+dash_helpers.register(app)
+
+
+def _sa_window(ctx):
+    asum = (ctx.get("audit") or {}).get("summary") or {}
+    return asum.get("window_start_iso"), asum.get("window_end_iso")
+
+
+def _rec_keys(ctx):
+    ai = ctx.get("ai") or {}
+    keys = {str(r.get("name", "")).strip().lower() for r in ai.get("sites") or []}
+    keys |= {str(r.get("app_id") or r.get("name") or "").strip().lower() for r in ai.get("apps") or []}
+    return {k for k in keys if k}
+
+
+def _add_sa(ctx, blocklist=None):
+    """StackAdapt delivery for the same window. Never takes the report down."""
+    if not sa_insights.configured():
+        return ctx
+    start, end = _sa_window(ctx)
+    if not (start and end):
+        return ctx
+    try:
+        if blocklist is None:
+            blocklist = load_blocklist()
+        ctx["sa"] = sa_insights.fetch(start, end, blocklist, _rec_keys(ctx))
+    except Exception as e:
+        ctx["sa"] = {"error": f"StackAdapt: {e}"}
+    return ctx
+
+
+def _render_dash(ctx):
+    return render_template("dashboard.html", **dash_helpers.enrich(ctx))
 
 
 def _range_label(date_str):
@@ -149,8 +184,7 @@ def analyze():
     if not (wb and wb.filename):
         if cf and cf.filename:  # creative-only upload → the standalone QA page
             return _analyze_creative_upload(cf)
-        return render_template("dashboard.html", pmap=PMAP,
-                               errors=["Upload the Insights workbook (.xlsx)."])
+        return _render_dash({"pmap": PMAP, "errors": ["Upload the Insights workbook (.xlsx)."]})
     creative_df = None
     if cf and cf.filename:
         try:
@@ -169,7 +203,7 @@ def analyze():
         except OSError:
             pass
         gc.collect()
-    return render_template("dashboard.html", **ctx)
+    return _render_dash(ctx)
 
 
 def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
@@ -673,6 +707,8 @@ def _analyze_path(path=None, frames=None, creative_df=None, device_df=None,
         except Exception as e:
             ctx["errors"].append(f"Device analysis: {e}")
 
+        _add_sa(ctx, blocklist)
+
         # Persist every cached CSV to disk so /download links keep working after the
         # in-memory cache is cleared (next run) or the process restarts (e.g. saved
         # reports served later). The latest analysis's CSVs are always available.
@@ -1116,7 +1152,7 @@ def ingest():
                 return jsonify({"ok": False, "error": "No file (send multipart 'insights_workbook', or JSON content_b64, or JSON file_url)."}), 400
         tmp.close()
         ctx = _analyze_path(tmp.name)
-        html = render_template("dashboard.html", **ctx)
+        html = _render_dash(ctx)
         saved = _save_report(html, date_str)
         base = request.host_url.rstrip("/")
         return jsonify({"ok": True, "date": saved,
@@ -1772,7 +1808,7 @@ def _run_pull(send_email=False, start=None, end=None):
                 app.logger.warning("Sheet creation at report time failed: %s", e)
             ctx["sheet_links"] = sheet_links or None
             ctx["report_id"] = date_str  # lets the dashboard load/save its block review
-            html = render_template("dashboard.html", **ctx)
+            html = _render_dash(ctx)
             saved = _save_report(html, date_str)
             _save_watchlists(saved, xlsx)  # persist so the email button never re-crunches
             _save_blocklist_check(saved, bl_xlsx)
@@ -1929,8 +1965,13 @@ def reports_rerender(date):
         return jsonify({"ok": False, "error": "No data snapshot for this report "
                         "(saved before snapshots existed) — re-pull to refresh it."}), 404
     ctx["report_id"] = date
+    # Reports saved before StackAdapt was added (or whose SA pull failed) pick it up here.
+    if not (ctx.get("sa") or {}).get("summary") or request.args.get("sa") == "1":
+        _add_sa(ctx)
+        if (ctx.get("sa") or {}).get("summary"):
+            _save_ctx(date, ctx)
     try:
-        html = render_template("dashboard.html", **ctx)
+        html = _render_dash(ctx)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Render failed: {e}"}), 500
     path = os.path.join(REPORTS_DIR, f"insights-{date}.html")
