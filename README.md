@@ -44,7 +44,16 @@ exclusion list, so Social Mirror-only blocks are skipped), publishers the AdLib
 analysis says to block, and high CTR publishers (`SA_HIGH_CTR_X` default 3x the
 product norm, `SA_HIGH_CTR_MIN_IMPR` 1000, `SA_HIGH_CTR_MIN_CLICKS` 10).
 Campaigns named `test_` are left out. Restyling a saved report pulls SA for it
-when it has none.
+when it has none. DOOH is left out of publishers.
+
+### Campaign recs tab
+
+`sa_recs.py` compares each SA campaign's CTR with its product's CTR goal (Product
+Details tab of sheet `11IuAikFBQL1bDGx8sOuOQ173SZ69bcbShcQsdtQ_V1k`; CTV, Audio and
+DOOH have no CTR goal) and pulls per-campaign breakdowns by site, device type, OS,
+ad and audience. Rules are in the module docstring. Thresholds:
+`SA_REC_MIN_CAMP_IMPR` 5000, `SA_REC_MIN_SITE_IMPR` 1000, `SA_REC_MIN_AD_IMPR` 1000.
+Re-render a saved report with `?sa=1` to add recs to it.
 
 ## Device insights & reconciliation
 

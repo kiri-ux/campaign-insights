@@ -57,6 +57,7 @@
   <nav class="tabbar" role="tablist">
     <button class="tabbtn active" data-tab="actions" type="button">Actions{% if actions %}<span class="ct bad">{{ actions|length }}</span>{% endif %}</button>
     <button class="tabbtn" data-tab="publishers" type="button">Publishers{% if n_pub %}<span class="ct">{{ n_pub }}</span>{% endif %}</button>
+    {% if sa_ok and sa.recs %}<button class="tabbtn" data-tab="recs" type="button">Campaign recs{% if sa.recs.summary.below %}<span class="ct bad">{{ sa.recs.summary.below }}</span>{% endif %}</button>{% endif %}
     <button class="tabbtn" data-tab="creative" type="button">Creative{% if n_cr %}<span class="ct bad">{{ n_cr }}</span>{% endif %}</button>
     <button class="tabbtn" data-tab="device" type="button">Device{% if n_dv %}<span class="ct bad">{{ n_dv }}</span>{% endif %}</button>
   </nav>
@@ -66,7 +67,7 @@
   <div class="tabpane" id="tab-actions">
     {% if actions %}
     <ul class="actions">
-      {% for a in actions %}<li class="{{ a.tone }}"><a href="#{{ a.tab }}/{{ a.anchor }}" data-go="{{ a.tab }}" data-anchor="{{ a.anchor }}"><span class="dot"></span><span class="what">{{ a.text }}</span><span class="where">{{ {'publishers':'Publishers','creative':'Creative','device':'Device'}[a.tab] }} &#8250;</span></a></li>{% endfor %}
+      {% for a in actions %}<li class="{{ a.tone }}"><a href="#{{ a.tab }}/{{ a.anchor }}" data-go="{{ a.tab }}" data-anchor="{{ a.anchor }}"><span class="dot"></span><span class="what">{{ a.text }}</span><span class="where">{{ {'publishers':'Publishers','creative':'Creative','device':'Device','recs':'Campaign recs'}[a.tab] }} &#8250;</span></a></li>{% endfor %}
     </ul>
     {% else %}
     <div class="allclear">Nothing to do.</div>
@@ -218,6 +219,13 @@
 
   {% if not (publishers or block_rows or leak_rows or low_ctr_sites) %}<p class="note">No publisher data.</p>{% endif %}
   </div>
+
+  <!-- =========================== CAMPAIGN RECS =========================== -->
+  {% if sa_ok and sa.recs %}
+  <div class="tabpane" id="tab-recs" style="display:none">
+    {% include "_recs.html" %}
+  </div>
+  {% endif %}
 
   <!-- ============================== CREATIVE ============================== -->
   <div class="tabpane" id="tab-creative" style="display:none">
@@ -450,7 +458,7 @@
       b.addEventListener('click',function(){
         seg.querySelectorAll('.fbtn').forEach(function(x){x.classList.toggle('active', x===b);});
         var f=b.dataset.f;
-        tbl.querySelectorAll('tbody tr').forEach(function(tr){
+        Array.prototype.slice.call(tbl.tBodies[0].rows).forEach(function(tr){
           var tags=(' '+(tr.dataset.tags||'')+' ');
           tr.classList.toggle('filtered', !!f && tags.indexOf(' '+f+' ')<0);
         });
@@ -466,7 +474,7 @@
           rows.sort(function(a,b){ return (parseFloat(b.children[col].textContent.replace(/[$,%\s]/g,''))||0)-(parseFloat(a.children[col].textContent.replace(/[$,%\s]/g,''))||0); });
           rows.forEach(function(r){ tb.appendChild(r); });
         }
-        if(tbl._repaginate) tbl._repaginate(); else tbl.querySelectorAll('tbody tr').forEach(function(tr){ tr.style.display=tr.classList.contains('filtered')?'none':''; });
+        if(tbl._repaginate) tbl._repaginate(); else Array.prototype.slice.call(tbl.tBodies[0].rows).forEach(function(tr){ tr.style.display=tr.classList.contains('filtered')?'none':''; });
       });
     });
   });

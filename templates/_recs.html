@@ -1,0 +1,46 @@
+{# StackAdapt campaign recommendations. ctx: sa.recs from sa_recs.build #}
+{% set rc = sa.recs if sa and sa.recs else none %}
+{% if not rc %}
+  <p class="note">No StackAdapt data.</p>
+{% elif rc.error %}
+  <div class="err">{{ rc.error }}</div>
+{% elif not rc.campaigns %}
+  <p class="note">No StackAdapt campaigns with a CTR goal.</p>
+{% else %}
+  <h2 id="rc-all">Campaigns <span class="count">{{ rc.campaigns|length }}</span> <span class="dsp sa">SA</span></h2>
+  <div class="seg" data-filter-for="rcgrid">
+    <button type="button" class="fbtn" data-f="">All</button>
+    <button type="button" class="fbtn active" data-f="below">Below goal</button>
+    <button type="button" class="fbtn" data-f="ongoal">On goal</button>
+  </div>
+  <div class="tblwrap"><table id="rcgrid" class="rcgrid"><thead><tr>
+    <th>Campaign</th><th>Product</th><th class="num">Impr</th><th class="num">Clicks</th>
+    <th class="num">CTR</th><th class="num">Goal</th><th>To goal</th><th class="num">Recs</th>
+  </tr></thead><tbody>
+  {% for c in rc.campaigns %}
+    {% set below = c.status == 'Below goal' %}
+    <tr class="rcrow" data-tags="{{ 'below' if below else 'ongoal' }}"{% if not below %} style="display:none"{% endif %}>
+      <td class="wc"><b>{{ c.advertiser }}</b><div class="sub">{{ c.name }}{% if c.line %} · {{ c.line }}{% endif %}</div></td>
+      <td>{{ c.product }}</td>
+      <td class="num">{{ c.impressions|n0 }}</td><td class="num">{{ c.clicks|n0 }}</td>
+      <td class="num"><b class="{{ 'neg' if below else 'pos' }}">{{ c.ctr|pct }}</b></td>
+      <td class="num">{{ c.goal|pct }}</td>
+      <td><div class="goalbar"><span class="{{ 'bad' if below else 'ok' }}" style="width:{{ [c.pct_goal * 100, 100]|min }}%"></span></div><span class="sub">{{ '{:.0f}%'.format(c.pct_goal * 100) }}</span></td>
+      <td class="num">{{ c.recs|length or '—' }}</td>
+    </tr>
+    {% if c.recs %}
+    <tr class="sitedetail rcrecs" data-tags="{{ 'below' if below else 'ongoal' }}"{% if not below %} style="display:none"{% endif %}><td colspan="8">
+      <table class="rcinner"><thead><tr><th>Action</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th></tr></thead><tbody>
+      {% for r in c.recs %}<tr>
+        <td><span class="act rc-{{ r.tone }}">{{ r.action }}</span></td>
+        <td>{{ r.kind }}</td><td class="wc">{{ r.target }}</td>
+        <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
+        <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
+        <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
+      </tr>{% endfor %}
+      </tbody></table>
+    </td></tr>
+    {% endif %}
+  {% endfor %}
+  </tbody></table></div>
+{% endif %}
