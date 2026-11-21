@@ -177,6 +177,7 @@ def fetch(start, end, blocklist=None, rec_keys=None):
     norm_ctr = {k: _rate(v[1], v[0]) for k, v in norms.items()}
 
     pubs = {}
+    camp_sites = {}
     for n in _pages(PUBLISHERS, "campaignInsight", d):
         cid = (n.get("campaign") or {}).get("id")
         if cid not in camps:
@@ -196,6 +197,10 @@ def fetch(start, end, blocklist=None, rec_keys=None):
                                   "products": set(), "advertisers": set(), "exp_clicks": 0.0,
                                   "ctr_impr": 0.0, "ctr_clicks": 0.0})
         i, cl = _num(m.get("impressions")), _num(m.get("clicks"))
+        cs = camp_sites.setdefault(cid, {}).setdefault(key, {"name": a.get("title") or dom if is_app else dom,
+                                                            "type": p["type"], "impressions": 0.0, "clicks": 0.0})
+        cs["impressions"] += i
+        cs["clicks"] += cl
         p["impressions"] += i
         p["clicks"] += cl
         p["spend"] += _num(m.get("cost"))
@@ -267,6 +272,11 @@ def fetch(start, end, blocklist=None, rec_keys=None):
     ti = sum(c["impressions"] for c in camp_rows)
     tc = sum(c["clicks"] for c in camp_rows)
     ts = sum(c["spend"] for c in camp_rows)
+    try:
+        import sa_recs
+        recs = sa_recs.build(d, camps, camp_sites, _pages, _gql, PAGE)
+    except Exception as e:  # recs are extra; never fail the whole SA pull
+        recs = {"campaigns": [], "summary": {}, "error": f"Campaign recommendations failed: {e}"}
     blocked = [r for r in pub_rows if "Blocked" in r["flags"]]
     to_block = [r for r in pub_rows if "To block" in r["flags"]]
     high = [r for r in pub_rows if "High CTR" in r["flags"]]
@@ -288,4 +298,5 @@ def fetch(start, end, blocklist=None, rec_keys=None):
         "blocked": blocked,
         "to_block": to_block,
         "high_ctr": sorted(high, key=lambda r: -r["x_norm"]),
+        "recs": recs,
     }
