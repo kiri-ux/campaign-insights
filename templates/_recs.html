@@ -55,7 +55,7 @@
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
-        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-group="{{ g.id }}" data-gname="{{ g.name }}">Push</button>{% endif %}</td>
+        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-gname="{{ g.name }}" data-link="{% if r.push.type == 'group_exclude' or not r.push.campaign_ids %}https://www.stackadapt.com/cg-editor?ids={{ g.id }}{% else %}https://www.stackadapt.com/editor?ids={{ r.push.campaign_ids|join(',') }}{% endif %}">Push</button>{% endif %}</td>
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
@@ -70,7 +70,6 @@
   <div class="pmbtns"><a class="btn go" id="pmlink" target="_blank" rel="noopener">See live changes</a><button type="button" class="btn ghost" id="pmclose">Close</button></div>
 </div></div>
 <script>
-var SA_GROUP_URL = {{ (sa_group_url or 'https://www.stackadapt.com/overview/campaigns')|tojson }};
 function pushModal(result, gname, url){
   var m=document.getElementById('pushmodal');
   m.querySelector('.pmgroup').textContent=gname||'';
@@ -96,9 +95,9 @@ function pushModal(result, gname, url){
           var s=document.createElement('span');
           s.className = j.ok ? 'pushed' : 'pusherr';
           s.textContent = j.ok ? j.result : (j.error || 'Push failed');
-          var gid=b.dataset.group, gname=b.dataset.gname;
+          var link=b.dataset.link, gname=b.dataset.gname;
           b.replaceWith(s);
-          if(j.ok) pushModal(j.result, gname, SA_GROUP_URL.replace('{id}', encodeURIComponent(gid)));
+          if(j.ok) pushModal(j.result, gname, link);
         })
         .catch(function(e){ b.disabled=false; b.dataset.state=''; b.textContent='Push'; console.log(e); });
     });
