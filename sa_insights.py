@@ -144,8 +144,9 @@ def fetch(start, end, blocklist=None, rec_keys=None):
         if tabs and tabs <= {"Social Mirror"}:
             continue  # SA has one global exclusion list; SM-only blocks are not on it
         added = e.get("date_added")
-        if added and str(added) > str(end):
-            continue  # blocked after this window
+        if added and str(added) >= str(start):
+            continue  # blocked during or after this window; no daily grain to tell
+
         kk = str(k).strip().lower()
         block_keys.setdefault(kk, e)
         block_keys.setdefault(norm_site(kk), e)
@@ -227,6 +228,7 @@ def fetch(start, end, blocklist=None, rec_keys=None):
             "products": ", ".join(sorted(p["products"])), "advertisers": len(p["advertisers"]),
             "flags": flags,
             "block_lists": ", ".join(sorted(on_block.get("tabs", []))) if on_block else "",
+            "date_added": str(on_block.get("date_added") or "") if on_block else "",
         })
     pub_rows.sort(key=lambda r: -r["impressions"])
 
