@@ -141,6 +141,8 @@ def _add_sa(ctx, blocklist=None):
 
 
 def _render_dash(ctx):
+    # SA page the push modal links to; {id} = campaign group id
+    ctx["sa_group_url"] = os.environ.get("SA_GROUP_URL", "https://www.stackadapt.com/overview/campaigns")
     return render_template("dashboard.html", **dash_helpers.enrich(ctx))
 
 
