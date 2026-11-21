@@ -218,3 +218,8 @@ p.note[style*="border-left"]{border-left:0 !important;border-radius:10px !import
 .act.rc-bad{background:var(--red-bg);color:var(--red)}
 .act.rc-warn{background:var(--amber-bg);color:var(--amber)}
 .act.rc-ok{background:var(--green-bg);color:var(--green)}
+.rcrange{font-size:12px;font-weight:500;color:var(--muted);margin-left:8px}
+.rcgrid .warnc{color:var(--amber)}
+.rctrend{display:flex;gap:24px;font-size:12.5px;color:var(--muted);margin:2px 0 8px}
+.rctrend b{color:var(--text);font-weight:600;margin-right:4px}
+.rccamps{margin-bottom:10px}

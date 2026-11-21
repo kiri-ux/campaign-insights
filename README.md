@@ -52,7 +52,7 @@ when it has none. DOOH is left out of publishers.
 Details tab of sheet `11IuAikFBQL1bDGx8sOuOQ173SZ69bcbShcQsdtQ_V1k`; CTV, Audio and
 DOOH have no CTR goal) and pulls per-campaign breakdowns by site, device type, OS,
 ad and audience. Rules are in the module docstring. Thresholds:
-`SA_REC_MIN_CAMP_IMPR` 5000, `SA_REC_MIN_SITE_IMPR` 1000, `SA_REC_MIN_AD_IMPR` 1000.
+`SA_REC_DAYS` 30 (lookback), `SA_REC_MIN_CAMP_IMPR` 10000 (per group), `SA_REC_MIN_SITE_IMPR` 2500, `SA_REC_MIN_AD_IMPR` 2500. One row per campaign group: group-wide recs ("All campaigns") from the combined breakdowns, campaign recs only where the group rec doesn't cover it, live SA pacing, and last 7 days vs prior 7.
 Re-render a saved report with `?sa=1` to add recs to it.
 
 ## Device insights & reconciliation

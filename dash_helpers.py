@@ -252,7 +252,7 @@ def build_actions(ctx):
         lambda n: f"Add client blocks for {n:,} low CTR {_pl(n, 'publisher')}", "publishers", "pub-lowctr", "warn")
     rcs = ((ctx.get("sa") or {}).get("recs") or {}).get("summary") or {}
     add(rcs.get("below"),
-        lambda n: f"{n:,} StackAdapt {_pl(n, 'campaign')} below CTR goal", "recs", "rc-all", "warn")
+        lambda n: f"{n:,} StackAdapt campaign {_pl(n, 'group')} below CTR goal", "recs", "rc-all", "warn")
     cr = (ctx.get("creative") or {}).get("summary") or {}
     add(cr.get("blank_campaigns"),
         lambda n: f"Tell AdLib: blank creative names in {n:,} {_pl(n, 'campaign')}", "creative", "cq-blank")

@@ -1,4 +1,4 @@
-"""StackAdapt campaign recommendations: compare each campaign's CTR with its
+"""StackAdapt campaign recommendations (on sa_insights.REC_DAYS of delivery, default 30): compare each campaign's CTR with its
 product's CTR goal (Product Details sheet), then point at the sites, devices,
 operating systems, ads and audiences pulling it down or lifting it up.
 
@@ -16,9 +16,9 @@ import os
 import re
 import time
 
-MIN_SITE_IMPR = int(os.environ.get("SA_REC_MIN_SITE_IMPR", "1000"))
-MIN_AD_IMPR = int(os.environ.get("SA_REC_MIN_AD_IMPR", "1000"))
-MIN_CAMP_IMPR = int(os.environ.get("SA_REC_MIN_CAMP_IMPR", "5000"))
+MIN_SITE_IMPR = int(os.environ.get("SA_REC_MIN_SITE_IMPR", "2500"))
+MIN_AD_IMPR = int(os.environ.get("SA_REC_MIN_AD_IMPR", "2500"))
+MIN_CAMP_IMPR = int(os.environ.get("SA_REC_MIN_CAMP_IMPR", "10000"))
 CORE_SIZES = ["300x250", "728x90", "320x50", "160x600", "300x600"]
 
 # CTR goals from the Product Details sheet (11IuAikFBQL1bDGx8sOuOQ173SZ69bcbShcQsdtQ_V1k).
@@ -140,7 +140,7 @@ def _pull(pages, d, gql, page, wanted):
 
 
 def _slices(kind, rows, c, goal):
-    """Device / OS / audience recs for one campaign."""
+    """Device / OS / audience recs for one campaign or group."""
     recs = []
     ci, cctr = c["impressions"], c["ctr"]
     for r in sorted(rows.values(), key=lambda r: -r["impressions"]):
@@ -165,76 +165,198 @@ def _slices(kind, rows, c, goal):
     return recs
 
 
-def build(d, camps, camp_sites, pages, gql, page=2400):
-    """Returns {"campaigns": [...], "summary": {...}}. `camp_sites` is
-    {campaign_id: {site_key: {"name", "type", "impressions", "clicks"}}}."""
-    wanted = {}
-    for cid, c in camps.items():
-        g = goal_for(c["product"], c.get("channel"))
-        if g and c["impressions"] >= MIN_CAMP_IMPR:
-            wanted[cid] = g
-    if not wanted:
-        return {"campaigns": [], "summary": {"campaigns": 0, "below": 0, "recs": 0}}
-    br = _pull(pages, d, gql, page, wanted)
+def _site_recs(sites, ci, cctr, goal):
+    bad = [x for x in sites.values()
+           if x["impressions"] >= MIN_SITE_IMPR
+           and _rate(x["clicks"], x["impressions"]) < min(goal * 0.25, cctr * 0.5)]
+    bad.sort(key=lambda x: -x["impressions"])
+    return [{"kind": "Site", "target": x["name"], "action": "Exclude", "tone": "bad",
+             "impressions": x["impressions"], "clicks": x["clicks"],
+             "ctr": _rate(x["clicks"], x["impressions"]), "share": _rate(x["impressions"], ci)}
+            for x in bad[:10]]
+
+
+def _merge(dicts):
+    """Sum per-key metric dicts across campaigns."""
+    out = {}
+    for d in dicts:
+        for k, r in (d or {}).items():
+            o = out.setdefault(k, {"name": r["name"], "impressions": 0.0, "clicks": 0.0, "spend": 0.0,
+                                   "size": r.get("size", "")})
+            o["impressions"] += r["impressions"]
+            o["clicks"] += r["clicks"]
+            o["spend"] += r.get("spend", 0.0)
+    return out
+
+
+def _creative_recs(ads_d, c):
+    recs = []
+    ads = [a for a in (ads_d or {}).values() if a["impressions"] > 0]
+    big = [a for a in ads if a["impressions"] >= MIN_AD_IMPR]
+    if len(big) > 1:
+        best = max(_rate(a["clicks"], a["impressions"]) for a in big)
+        for a in sorted(big, key=lambda a: -a["impressions"]):
+            ctr = _rate(a["clicks"], a["impressions"])
+            share = _rate(a["impressions"], c["impressions"])
+            if best > 0 and ctr < best * 0.5 and share <= 0.5:
+                recs.append({"kind": "Creative", "target": a["name"], "action": "Pause", "tone": "warn",
+                             "impressions": a["impressions"], "clicks": a["clicks"], "ctr": ctr, "share": share})
+    if len(ads) == 1:
+        recs.append({"kind": "Creative", "target": "1 ad running", "action": "Add creatives", "tone": "warn",
+                     "impressions": ads[0]["impressions"], "clicks": ads[0]["clicks"],
+                     "ctr": _rate(ads[0]["clicks"], ads[0]["impressions"]), "share": 1.0})
+    if str(c.get("channel") or "").upper() == "DISPLAY" and ads:
+        sizes = {a["size"] for a in ads}
+        missing = [x for x in CORE_SIZES if x not in sizes]
+        if len(missing) >= 2:
+            recs.append({"kind": "Creative", "target": ", ".join(missing), "action": "Add sizes",
+                         "tone": "warn", "impressions": 0, "clicks": 0, "ctr": 0, "share": 0})
+    return recs
+
+
+def _short(name, adv):
+    n = str(name or "")
+    for pre in (adv + " - ", adv + "- ", adv + " "):
+        if adv and n.startswith(pre):
+            return n[len(pre):]
+    return n
+
+
+PACING_Q = """query($ids: [ID!]) { campaignGroups(first: 50, filterBy: {ids: $ids}) { nodes { id
+  pacing { flightPacing { calculatedPacePercent lifetimeBudget }
+           projectedDailySpend { currentPacePercentVar } } } } }"""
+
+
+def _pacing(gql, ids):
+    """SA's live pacing per group: projected share of the flight budget and
+    current daily pace vs what's needed (1.0 = on pace)."""
+    out, ids = {}, [i for i in ids if i]
+    for k in range(0, len(ids), 50):
+        try:
+            nodes = gql(PACING_Q, {"ids": ids[k:k + 50]})["campaignGroups"]["nodes"]
+        except Exception:
+            continue
+        for g in nodes:
+            p = g.get("pacing") or {}
+            fp, pd = p.get("flightPacing") or {}, p.get("projectedDailySpend") or {}
+            if fp.get("calculatedPacePercent") is None:
+                continue
+            out[g["id"]] = {"projected": _num(fp.get("calculatedPacePercent")),
+                            "daily": 1 + _num(pd.get("currentPacePercentVar"))}
+    return out
+
+
+def _trend(load_camps, end, gids):
+    """Last 7 days vs the 7 before, per group, ending `end`."""
+    import datetime as dt
+    e = dt.date.fromisoformat(str(end)[:10])
+    wins = {"l7": (e - dt.timedelta(days=6), e), "p7": (e - dt.timedelta(days=13), e - dt.timedelta(days=7))}
+    out = {}
+    for w, (a, b) in wins.items():
+        try:
+            cs = load_camps({"from": a.isoformat(), "to": b.isoformat()})
+        except Exception:
+            continue
+        for c in cs.values():
+            g = c.get("group_id")
+            if g not in gids:
+                continue
+            t = out.setdefault(g, {}).setdefault(w, {"impressions": 0.0, "clicks": 0.0, "spend": 0.0})
+            for k in t:
+                t[k] += c[k]
+    for g, ws in out.items():
+        for w in ("l7", "p7"):
+            t = ws.setdefault(w, {"impressions": 0.0, "clicks": 0.0, "spend": 0.0})
+            t["ctr"] = _rate(t["clicks"], t["impressions"])
+            t["cpm"] = _rate(t["spend"], t["impressions"]) * 1000
+        l, p = ws["l7"], ws["p7"]
+        ws["new"] = p["impressions"] < max(1000, l["impressions"] * 0.1)
+        ws["d_impr"] = _rate(l["impressions"] - p["impressions"], p["impressions"]) if p["impressions"] else None
+        ws["d_ctr"] = _rate(l["ctr"] - p["ctr"], p["ctr"]) if p["ctr"] else None
+        ws["d_spend"] = _rate(l["spend"] - p["spend"], p["spend"]) if p["spend"] else None
+    return out
+
+
+def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
+    """One entry per campaign group. Group recs ("All campaigns") come from the
+    group's combined breakdowns; a campaign gets its own rec only when the group
+    rec doesn't already cover it. Creatives are always per campaign."""
+    wanted = {cid: goal_for(c["product"], c.get("channel")) for cid, c in camps.items()}
+    wanted = {cid: g for cid, g in wanted.items() if g}
+    groups = {}
+    for cid in wanted:
+        c = camps[cid]
+        groups.setdefault(c.get("group_id") or c["group"], []).append(cid)
+    groups = {g: ids for g, ids in groups.items()
+              if sum(camps[i]["impressions"] for i in ids) >= MIN_CAMP_IMPR}
+    if not groups:
+        return {"groups": [], "summary": {"groups": 0, "below": 0, "recs": 0}}
+    keep = {i for ids in groups.values() for i in ids}
+    br = _pull(pages, d, gql, page, keep)
+    pace = _pacing(gql, list(groups))
+    trend = _trend(load_camps, d["to"], set(groups)) if load_camps else {}
 
     out = []
-    for cid, goal in wanted.items():
-        c = dict(camps[cid])
-        c["ctr"] = _rate(c["clicks"], c["impressions"])
-        c["goal"] = goal
-        c["pct_goal"] = _rate(c["ctr"], goal)
-        recs = []
+    for gid, ids in groups.items():
+        cs = [camps[i] for i in ids]
+        c0 = cs[0]
+        goal = wanted[ids[0]]
+        g = {"id": gid, "name": c0["group"], "advertiser": c0["advertiser"], "product": c0["product"],
+             "line": c0["line"], "goal": goal,
+             "impressions": sum(c["impressions"] for c in cs), "clicks": sum(c["clicks"] for c in cs),
+             "spend": sum(c["spend"] for c in cs)}
+        g["ctr"] = _rate(g["clicks"], g["impressions"])
+        g["pct_goal"] = _rate(g["ctr"], goal)
+        g["status"] = "On goal" if g["ctr"] >= goal else "Below goal"
+        g["pacing"] = pace.get(gid)
+        g["trend"] = trend.get(gid)
+        gi, gctr = g["impressions"], g["ctr"]
 
-        # Sites
-        sites = (camp_sites or {}).get(cid) or {}
-        bad = [s for s in sites.values()
-               if s["impressions"] >= MIN_SITE_IMPR
-               and _rate(s["clicks"], s["impressions"]) < min(goal * 0.25, c["ctr"] * 0.5)]
-        bad.sort(key=lambda s: -s["impressions"])
-        for s in bad[:10]:
-            recs.append({"kind": "Site", "target": s["name"], "action": "Exclude", "tone": "bad",
-                         "impressions": s["impressions"], "clicks": s["clicks"],
-                         "ctr": _rate(s["clicks"], s["impressions"]),
-                         "share": _rate(s["impressions"], c["impressions"])})
+        # Group-wide recs on the combined breakdowns
+        recs = _site_recs(_merge((camp_sites or {}).get(i) for i in ids), gi, gctr, goal)
+        recs += _slices("Device", _merge(br["DEVICE_TYPE"].get(i) for i in ids), g, goal)
+        recs += _slices("OS", _merge(br["DEVICE_OS"].get(i) for i in ids), g, goal)
+        recs += _slices("Audience", _merge(br["AUDIENCE"].get(i) for i in ids), g, goal)
+        multi = len(ids) > 1
+        for r in recs:
+            r["scope"] = "All campaigns" if multi else ""
+        covered = {(r["kind"], r["target"]) for r in recs}
 
-        recs += _slices("Device", br["DEVICE_TYPE"].get(cid) or {}, c, goal)
-        recs += _slices("OS", br["DEVICE_OS"].get(cid) or {}, c, goal)
+        # Per-campaign recs the group recs don't cover
+        camp_rows = []
+        for i in sorted(ids, key=lambda i: -camps[i]["impressions"]):
+            c = dict(camps[i])
+            c["ctr"] = _rate(c["clicks"], c["impressions"])
+            c["short"] = _short(c["name"], c["advertiser"])
+            own = []
+            if multi and c["impressions"] >= MIN_CAMP_IMPR:
+                own += _site_recs((camp_sites or {}).get(i) or {}, c["impressions"], c["ctr"], goal)
+                own += _slices("Device", br["DEVICE_TYPE"].get(i) or {}, c, goal)
+                own += _slices("OS", br["DEVICE_OS"].get(i) or {}, c, goal)
+                own += _slices("Audience", br["AUDIENCE"].get(i) or {}, c, goal)
+                own = [r for r in own if (r["kind"], r["target"]) not in covered]
+            own += _creative_recs(br["AD"].get(i), c)
+            for r in own:
+                r["scope"] = c["short"] if multi else ""
+            recs += own
+            camp_rows.append({"id": i, "name": c["short"], "impressions": c["impressions"],
+                              "clicks": c["clicks"], "ctr": c["ctr"], "spend": c["spend"],
+                              "pct_goal": _rate(c["ctr"], goal)})
 
-        # Creatives
-        ads = [a for a in (br["AD"].get(cid) or {}).values() if a["impressions"] > 0]
-        big = [a for a in ads if a["impressions"] >= MIN_AD_IMPR]
-        if big:
-            best = max(_rate(a["clicks"], a["impressions"]) for a in big)
-            for a in sorted(big, key=lambda a: -a["impressions"]):
-                ctr = _rate(a["clicks"], a["impressions"])
-                share = _rate(a["impressions"], c["impressions"])
-                if len(big) > 1 and best > 0 and ctr < best * 0.5 and share <= 0.5:
-                    recs.append({"kind": "Creative", "target": a["name"], "action": "Pause", "tone": "warn",
-                                 "impressions": a["impressions"], "clicks": a["clicks"], "ctr": ctr,
-                                 "share": _rate(a["impressions"], c["impressions"])})
-        if len(ads) == 1:
-            recs.append({"kind": "Creative", "target": "1 ad running", "action": "Add creatives",
-                         "tone": "warn", "impressions": ads[0]["impressions"], "clicks": ads[0]["clicks"],
-                         "ctr": _rate(ads[0]["clicks"], ads[0]["impressions"]), "share": 1.0})
-        if str(c.get("channel") or "").upper() == "DISPLAY" and ads:
-            sizes = {a["size"] for a in ads}
-            missing = [s for s in CORE_SIZES if s not in sizes]
-            if len(missing) >= 2:
-                recs.append({"kind": "Creative", "target": ", ".join(missing), "action": "Add sizes",
-                             "tone": "warn", "impressions": 0, "clicks": 0, "ctr": 0, "share": 0})
+        # Same "Add sizes" on every campaign -> one group line
+        sz = [r for r in recs if r["action"] == "Add sizes"]
+        if multi and len(sz) > 1 and len({r["target"] for r in sz}) == 1 and len(sz) == len(ids):
+            recs = [r for r in recs if r["action"] != "Add sizes"] + [dict(sz[0], scope="All campaigns")]
 
-        recs += _slices("Audience", br["AUDIENCE"].get(cid) or {}, c, goal)
-
-        # Below goal: show everything. On goal: only the upside (bid up / shift budget).
-        if c["ctr"] >= goal:
+        # On goal: only the upside
+        if g["status"] == "On goal":
             recs = [r for r in recs if r["tone"] == "ok"]
-        c["recs"] = recs
-        c["status"] = "On goal" if c["ctr"] >= goal else "Below goal"
-        out.append(c)
+        order = {"Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4}
+        recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
+        g["recs"], g["campaigns"] = recs, camp_rows
+        out.append(g)
 
-    out.sort(key=lambda c: (c["status"] != "Below goal", c["pct_goal"], -c["impressions"]))
-    below = [c for c in out if c["status"] == "Below goal"]
-    return {"campaigns": out,
-            "summary": {"campaigns": len(out), "below": len(below),
-                        "recs": sum(len(c["recs"]) for c in out),
-                        "sites": sum(1 for c in out for r in c["recs"] if r["kind"] == "Site")}}
+    out.sort(key=lambda g: (g["status"] != "Below goal", g["pct_goal"], -g["impressions"]))
+    return {"groups": out,
+            "summary": {"groups": len(out), "below": sum(1 for g in out if g["status"] == "Below goal"),
+                        "recs": sum(len(g["recs"]) for g in out)}}

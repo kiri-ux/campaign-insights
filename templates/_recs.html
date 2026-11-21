@@ -1,46 +1,64 @@
-{# StackAdapt campaign recommendations. ctx: sa.recs from sa_recs.build #}
+{# StackAdapt campaign group recommendations. ctx: sa.recs from sa_recs.build #}
 {% set rc = sa.recs if sa and sa.recs else none %}
+{% macro delta(v, new=false, inverse=false) %}{% if new %}<span class="sub">New</span>{% elif v is none %}—{% else %}{% set up = v >= 0 %}<span class="{{ 'pos' if (up != inverse) else 'neg' }}">{{ '+' if up else '' }}{{ '{:.0f}%'.format(v * 100) }}</span>{% endif %}{% endmacro %}
 {% if not rc %}
   <p class="note">No StackAdapt data.</p>
 {% elif rc.error %}
   <div class="err">{{ rc.error }}</div>
-{% elif not rc.campaigns %}
-  <p class="note">No StackAdapt campaigns with a CTR goal.</p>
+{% elif not rc.groups %}
+  <p class="note">No StackAdapt campaign groups with a CTR goal.</p>
 {% else %}
-  <h2 id="rc-all">Campaigns <span class="count">{{ rc.campaigns|length }}</span> <span class="dsp sa">SA</span></h2>
+  <h2 id="rc-all">Campaign groups <span class="count">{{ rc.groups|length }}</span> <span class="dsp sa">SA</span>{% if rc.start %} <span class="rcrange">Recs: last {{ rc.days }} days, {{ rc.start }} to {{ rc.end }} · Trend: last 7 days vs prior 7 · Pacing: live from StackAdapt</span>{% endif %}</h2>
   <div class="seg" data-filter-for="rcgrid">
     <button type="button" class="fbtn" data-f="">All</button>
     <button type="button" class="fbtn active" data-f="below">Below goal</button>
     <button type="button" class="fbtn" data-f="ongoal">On goal</button>
   </div>
   <div class="tblwrap"><table id="rcgrid" class="rcgrid"><thead><tr>
-    <th>Campaign</th><th>Product</th><th class="num">Impr</th><th class="num">Clicks</th>
-    <th class="num">CTR</th><th class="num">Goal</th><th>To goal</th><th class="num">Recs</th>
+    <th>Campaign group</th><th>Product</th><th class="num">Impr</th><th class="num">CTR</th><th class="num">Goal</th><th>To goal</th>
+    <th class="num">Projected</th><th class="num">Daily pace</th>
+    <th class="num">Impr 7d</th><th class="num">CTR 7d</th><th class="num">Recs</th>
   </tr></thead><tbody>
-  {% for c in rc.campaigns %}
-    {% set below = c.status == 'Below goal' %}
+  {% for g in rc.groups %}
+    {% set below = g.status == 'Below goal' %}{% set t = g.trend %}{% set p = g.pacing %}
     <tr class="rcrow" data-tags="{{ 'below' if below else 'ongoal' }}"{% if not below %} style="display:none"{% endif %}>
-      <td class="wc"><b>{{ c.advertiser }}</b><div class="sub">{{ c.name }}{% if c.line %} · {{ c.line }}{% endif %}</div></td>
-      <td>{{ c.product }}</td>
-      <td class="num">{{ c.impressions|n0 }}</td><td class="num">{{ c.clicks|n0 }}</td>
-      <td class="num"><b class="{{ 'neg' if below else 'pos' }}">{{ c.ctr|pct }}</b></td>
-      <td class="num">{{ c.goal|pct }}</td>
-      <td><div class="goalbar"><span class="{{ 'bad' if below else 'ok' }}" style="width:{{ [c.pct_goal * 100, 100]|min }}%"></span></div><span class="sub">{{ '{:.0f}%'.format(c.pct_goal * 100) }}</span></td>
-      <td class="num">{{ c.recs|length or '—' }}</td>
+      <td class="wc"><b>{{ g.advertiser }}</b><div class="sub">{{ g.name }} · {{ g.campaigns|length }} {{ 'campaign' if g.campaigns|length == 1 else 'campaigns' }}</div></td>
+      <td>{{ g.product }}</td>
+      <td class="num">{{ g.impressions|n0 }}</td>
+      <td class="num"><b class="{{ 'neg' if below else 'pos' }}">{{ g.ctr|pct }}</b></td>
+      <td class="num">{{ g.goal|pct }}</td>
+      <td><div class="goalbar"><span class="{{ 'bad' if below else 'ok' }}" style="width:{{ [g.pct_goal * 100, 100]|min }}%"></span></div><span class="sub">{{ '{:.0f}%'.format(g.pct_goal * 100) }}</span></td>
+      <td class="num">{% if p %}<span class="{{ 'neg' if p.projected < 0.95 else 'pos' }}">{{ '{:.0f}%'.format(p.projected * 100) }}</span>{% else %}—{% endif %}</td>
+      <td class="num">{% if p %}<span class="{{ 'neg' if p.daily < 0.9 else ('pos' if p.daily <= 1.15 else 'warnc') }}">{{ '{:.0f}%'.format(p.daily * 100) }}</span>{% else %}—{% endif %}</td>
+      <td class="num">{% if t %}{{ delta(t.d_impr, t.new) }}{% else %}—{% endif %}</td>
+      <td class="num">{% if t %}{{ delta(t.d_ctr, t.new) }}{% else %}—{% endif %}</td>
+      <td class="num">{{ g.recs|length or '—' }}</td>
     </tr>
-    {% if c.recs %}
-    <tr class="sitedetail rcrecs" data-tags="{{ 'below' if below else 'ongoal' }}"{% if not below %} style="display:none"{% endif %}><td colspan="8">
-      <table class="rcinner"><thead><tr><th>Action</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th></tr></thead><tbody>
-      {% for r in c.recs %}<tr>
+    <tr class="sitedetail rcrecs" data-tags="{{ 'below' if below else 'ongoal' }}"{% if not below %} style="display:none"{% endif %}><td colspan="11">
+      {% if t %}<div class="rctrend">
+        <span><b>Last 7 days</b> {{ t.l7.impressions|n0 }} impr · {{ t.l7.ctr|pct }} CTR · {{ t.l7.spend|money }}</span>
+        <span><b>Prior 7</b> {{ t.p7.impressions|n0 }} impr · {{ t.p7.ctr|pct }} CTR · {{ t.p7.spend|money }}</span>
+      </div>{% endif %}
+      {% if g.campaigns|length > 1 %}
+      <table class="rcinner rccamps"><thead><tr><th>Campaign</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CTR</th><th>To goal</th></tr></thead><tbody>
+      {% for c in g.campaigns %}<tr><td class="wc">{{ c.name }}</td><td class="num">{{ c.impressions|n0 }}</td><td class="num">{{ c.clicks|n0 }}</td>
+        <td class="num"><span class="{{ 'neg' if c.pct_goal < 1 else 'pos' }}">{{ c.ctr|pct }}</span></td>
+        <td><div class="goalbar"><span class="{{ 'bad' if c.pct_goal < 1 else 'ok' }}" style="width:{{ [c.pct_goal * 100, 100]|min }}%"></span></div><span class="sub">{{ '{:.0f}%'.format(c.pct_goal * 100) }}</span></td></tr>{% endfor %}
+      </tbody></table>
+      {% endif %}
+      {% if g.recs %}
+      <table class="rcinner"><thead><tr><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th></tr></thead><tbody>
+      {% for r in g.recs %}<tr>
         <td><span class="act rc-{{ r.tone }}">{{ r.action }}</span></td>
+        <td class="wc">{% if r.scope == 'All campaigns' or not r.scope %}<b>All campaigns</b>{% else %}{{ r.scope }}{% endif %}</td>
         <td>{{ r.kind }}</td><td class="wc">{{ r.target }}</td>
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
       </tr>{% endfor %}
       </tbody></table>
+      {% else %}<p class="note">No changes.</p>{% endif %}
     </td></tr>
-    {% endif %}
   {% endfor %}
   </tbody></table></div>
 {% endif %}

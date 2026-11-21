@@ -41,10 +41,15 @@ def _gql(query, variables=None, tries=4):
         URL, json.dumps({"query": query, "variables": variables or {}}).encode(),
         {"Authorization": f"Bearer {os.environ['STACKADAPT_TOKEN'].strip()}",
          "Content-Type": "application/json"})
-    for attempt in range(tries):
+    for attempt in range(tries + 2):
         try:
             with urllib.request.urlopen(req, context=_ctx(), timeout=120) as r:
                 body = json.load(r)
+            errs = body.get("errors") or []
+            if errs and "rate limit" in str(errs[0].get("message", "")).lower() and attempt < tries + 1:
+                wait = ((errs[0].get("extensions") or {}).get("cost") or {}).get("throttle", {}).get("retryAfterInSeconds")
+                time.sleep(max(float(wait or 0), 5 * (attempt + 1)))
+                continue
             break
         except urllib.error.HTTPError as e:
             if e.code < 500 or attempt == tries - 1:
@@ -132,6 +137,26 @@ def _rate(n, d):
     return n / d if d else 0.0
 
 
+def _load_camps(d):
+    camps = {}
+    for n in _pages(CAMPAIGNS, "campaignDelivery", d):
+        c, m = n["campaign"], n["metrics"]
+        product, line = _product((c.get("campaignGroup") or {}).get("name"), c.get("channelType"))
+        camps[c["id"]] = {
+            "id": c["id"], "name": c.get("name") or "", "channel": c.get("channelType") or "",
+            "advertiser": (c.get("advertiser") or {}).get("name") or "",
+            "group": (c.get("campaignGroup") or {}).get("name") or "",
+            "group_id": (c.get("campaignGroup") or {}).get("id") or "",
+            "product": product, "line": line,
+            "impressions": _num(m.get("impressionsBigint")), "clicks": _num(m.get("clicksBigint")),
+            "spend": _num(m.get("cost")), "conversions": _num(m.get("conversionsBigint")),
+        }
+    camps = {k: v for k, v in camps.items()
+             if v["impressions"] > 0 and not any(str(v[f]).lower().startswith("test_")
+                                                  for f in ("advertiser", "name", "group"))}
+    return camps
+
+
 def fetch(start, end, blocklist=None, rec_keys=None):
     """Return the StackAdapt block for the dashboard ctx. `blocklist` is the
     master block sheet map ({value_lower: {...}}); `rec_keys` the set of
@@ -152,21 +177,7 @@ def fetch(start, end, blocklist=None, rec_keys=None):
         block_keys.setdefault(norm_site(kk), e)
     rec_keys = {str(k).strip().lower() for k in (rec_keys or ())} | {norm_site(k) for k in (rec_keys or ())}
 
-    camps = {}
-    for n in _pages(CAMPAIGNS, "campaignDelivery", d):
-        c, m = n["campaign"], n["metrics"]
-        product, line = _product((c.get("campaignGroup") or {}).get("name"), c.get("channelType"))
-        camps[c["id"]] = {
-            "id": c["id"], "name": c.get("name") or "", "channel": c.get("channelType") or "",
-            "advertiser": (c.get("advertiser") or {}).get("name") or "",
-            "group": (c.get("campaignGroup") or {}).get("name") or "",
-            "product": product, "line": line,
-            "impressions": _num(m.get("impressionsBigint")), "clicks": _num(m.get("clicksBigint")),
-            "spend": _num(m.get("cost")), "conversions": _num(m.get("conversionsBigint")),
-        }
-    camps = {k: v for k, v in camps.items()
-             if v["impressions"] > 0 and not any(str(v[f]).lower().startswith("test_")
-                                                  for f in ("advertiser", "name", "group"))}
+    camps = _load_camps(d)
 
     # Product CTR norms (display-type products only)
     norms = {}
@@ -274,9 +285,9 @@ def fetch(start, end, blocklist=None, rec_keys=None):
     ts = sum(c["spend"] for c in camp_rows)
     try:
         import sa_recs
-        recs = sa_recs.build(d, camps, camp_sites, _pages, _gql, PAGE)
+        recs = fetch_recs(end, set(camps))
     except Exception as e:  # recs are extra; never fail the whole SA pull
-        recs = {"campaigns": [], "summary": {}, "error": f"Campaign recommendations failed: {e}"}
+        recs = {"groups": [], "summary": {}, "error": f"Campaign recommendations failed: {e}"}
     blocked = [r for r in pub_rows if "Blocked" in r["flags"]]
     to_block = [r for r in pub_rows if "To block" in r["flags"]]
     high = [r for r in pub_rows if "High CTR" in r["flags"]]
@@ -300,3 +311,39 @@ def fetch(start, end, blocklist=None, rec_keys=None):
         "high_ctr": sorted(high, key=lambda r: -r["x_norm"]),
         "recs": recs,
     }
+
+
+REC_DAYS = int(os.environ.get("SA_REC_DAYS", "30"))
+
+
+def fetch_recs(end, active_ids=None, days=None):
+    """Campaign recs on a longer lookback than the report week (REC_DAYS ending
+    on `end`), so exclusions rest on more impressions. Only campaigns that
+    delivered in the report window (`active_ids`) get recs."""
+    import datetime as dt
+    import sa_recs
+    days = days or REC_DAYS
+    e = dt.date.fromisoformat(str(end)[:10])
+    d = {"from": (e - dt.timedelta(days=days - 1)).isoformat(), "to": e.isoformat()}
+    camps = _load_camps(d)
+    if active_ids is not None:
+        camps = {k: v for k, v in camps.items() if k in active_ids}
+    camp_sites = {}
+    for n in _pages(PUBLISHERS, "campaignInsight", d):
+        cid = (n.get("campaign") or {}).get("id")
+        if cid not in camps:
+            continue
+        a = ((n.get("attributes") or {}).get("app") or {})
+        dom = (a.get("domain") or "").strip()
+        if not dom:
+            continue
+        key, is_app = app_key(dom)
+        m = n["metrics"]
+        cs = camp_sites.setdefault(cid, {}).setdefault(
+            key, {"name": (a.get("title") or dom) if is_app else dom,
+                  "type": "app" if is_app else "site", "impressions": 0.0, "clicks": 0.0})
+        cs["impressions"] += _num(m.get("impressions"))
+        cs["clicks"] += _num(m.get("clicks"))
+    out = sa_recs.build(d, camps, camp_sites, _pages, _gql, PAGE, load_camps=_load_camps)
+    out["start"], out["end"], out["days"] = d["from"], d["to"], days
+    return out
