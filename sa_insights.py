@@ -188,6 +188,8 @@ def fetch(start, end, blocklist=None, rec_keys=None):
         key, is_app = app_key(dom)
         m = n["metrics"]
         c = camps.get(cid, {})
+        if re.search(r"DOOH|Out.Of.Home", c.get("product") or "", re.I):
+            continue  # DOOH screens aren't publishers we block or optimize
         p = pubs.setdefault(key, {"name": key if is_app else dom, "title": a.get("title") or "",
                                   "type": "app" if is_app else "site",
                                   "impressions": 0.0, "clicks": 0.0, "spend": 0.0, "conversions": 0.0,
