@@ -108,6 +108,8 @@ def build_publishers(ctx, limit=500):
             "products": r.get("products") or "", "adlib": True, "sa": False,
             "impressions": num(r.get("impressions")), "clicks": num(r.get("clicks")),
             "spend": num(r.get("spend")), "last_served": r.get("last_served") or "",
+            "al": {"impressions": num(r.get("impressions")), "clicks": num(r.get("clicks")),
+                   "spend": num(r.get("spend")), "products": r.get("products") or ""},
             "serving": r.get("serving") or "",
             "action": "block" if r.get("rec") else ("leak" if k in leaking else ""),
         }
@@ -125,6 +127,8 @@ def build_publishers(ctx, limit=500):
         row["sa"] = True
         row["products"] = _merge_products(row["products"], sa_products(p.get("products")))
         row["sa_impressions"] = num(p.get("impressions"))
+        row["sad"] = {"impressions": num(p.get("impressions")), "clicks": num(p.get("clicks")),
+                      "spend": num(p.get("spend")), "products": sa_products(p.get("products"))}
         row["impressions"] += num(p.get("impressions"))
         row["clicks"] += num(p.get("clicks"))
         row["spend"] += num(p.get("spend"))
@@ -134,13 +138,32 @@ def build_publishers(ctx, limit=500):
                 row["action"] = "sa_list"
             elif "To block" in flags or "High CTR" in flags:
                 row["action"] = "block"
-    out = sorted(rows.values(), key=lambda r: -r["impressions"])[:limit]
+    # Top `limit` from each DSP, so the AdLib and StackAdapt filters each get a full list.
+    keep = set()
+    for d in ("al", "sad"):
+        ranked = sorted((r for r in rows.values() if r.get(d)), key=lambda r: -r[d]["impressions"])
+        keep.update(id(r) for r in ranked[:limit])
+    out = sorted((r for r in rows.values() if id(r) in keep), key=lambda r: -r["impressions"])
     tot = (num((ctx.get("topcards") or {}).get("impressions"))
            + num((sa.get("summary") or {}).get("impressions"))) or sum(r["impressions"] for r in rows.values()) or 1.0
+    al_tot = num((ctx.get("topcards") or {}).get("impressions")) or 1.0
+    sa_tot = num((sa.get("summary") or {}).get("impressions")) or 1.0
     for r in out:
         r["ctr"] = r["clicks"] / r["impressions"] if r["impressions"] else 0.0
         r["cpm"] = r["spend"] / r["impressions"] * 1000 if r["impressions"] else 0.0
         r["share"] = r["impressions"] / tot
+        # Per-DSP numbers, so the AdLib / StackAdapt filters show that DSP only.
+        r["by_dsp"] = {}
+        for dsp, d, t in (("adlib", r.get("al"), al_tot), ("sa", r.get("sad"), sa_tot)):
+            if not d:
+                continue
+            i = d["impressions"]
+            r["by_dsp"][dsp] = {
+                "products": d["products"], "impressions": n0(i), "share": pct(i / t),
+                "clicks": n0(d["clicks"]), "ctr": pct(d["clicks"] / i if i else 0),
+                "spend": money(d["spend"]), "cpm": money2(d["spend"] / i * 1000 if i else 0),
+                "last_served": (r["last_served"] or "—") if dsp == "adlib" else "—",
+            }
     return out
 
 

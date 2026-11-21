@@ -100,10 +100,10 @@
     {% for r in publishers %}<tr data-tags="{{ r.type }}{% if r.adlib %} adlib{% endif %}{% if r.sa %} sa{% endif %}{% if r.action %} act{% endif %}"{% if r.action %} class="coral"{% endif %}>
       <td class="wc">{{ r.name }}</td><td>{{ tpill(r.type) }}</td>
       <td>{% if r.adlib %}<span class="dsp adlib">AdLib</span>{% endif %}{% if r.sa %}<span class="dsp sa" data-tip="{{ r.sa_impressions|n0 }} impr in StackAdapt">SA</span>{% endif %}</td>
-      <td>{{ pills(r.products) }}</td>
-      <td class="num">{{ r.impressions|n0 }}</td><td class="num">{{ r.share|pct }}</td><td class="num">{{ r.clicks|n0 }}</td>
-      <td class="num">{{ r.ctr|pct }}</td><td class="num">{{ r.spend|money }}</td><td class="num">{{ r.cpm|money2 }}</td>
-      <td>{{ r.last_served or '—' }}</td>
+      {% set ad = r.by_dsp.adlib %}{% set sd = r.by_dsp.sa %}
+      <td data-dsp-html{% if ad %} data-adlib="{{ pills(ad.products)|forceescape }}"{% endif %}{% if sd %} data-sa="{{ pills(sd.products)|forceescape }}"{% endif %}>{{ pills(r.products) }}</td>
+      {% for k in ['impressions','share','clicks','ctr','spend','cpm'] %}<td class="num"{% if ad %} data-adlib="{{ ad[k] }}"{% endif %}{% if sd %} data-sa="{{ sd[k] }}"{% endif %}>{{ {'impressions': r.impressions|n0, 'share': r.share|pct, 'clicks': r.clicks|n0, 'ctr': r.ctr|pct, 'spend': r.spend|money, 'cpm': r.cpm|money2}[k] }}</td>{% endfor %}
+      <td{% if ad %} data-adlib="{{ ad.last_served }}"{% endif %}{% if sd %} data-sa="{{ sd.last_served }}"{% endif %}>{{ r.last_served or '—' }}</td>
       <td>{% if r.action == 'block' %}<span class="act block">Block</span>{% elif r.action == 'leak' %}<span class="act fix">Still serving</span>{% elif r.action == 'sa_list' %}<span class="act sa">Add to SA list</span>{% endif %}</td>
     </tr>{% endfor %}
     </tbody></table></div>
@@ -454,6 +454,18 @@
           var tags=(' '+(tr.dataset.tags||'')+' ');
           tr.classList.toggle('filtered', !!f && tags.indexOf(' '+f+' ')<0);
         });
+        // DSP filters show that DSP's own numbers, re-sorted by its impressions.
+        if(tbl.querySelector('td[data-adlib],td[data-sa]')){
+          var mode=(f==='adlib'||f==='sa')?f:'all', tb=tbl.tBodies[0];
+          tb.querySelectorAll('td[data-adlib],td[data-sa]').forEach(function(td){
+            if(!('all' in td.dataset)) td.dataset.all=td.innerHTML;
+            var v=td.dataset[mode]; if(v==null) v=td.dataset.all;
+            td.innerHTML=v;
+          });
+          var col=4, rows=Array.prototype.slice.call(tb.rows);
+          rows.sort(function(a,b){ return (parseFloat(b.children[col].textContent.replace(/[$,%\s]/g,''))||0)-(parseFloat(a.children[col].textContent.replace(/[$,%\s]/g,''))||0); });
+          rows.forEach(function(r){ tb.appendChild(r); });
+        }
         if(tbl._repaginate) tbl._repaginate(); else tbl.querySelectorAll('tbody tr').forEach(function(tr){ tr.style.display=tr.classList.contains('filtered')?'none':''; });
       });
     });
