@@ -501,6 +501,38 @@ def _setting_recs(ids, camps, sets, g, goal, multi):
     return recs
 
 
+RAISE_AFTER_DAYS = 7
+
+
+def _now():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _first_push():
+    """group id -> time of the first push logged from the app."""
+    import datetime as _dt
+    import json as _json
+    import tempfile
+    path = os.path.join(os.environ.get("REPORTS_DIR", os.path.join(tempfile.gettempdir(), "insights_reports")),
+                        "sa_push_log.jsonl")
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = _json.loads(line)
+                    t = _dt.datetime.fromisoformat(e["at"])
+                except Exception:
+                    continue
+                gid = str(e.get("group_id") or "")
+                if gid and (gid not in out or t < out[gid]):
+                    out[gid] = t
+    except OSError:
+        pass
+    return out
+
+
 RANK_PRODUCTS = {"Video", "Native Video"}
 
 
@@ -613,11 +645,22 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
 
         recs = _pace_guard(recs, g, ids, camps)
 
+        # Last resort (kiri 2026-11-23): higher CPMs win better inventory but cut
+        # margin, so only once our pushes have had a week and the group is still
+        # below goal.
+        first = _first_push().get(str(gid))
+        if g["status"] == "Below goal" and first and (_now() - first).days >= RAISE_AFTER_DAYS:
+            recs.append({"kind": "Bid", "action": "Raise CPM", "tone": "warn", "key": None,
+                         "target": f"Still below goal {(_now() - first).days} days after first push. "
+                                   "Bid for better inventory",
+                         "impressions": 0, "clicks": 0, "ctr": 0, "share": 0,
+                         "scope": "All campaigns" if multi else "", "camp_share": 1.0})
+
         # On goal: only the upside
         if g["status"] == "On goal":
             recs = [r for r in recs if r["tone"] == "ok"]
         order = {"Goal": -1, "Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4,
-                 "Frequency": 5, "Viewability": 6}
+                 "Frequency": 5, "Viewability": 6, "Bid": 7}
         recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
         by_short = {_short(camps[i]["name"], camps[i]["advertiser"]): i for i in ids}
         for r in recs:
