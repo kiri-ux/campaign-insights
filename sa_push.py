@@ -220,6 +220,48 @@ def _device_caps(spec):
     return msg
 
 
+FLIGHT_FIELDS = ("id name startTime endTime bidType bidAmount budgetType cpaTarget firstGoalType firstGoalValue "
+                 "grossDailyBudget grossLifetimeBudget isPaceEvenly paceAheadPercent partingTimeZone "
+                 "secondaryGoalType secondaryGoalValue viewabilityGoal")
+
+
+def _raise_bid(spec):
+    """Raise the CPM bid on a campaign's current and future flights. Past flights
+    are re-sent unchanged so none are dropped."""
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    f = float(spec["factor"])
+    out_msgs = []
+    for cid in spec["campaign_ids"]:
+        nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType "
+                     "flights{ nodes{ " + FLIGHT_FIELDS + " } } } } }", {"ids": [cid]})["campaigns"]["nodes"]
+        if not nodes:
+            raise RuntimeError(f"Campaign {cid} not found")
+        c = nodes[0]
+        ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+        if not ch:
+            raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
+        fl = (c.get("flights") or {}).get("nodes") or []
+        live = [x for x in fl if _dt.datetime.fromisoformat(x["endTime"]) >= now]
+        if not live:
+            raise RuntimeError(f"Campaign {cid} has no current flights")
+        if any(x.get("bidType") != "CPM" for x in live):
+            raise RuntimeError(f"Campaign {cid} doesn't bid on CPM")
+        old = live[0]["bidAmount"]
+        new = round(old * f, 2)
+        sent = []
+        for x in fl:
+            y = {k: v for k, v in x.items() if v is not None}
+            if x in live:
+                y["bidAmount"] = round(x["bidAmount"] * f, 2)
+            sent.append(y)
+        r = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+            campaign{ id } userErrors{ message } } }""", {"i": {ch: {"id": cid, "flights": sent}}})
+        _user_errors(r["upsertCampaign"])
+        out_msgs.append(f"CPM ${old:.2f} to ${new:.2f}")
+    return "; ".join(out_msgs) + f" on {len(live)} flights"
+
+
 def _pause_ads(spec):
     out = _gql("""mutation($i: PauseAdsInput!){ pauseAds(input:$i){ pausedCount userErrors{ message } } }""",
                {"i": {"adIds": spec["ad_ids"]}})["pauseAds"]
@@ -242,6 +284,8 @@ def push(rec):
         return _bid_factor(spec, name)
     if t == "device_caps":
         return _device_caps(spec)
+    if t == "raise_bid":
+        return _raise_bid(spec)
     if t == "pause_ads":
         return _pause_ads(spec)
     raise RuntimeError(f"Unknown push type {t}")
