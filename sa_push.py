@@ -411,7 +411,7 @@ def _high_ctr(spec):
             if not new:
                 raise RuntimeError("StackAdapt didn't return the copy")
             state = finish_copy(new, c, ch, ids)
-            out.append(f"Copied to {new} with {len(ids)} High CTR packages, {state.lower()}")
+            out.append(f"Copied to {new} with {len(ids)} High CTR packages, {state.lower()}. Add label High CTR in SA")
         else:
             _upsert(ch, {"id": cid, "inventory": inv})
             _check_inventory(cid, ids)
