@@ -6,6 +6,7 @@ in StackAdapt is dropped:
   group_exclude: campaign group domainExclusions += domains (updateCampaignGroup)
   bid_factor:    campaign bidFactors += one factor named "Insights: ..." (upsertCampaign);
                  a factor with the same name is updated instead of duplicated
+  device_caps:   campaign inventory.deviceCaps lowered (upsertCampaign)
   pause_ads:     pauseAds
 """
 import json
@@ -121,6 +122,32 @@ def _bid_factor(spec, name):
     return f"Bid factor {spec['factor']}% set on {len(done)} {'campaign' if len(done) == 1 else 'campaigns'}"
 
 
+def _device_caps(spec):
+    """Lower SA's supply caps (max share of impressions; 0 = none). Each cap only
+    ever goes down from what's set."""
+    done = []
+    for cid in spec["campaign_ids"]:
+        nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType "
+                     "inventory{ deviceCaps{ app desktop web } } } } }", {"ids": [cid]})["campaigns"]["nodes"]
+        if not nodes:
+            raise RuntimeError(f"Campaign {cid} not found")
+        c = nodes[0]
+        ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+        if not ch:
+            raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
+        cur = (c.get("inventory") or {}).get("deviceCaps") or {"app": 1, "desktop": 1, "web": 1}
+        caps = {k: float(cur.get(k, 1)) for k in ("app", "desktop", "web")}
+        for k, v in spec["caps"].items():
+            caps[k] = min(caps[k], float(v))
+        out = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+            campaign{ id } userErrors{ message } } }""", {"i": {ch: {"id": cid, "inventory": {"deviceCaps": caps}}}})
+        _user_errors(out["upsertCampaign"])
+        done.append(cid)
+    names = {"desktop": "Desktop", "web": "Mobile web", "app": "In-app"}
+    what = ", ".join(f"{names[k]} {round(v * 100)}%" for k, v in spec["caps"].items())
+    return f"Caps set ({what}) on {len(done)} {'campaign' if len(done) == 1 else 'campaigns'}"
+
+
 def _pause_ads(spec):
     out = _gql("""mutation($i: PauseAdsInput!){ pauseAds(input:$i){ pausedCount userErrors{ message } } }""",
                {"i": {"adIds": spec["ad_ids"]}})["pauseAds"]
@@ -141,6 +168,8 @@ def push(rec):
     if t == "bid_factor":
         name = f"Insights: {rec.get('kind')} {rec.get('target')}"[:120]
         return _bid_factor(spec, name)
+    if t == "device_caps":
+        return _device_caps(spec)
     if t == "pause_ads":
         return _pause_ads(spec)
     raise RuntimeError(f"Unknown push type {t}")
