@@ -23,7 +23,24 @@
 
 <div class="pagehead">
   <h2>Insights</h2>
-  {% if t %}<span class="range">{{ t.date_range }}</span>{% endif %}
+  <div class="drp" id="drp">
+    <button type="button" class="drbtn" id="drBtn" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10zm0-2h12V6H6z"/></svg><span>{{ t.date_range if t else 'Select dates' }}</span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg></button>
+    <div class="drpop" id="drPop" hidden>
+      <div class="drpre">
+        <button type="button" data-p="7">Last 7 days</button>
+        <button type="button" data-p="14">Last 14 days</button>
+        <button type="button" data-p="30">Last 30 days</button>
+        <button type="button" data-p="tm">This month</button>
+        <button type="button" data-p="lm">Last month</button>
+      </div>
+      <div class="drcustom">
+        <label>Start<input type="date" id="drStart"></label>
+        <label>End<input type="date" id="drEnd"></label>
+      </div>
+      <div class="drfoot"><span class="drmsg" id="drMsg"></span><button type="button" class="btn go" id="drGo">View</button></div>
+      <div class="drsaved"><div class="drlbl">Saved reports</div><ul id="drList"><li class="drmsg">Loading...</li></ul></div>
+    </div>
+  </div>
   <span class="build">build {{ build_version }}</span>
   <span class="syncalert" id="syncAlert">Newer build <span id="syncCur"></span> <button type="button" id="syncBtn">Sync</button></span>
   {% if sheet_links and sheet_links.watchlists %}<a class="btn-ghost" href="{{ sheet_links.watchlists }}" target="_blank" rel="noopener">Buyer watchlists</a>{% endif %}
@@ -562,6 +579,67 @@
       }).catch(function(e){ alert('Sync failed: '+e); btn.disabled=false; btn.textContent='Sync'; });
     };
   })();
+</script>
+
+<script>
+(function(){
+  var btn=document.getElementById('drBtn'), pop=document.getElementById('drPop');
+  if(!btn) return;
+  var S=document.getElementById('drStart'), E=document.getElementById('drEnd'),
+      msg=document.getElementById('drMsg'), go=document.getElementById('drGo'),
+      list=document.getElementById('drList'), cur={{ (report_id or '')|tojson }}, loaded=false;
+  function iso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function setRange(s,e){ S.value=iso(s); E.value=iso(e); msg.textContent=''; }
+  var m=/^(\d{4}-\d{2}-\d{2})(?:_to_(\d{4}-\d{2}-\d{2}))?$/.exec(cur);
+  if(m){ S.value=m[1]; E.value=m[2]||m[1]; }
+  function load(){
+    if(loaded) return; loaded=true;
+    fetch('/api/reports',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      list.innerHTML='';
+      (j.reports||[]).slice(0,15).forEach(function(r){
+        var li=document.createElement('li'), a=document.createElement('a');
+        a.href='/reports/'+r.id; a.textContent=r.name||r.id;
+        if(r.id===cur) a.className='on';
+        li.appendChild(a); list.appendChild(li);
+      });
+      if(!list.children.length) list.innerHTML='<li class="drmsg">None</li>';
+    }).catch(function(){ list.innerHTML='<li class="drmsg">Could not load</li>'; });
+    fetch('/ui/s3dates',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      var d=(j.days||[]).map(function(x){return x.date;});
+      if(d.length){ S.min=E.min=d[0]; S.max=E.max=d[d.length-1]; }
+    }).catch(function(){});
+  }
+  function toggle(open){ pop.hidden=!open; btn.setAttribute('aria-expanded',open); if(open) load(); }
+  btn.onclick=function(e){ e.stopPropagation(); toggle(pop.hidden); };
+  document.addEventListener('click',function(e){ if(!pop.hidden && !pop.contains(e.target)) toggle(false); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') toggle(false); });
+  pop.querySelectorAll('.drpre button').forEach(function(b){
+    b.onclick=function(){
+      var p=b.dataset.p, t=new Date(); t.setDate(t.getDate()-1);
+      if(p==='tm'){ setRange(new Date(t.getFullYear(),t.getMonth(),1),t); }
+      else if(p==='lm'){ setRange(new Date(t.getFullYear(),t.getMonth()-1,1),new Date(t.getFullYear(),t.getMonth(),0)); }
+      else { var s=new Date(t); s.setDate(s.getDate()-(+p)+1); setRange(s,t); }
+      pop.querySelectorAll('.drpre button').forEach(function(x){x.classList.toggle('on',x===b);});
+    };
+  });
+  go.onclick=function(){
+    var s=S.value, e=E.value;
+    if(!s||!e){ msg.textContent='Pick a start and end date'; return; }
+    if(s>e){ var x=s; s=e; e=x; }
+    var id=s+'_to_'+e;
+    if(id===cur){ toggle(false); return; }
+    go.disabled=true; msg.textContent='Loading...';
+    fetch('/reports/'+id,{method:'HEAD',cache:'no-store'}).then(function(r){
+      if(r.ok){ location.href='/reports/'+id; return; }
+      msg.textContent='Pulling '+s+' to '+e+'. Takes a few minutes.';
+      return fetch('/ui/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start:s,end:e})})
+        .then(function(r){return r.json();}).then(function(j){
+          if(j.view_url){ location.href=j.view_url; return; }
+          go.disabled=false; msg.textContent=j.message||j.error||'Pull failed';
+        });
+    }).catch(function(err){ go.disabled=false; msg.textContent='Pull failed'; console.log(err); });
+  };
+})();
 </script>
 </body>
 </html>
