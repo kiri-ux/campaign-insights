@@ -55,7 +55,7 @@
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
-        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-gname="{{ g.name }}" data-link="{% if r.push.type == 'group_exclude' or not r.push.campaign_ids %}https://www.stackadapt.com/cg-editor?ids={{ g.id }}{% else %}https://www.stackadapt.com/editor?ids={{ r.push.campaign_ids|join(',') }}&tab={{ {'pause_ads': 'creative', 'device_caps': 'inventory', 'bid_factor': 'strategy', 'raise_bid': 'flights', 'freq_cap': 'targeting', 'high_ctr': 'inventory', 'viewability': 'targeting'}.get(r.push.type, 'setup') }}{% endif %}">Push</button>{% endif %}</td>
+        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% set m = (r.pushed.result or '').split('Copied to ') %}{% if m|length > 1 %} <a href="https://www.stackadapt.com/editor?ids={{ m[1].split(' ')[0] }}&tab=inventory" target="_blank" rel="noopener">See live changes</a>{% endif %}{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-gname="{{ g.name }}" data-link="{% if r.push.type == 'group_exclude' or not r.push.campaign_ids %}https://www.stackadapt.com/cg-editor?ids={{ g.id }}{% else %}https://www.stackadapt.com/editor?ids={{ r.push.campaign_ids|join(',') }}&tab={{ {'pause_ads': 'creative', 'device_caps': 'inventory', 'bid_factor': 'strategy', 'raise_bid': 'flights', 'freq_cap': 'targeting', 'high_ctr': 'inventory', 'viewability': 'targeting'}.get(r.push.type, 'setup') }}{% endif %}">Push</button>{% endif %}</td>
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
@@ -68,6 +68,7 @@
 <script>
 (function(){
   function td(t){ var c=document.createElement('td'); c.textContent=t==null?'':t; return c; }
+  function copyLink(c,v){ var m=/Copied to (\d+)/.exec(v||''); if(!m) return; var a=document.createElement('a'); a.href='https://www.stackadapt.com/editor?ids='+m[1]+'&tab=inventory'; a.target='_blank'; a.rel='noopener'; a.textContent='See live changes'; c.appendChild(document.createTextNode(' ')); c.appendChild(a); }
   function when(a){ try{ return new Date(a).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return a; } }
   fetch('/api/sa_log',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
     var log=j.log||[]; if(!log.length) return;
@@ -75,12 +76,12 @@
     document.getElementById('rclogn').textContent=log.length;
     log.forEach(function(e){
       var tr=document.createElement('tr');
-      [when(e.at), e.advertiser, e.group, e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===6) c.className='wc'; tr.appendChild(c); });
+      [when(e.at), e.advertiser, e.group, e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===6) c.className='wc'; if(i===7) copyLink(c,v); tr.appendChild(c); });
       all.appendChild(tr);
       if(!e.group_id) return;
       document.querySelectorAll('.rclog[data-gid="'+e.group_id+'"]').forEach(function(box){
         var r=document.createElement('tr');
-        [when(e.at), e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===4) c.className='wc'; r.appendChild(c); });
+        [when(e.at), e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===4) c.className='wc'; if(i===5) copyLink(c,v); r.appendChild(c); });
         box.querySelector('tbody').appendChild(r); box.hidden=false;
       });
     });
