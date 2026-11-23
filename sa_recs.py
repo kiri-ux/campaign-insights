@@ -730,7 +730,11 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         # High CTR inventory (kiri 2026-11-23): on pace, switch the campaign to SA's
         # High CTR packages; behind, copy it and switch the copy, so delivery holds.
         if g["status"] == "Below goal" and hc:
-            behind = bool(g.get("pacing")) and (g["pacing"].get("projected") or 0) < 0.95
+            # Behind on either SA number: the flight projection, or today's daily
+            # pace vs what's needed (kiri 2026-11-23, NRF 139578 read on pace while
+            # the month sat at 73%).
+            p = g.get("pacing") or {}
+            behind = bool(p) and ((p.get("projected") or 0) < 0.95 or (p.get("daily") or 1) < 0.95)
             for i in ids:
                 ch = str(camps[i].get("channel") or "").upper()
                 pk = hc.get(ch) or []
