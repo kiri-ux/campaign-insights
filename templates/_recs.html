@@ -50,7 +50,7 @@
       <table class="rcinner"><thead><tr><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th class="num">Impr</th><th class="num">Share</th><th class="num">CTR</th><th></th></tr></thead><tbody>
       {% for r in g.recs %}<tr>
         <td><span class="act rc-{{ r.tone }}">{{ 'Bid up 20%' if r.action == 'Shift budget to' else r.action }}</span></td>
-        <td class="wc">{% if r.scope == 'All campaigns' or not r.scope %}<b>All campaigns</b>{% else %}{{ r.scope }}{% endif %}</td>
+        <td class="wc">{% if r.scope == 'All campaigns' or not r.scope %}<b>All in group</b>{% else %}{{ r.scope }}{% endif %}</td>
         <td>{{ r.kind }}</td><td class="wc">{{ r.target }}</td>
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
