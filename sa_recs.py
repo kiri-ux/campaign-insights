@@ -383,7 +383,8 @@ def push_spec(r, group_id, campaign_ids, group_wide):
     """What the Push button does for a rec, or None when it can't be pushed.
       group_exclude: add domains to the campaign group's domain exclusions
       bid_factor:    add a bid factor (100 = no change, 0 = no bids) to each campaign
-      pause_ads:     pause ads"""
+      pause_ads:     pause ads
+      remove_audience: take the segment off each campaign's audience"""
     kind, action, key = r.get("kind"), r.get("action"), r.get("key")
     if action == "Raise CPM":
         if not campaign_ids:
@@ -429,6 +430,9 @@ def push_spec(r, group_id, campaign_ids, group_wide):
         rule = {"deviceOsRule": {"deviceOses": [key]}}
     elif kind == "Audience":
         t = r.get("aud_type") or ""
+        if action == "Remove" and (t == "RetargetingPixel" or t.endswith("CustomSegment")):
+            return {"type": "remove_audience", "campaign_ids": campaign_ids, "key": str(key),
+                    "pixel": t == "RetargetingPixel"}
         if t == "RetargetingPixel":
             rule = {"retargetingPixelRule": {"retargetingPixelIds": [key]}}
         elif t.endswith("CustomSegment"):

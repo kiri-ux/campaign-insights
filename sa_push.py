@@ -8,6 +8,9 @@ in StackAdapt is dropped:
                  a factor with the same name is updated instead of duplicated
   device_caps:   campaign inventory.deviceCaps lowered (upsertCampaign)
   pause_ads:     pauseAds
+  remove_audience: campaign audience customSegmentIds / retargetingPixelIds -= the
+                 segment (upsertCampaign), unless it is the campaign's only one;
+                 drops our old "Insights: Audience ..." bid factor for it too
 """
 import json
 import os
@@ -502,6 +505,61 @@ def _viewability(spec):
     return msg + (f", {had} already had it" if had else "")
 
 
+def _remove_audience(spec, name):
+    """Take one segment off each campaign's audience. A campaign whose only
+    segment it is keeps it: with none left the campaign would run untargeted."""
+    key = str(spec["key"])
+    field, read = (("retargetingPixelIds", "retargetingPixels") if spec.get("pixel")
+                   else ("customSegmentIds", "customSegments"))
+    done, only, absent = 0, 0, 0
+    for cid in spec["campaign_ids"]:
+        c, ch = _camp(cid, "audience{ customSegments(first:200){ nodes{ id } } "
+                           "retargetingPixels(first:200){ nodes{ id } } } "
+                           "bidFactors{ nodes{ id name } }")
+        aud = c.get("audience") or {}
+        ids = lambda f: [str(n["id"]) for n in ((aud.get(f) or {}).get("nodes") or [])]
+        cur, other = ids(read), ids("retargetingPixels" if read == "customSegments" else "customSegments")
+        if key not in cur:
+            absent += 1
+            continue
+        left = [i for i in cur if i != key]
+        if not left and not other:
+            only += 1
+            continue
+        _upsert(ch, {"id": cid, "audience": {field: left}})
+        done += 1
+        if any(f.get("name") == name for f in (c.get("bidFactors") or {}).get("nodes") or []):
+            _drop_bid_factor(cid, name)
+    msg = f"Segment removed from {done} {'campaign' if done == 1 else 'campaigns'}"
+    if only:
+        msg += f", kept on {only} where it is the only audience"
+    if absent:
+        msg += f", not on {absent}"
+    if not done and not only:
+        raise RuntimeError("The segment isn't on any of these campaigns")
+    return msg
+
+
+def _drop_bid_factor(cid, name):
+    """Re-send a campaign's bid factors without the one named `name`."""
+    q = "query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType bidFactors{ nodes{ id name factorPercent paused %s } } } } }" \
+        % " ".join(RULES.values())
+    c = _gql(q, {"ids": [cid]})["campaigns"]["nodes"][0]
+    ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+    factors = []
+    for f in (c.get("bidFactors") or {}).get("nodes") or []:
+        if f.get("name") == name:
+            continue
+        item = {"id": f["id"], "name": f.get("name"), "factorPercent": f.get("factorPercent"),
+                "paused": bool(f.get("paused"))}
+        for rn in RULES:
+            v = _rule_in(rn, f.get(rn))
+            if v:
+                item[rn] = v
+        factors.append(item)
+    _upsert(ch, {"id": cid, "bidFactors": factors})
+
+
 def push(rec):
     """Run one rec's push spec. Returns a short result string; raises on failure."""
     spec = rec.get("push")
@@ -527,6 +585,8 @@ def push(rec):
         return _high_ctr(spec)
     if t == "viewability":
         return _viewability(spec)
+    if t == "remove_audience":
+        return _remove_audience(spec, f"Insights: {rec.get('kind')} {rec.get('target')}"[:120])
     raise RuntimeError(f"Unknown push type {t}")
 
 
