@@ -60,33 +60,54 @@ def _user_errors(payload):
 
 
 def _group_exclude(spec):
-    """Add exclusions to every campaign in the group, merged into each campaign's
-    own list. SA's API applies group domainExclusions to the campaigns and
-    replaces their lists, so write per campaign to keep what's there."""
+    """Add exclusions to the campaign group's Domain Exclusion List. SA copies the
+    group list onto each campaign and can replace their own lists, so campaign
+    entries that drop off are put back after."""
     gid = spec["group_id"]
-    camps = _gql("query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{ id channelType "
-                 "inventory{ domainExclusions } } } }", {"g": [gid]})["campaigns"]["nodes"]
-    if not camps:
-        raise RuntimeError(f"No campaigns found in group {gid}")
-    done = 0
-    for c in camps:
+    cq = ("query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{ id channelType "
+          "inventory{ domainExclusions } } } }")
+    g = _gql("query($ids:[ID!]){ campaignGroups(first:1, filterBy:{ids:$ids}){ nodes{ id domainExclusions } } }",
+             {"ids": [gid]})["campaignGroups"]["nodes"]
+    if not g:
+        raise RuntimeError(f"Campaign group {gid} not found")
+    cur = [x for x in (g[0].get("domainExclusions") or []) if x]
+    have = {_norm_excl(x) for x in cur}
+    add = [sa_exclusion(d) for d in spec["domains"] if _norm_excl(d) not in have]
+    if not add:
+        return "Already on the campaign group's exclusion list"
+    before = {c["id"]: [x for x in ((c.get("inventory") or {}).get("domainExclusions") or []) if x]
+              for c in _gql(cq, {"g": [gid]})["campaigns"]["nodes"]}
+    out = _gql("""mutation($i: CampaignGroupInput!){ updateCampaignGroup(input:$i){
+        campaignGroup{ id domainExclusions } userErrors{ message } } }""",
+               {"i": {"id": gid, "domainExclusions": cur + add}})["updateCampaignGroup"]
+    _user_errors(out)
+    saved = {_norm_excl(x) for x in ((out.get("campaignGroup") or {}).get("domainExclusions") or [])}
+    if not all(_norm_excl(d) in saved for d in add):
+        raise RuntimeError("StackAdapt didn't keep the exclusion on the campaign group")
+    for c in _gql(cq, {"g": [gid]})["campaigns"]["nodes"]:
+        now = [x for x in ((c.get("inventory") or {}).get("domainExclusions") or []) if x]
+        seen = {_norm_excl(x) for x in now}
+        lost = [x for x in before.get(c["id"], []) if _norm_excl(x) not in seen]
+        if not lost:
+            continue
         ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
         if not ch:
             raise RuntimeError(f"Campaign {c['id']}: unsupported channel {c.get('channelType')}")
-        cur = [x for x in ((c.get("inventory") or {}).get("domainExclusions") or []) if x]
-        have = {_norm_excl(x) for x in cur}
-        add = [d for d in spec["domains"] if _norm_excl(d) not in have]
-        if not add:
-            continue
-        out = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+        r = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
             campaign{ id } userErrors{ message } } }""",
-                   {"i": {ch: {"id": c["id"], "inventory": {"domainExclusions": cur + add}}}})
-        _user_errors(out["upsertCampaign"])
-        done += 1
-    n = len(camps)
-    if not done:
-        return f"Already excluded on all {n} campaigns in the group"
-    return f"Excluded on {done} of {n} campaigns in the group"
+                 {"i": {ch: {"id": c["id"], "inventory": {"domainExclusions": now + lost}}}})
+        _user_errors(r["upsertCampaign"])
+    return f"Excluded on the campaign group ({len(cur) + len(add)} exclusions)"
+
+
+def sa_exclusion(v):
+    """Entry in the form SA's UI uses: bare domain, or the app's store URL."""
+    k = _norm_excl(v)
+    if k.startswith("ios:"):
+        return "https://itunes.apple.com/app/id" + k[4:]
+    if k.startswith("android:"):
+        return "https://play.google.com/store/apps/details?id=" + k[8:]
+    return k
 
 
 def _norm_excl(v):
