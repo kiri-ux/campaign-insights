@@ -354,7 +354,7 @@ def high_ctr_packages(gql=None):
                    "countryCodes avails bidGuidanceMin bidGuidanceMax } pageInfo { hasNextPage endCursor } } }")["inventoryPackages"]
         for p in conn["nodes"]:
             n = (p.get("name") or "").lower()
-            if ("high ctr" not in n or "political" in n or p.get("isDeprecated") or p.get("isPrivate")
+            if ("high ctr" not in n or "political" in n or not n.rstrip().endswith("| us") or p.get("isDeprecated") or p.get("isPrivate")
                     or "US" not in (p.get("countryCodes") or []) or not int(p.get("avails") or 0)):
                 continue
             for ch, sup in HC_SUPPLY.items():
@@ -396,7 +396,7 @@ def _high_ctr(spec):
     pk = high_ctr_packages()
     out = []
     for cid in spec["campaign_ids"]:
-        c, ch = _camp(cid, "campaignGroup{ id }")
+        c, ch = _camp(cid, "campaignGroup{ id } userMetadata")
         ids = [p["id"] for p in pk.get(str(c["channelType"]).upper()) or []]
         if not ids:
             raise RuntimeError(f"No US High CTR packages for {c['channelType'].lower()}")
@@ -410,20 +410,48 @@ def _high_ctr(spec):
             new = (r.get("copiedCampaignIds") or [None])[0]
             if not new:
                 raise RuntimeError("StackAdapt didn't return the copy")
-            _upsert(ch, {"id": new, "name": (c.get("name") or "")[:180] + " - High CTR", "inventory": inv,
-                         "isDraft": False})
-            state = _check_inventory(new, ids)
-            if state not in ("LIVE", "APPROVED", "PENDING"):
-                r = _gql("""mutation($i: ResumeCampaignsInput!){ resumeCampaigns(input:$i){ userErrors{ message } } }""",
-                         {"i": {"campaignIds": [new]}})["resumeCampaigns"]
-                _user_errors(r)
-                state = _check_inventory(new, ids)
+            state = finish_copy(new, c, ch, ids)
             out.append(f"Copied to {new} with {len(ids)} High CTR packages, {state.lower()}")
         else:
             _upsert(ch, {"id": cid, "inventory": inv})
             _check_inventory(cid, ids)
             out.append(f"{len(ids)} High CTR packages set")
     return "; ".join(out)
+
+
+def _labels(c, label):
+    """The campaign's labels plus one more, as userMetadata key/value pairs."""
+    meta = c.get("userMetadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except ValueError:
+            meta = {}
+    pairs = ([{"key": str(k), "value": str(v)} for k, v in meta.items()] if isinstance(meta, dict)
+             else [{"key": str(m.get("key")), "value": str(m.get("value"))} for m in meta if isinstance(m, dict)])
+    pairs = [p for p in pairs if p["key"] != "label"] + [{"key": "label", "value": label}]
+    return pairs
+
+
+def finish_copy(new, c, ch, ids):
+    """Give a copy the original's name (so reporting merges), a High CTR label,
+    the packages, and take it live (kiri 2026-11-23). Returns its state."""
+    _upsert(ch, {"id": new, "name": c.get("name"), "inventory": {"inventoryPackageIds": ids,
+                 "isInventoryPackagesStrict": True}, "isDraft": False, "userMetadata": _labels(c, "High CTR")})
+    state = _check_inventory(new, ids)
+    if state not in ("LIVE", "APPROVED", "PENDING"):
+        r = _gql("""mutation($i: ResumeCampaignsInput!){ resumeCampaigns(input:$i){ userErrors{ message } } }""",
+                 {"i": {"campaignIds": [new]}})["resumeCampaigns"]
+        _user_errors(r)
+        state = _check_inventory(new, ids)
+    return state
+
+
+def finish_existing_copy(new, original):
+    """Apply finish_copy to a copy made earlier."""
+    c, ch = _camp(original, "campaignGroup{ id } userMetadata")
+    ids = [p["id"] for p in high_ctr_packages().get(str(c["channelType"]).upper()) or []]
+    return finish_copy(new, c, ch, ids)
 
 
 def _check_inventory(cid, ids):
@@ -433,7 +461,7 @@ def _check_inventory(cid, ids):
                           "inventoryPackages(first:100){ nodes{ id } } }")
         inv = c.get("inventory") or {}
         have = {str(n["id"]) for n in (inv.get("inventoryPackages") or {}).get("nodes") or []}
-        if set(ids) <= have and inv.get("isInventoryPackagesStrict"):
+        if set(ids) == have and inv.get("isInventoryPackagesStrict"):
             return ("DRAFT" if c.get("isDraft") else ((c.get("campaignStatus") or {}).get("state") or "?"))
         time.sleep(2)
     raise RuntimeError(f"StackAdapt didn't keep the High CTR packages on campaign {cid}")
