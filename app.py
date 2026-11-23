@@ -2026,7 +2026,7 @@ def api_sa_log():
                 m = re.search(r"-\s*(\d+)\s*$", str(e.get("group") or ""))
                 ln = m.group(1) if m else ""
             return ln
-        rows = [dict(e, line=_line(e)) for e in rows if _line(e) in lines]
+        rows = [dict(e, line=_line(e)) for e in rows if _line(e) in lines and not e.get("dropped")]
     return jsonify({"log": rows[::-1]})
 
 
@@ -2038,7 +2038,7 @@ _LINE_CACHE = {}
 def _pacing_cors(resp):
     """The pacing app shows each line's recs and pushes them from its own page."""
     o = request.headers.get("Origin", "")
-    if o in _PACING_ORIGINS and (request.path.startswith("/api/line_recs/") or request.path.endswith("/sa_push")):
+    if o in _PACING_ORIGINS and (request.path.startswith("/api/line_recs/") or request.path.endswith(("/sa_push", "/sa_drop"))):
         resp.headers["Access-Control-Allow-Origin"] = o
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -2347,6 +2347,33 @@ def live_sa_push():
         return jsonify({"ok": False, "error": "Recs are still loading."}), 404
     rid = str((request.get_json(silent=True) or {}).get("rid") or "")
     return _push_rec((snap.get("recs") or {}).get("groups") or [], rid, "live", lambda: _live_save(snap))
+
+
+@app.route("/recs/sa_drop", methods=["POST", "OPTIONS"])
+def live_sa_drop():
+    """Drop a rec nobody will act on (e.g. sizes the client can't supply), so it
+    stops coming back as open. Logged like a push, with no StackAdapt change."""
+    import datetime as _dt
+    if request.method == "OPTIONS":
+        return ("", 204)
+    snap = _live_load()
+    if not snap:
+        return jsonify({"ok": False, "error": "Recs are still loading."}), 404
+    rid = str((request.get_json(silent=True) or {}).get("rid") or "")
+    groups = (snap.get("recs") or {}).get("groups") or []
+    hit = next(((g, r) for g in groups for r in g.get("recs") or [] if r.get("rid") == rid), None)
+    if hit is None:
+        return jsonify({"ok": False, "error": "Rec not found."}), 404
+    grp, rec = hit
+    rec["pushed"] = {"result": "Dropped", "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
+    _live_save(snap)
+    _log_push({"at": rec["pushed"]["at"], "report": "live", "group_id": str(grp.get("id") or ""),
+               "line": str(grp.get("line") or ""),
+               "group": grp.get("name"), "advertiser": grp.get("advertiser"),
+               "scope": rec.get("scope") or "All in group", "kind": rec.get("kind"),
+               "action": rec.get("action"), "target": rec.get("target"), "result": "Dropped",
+               "dropped": True})
+    return jsonify({"ok": True, "result": "Dropped"})
 
 
 @app.route("/reports/<date>/sa_push", methods=["POST", "OPTIONS"])
