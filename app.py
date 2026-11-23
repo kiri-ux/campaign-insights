@@ -2066,7 +2066,25 @@ def _line_index(date):
     return idx
 
 
-def _line_group(g):
+def _pushed_index():
+    """(group id, kind, target, action) -> newest logged push, so a rec that was
+    already pushed from any page or report shows as done."""
+    out = {}
+    try:
+        with open(_PUSH_LOG, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                k = (str(e.get("group_id") or ""), e.get("kind"), e.get("target"), e.get("action"))
+                out[k] = {"result": e.get("result"), "at": e.get("at")}
+    except OSError:
+        pass
+    return out
+
+
+def _line_group(g, done=None):
     camp_ids = ",".join(str(c.get("id")) for c in g.get("campaigns") or [])
     recs = []
     for r in g.get("recs") or []:
@@ -2081,7 +2099,9 @@ def _line_group(g):
                 link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
         recs.append({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
                                            "impressions", "share", "ctr")}
-                    | {"can_push": bool(p), "link": link, "pushed": r.get("pushed")})
+                    | {"can_push": bool(p), "link": link,
+                       "pushed": r.get("pushed") or (done or {}).get(
+                           (str(g.get("id") or ""), r.get("kind"), r.get("target"), r.get("action")))})
     return ({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
                 "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
                 "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),
@@ -2110,7 +2130,7 @@ def api_line_recs(line):
         return jsonify({"line": line, "report": "live", "updated": snap["at"],
                         "window": f"{r.get('start')} to {r.get('end')}",
                         "push_url": "/recs/sa_push",
-                        "groups": [_line_group(g) for g in hit[1].get(line, [])]})
+                        "groups": [_line_group(g, _pushed_index()) for g in hit[1].get(line, [])]})
     for date in _list_reports():
         idx = _line_index(date)
         if not idx:
@@ -2118,7 +2138,8 @@ def api_line_recs(line):
         groups = idx.get(line)
         if groups is None:
             return jsonify({"line": line, "report": date, "groups": []})
-        out = [_line_group(g) for g in groups]
+        done = _pushed_index()
+        out = [_line_group(g, done) for g in groups]
         return jsonify({"line": line, "report": date, "report_name": _fmt_report_name(date), "groups": out})
     return jsonify({"line": line, "report": None, "groups": []})
 
@@ -2214,8 +2235,10 @@ def _push_rec(groups, rid, label, save):
     grp, rec = hit if hit else (None, None)
     if rec is None:
         return jsonify({"ok": False, "error": "Rec not found."}), 404
-    if rec.get("pushed"):
-        return jsonify({"ok": True, "result": rec["pushed"]["result"], "already": True})
+    prev = rec.get("pushed") or _pushed_index().get(
+        (str(grp.get("id") or ""), rec.get("kind"), rec.get("target"), rec.get("action")))
+    if prev:
+        return jsonify({"ok": True, "result": prev["result"], "already": True})
     try:
         result = sa_push.push(rec)
     except Exception as e:
