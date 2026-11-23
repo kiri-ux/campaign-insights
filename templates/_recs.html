@@ -59,9 +59,34 @@
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
+      <div class="rclog" data-gid="{{ g.id }}" hidden><div class="rclbl">Pushed</div><table class="rcinner"><thead><tr><th>When</th><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th>Result</th></tr></thead><tbody></tbody></table></div>
     </td></tr>
   {% endfor %}
   </tbody></table></div>
+  <h2 id="rc-log">Change log <span class="count" id="rclogn">0</span></h2>
+  <div class="tblwrap"><table id="rclogall" class="rcgrid"><thead><tr><th>When</th><th>Advertiser</th><th>Campaign group</th><th>Action</th><th>Applies to</th><th>Type</th><th>Target</th><th>Result</th></tr></thead><tbody><tr><td colspan="8" class="note">None yet</td></tr></tbody></table></div>
+<script>
+(function(){
+  function td(t){ var c=document.createElement('td'); c.textContent=t==null?'':t; return c; }
+  function when(a){ try{ return new Date(a).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return a; } }
+  fetch('/api/sa_log',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+    var log=j.log||[]; if(!log.length) return;
+    var all=document.querySelector('#rclogall tbody'); all.innerHTML='';
+    document.getElementById('rclogn').textContent=log.length;
+    log.forEach(function(e){
+      var tr=document.createElement('tr');
+      [when(e.at), e.advertiser, e.group, e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===6) c.className='wc'; tr.appendChild(c); });
+      all.appendChild(tr);
+      if(!e.group_id) return;
+      document.querySelectorAll('.rclog[data-gid="'+e.group_id+'"]').forEach(function(box){
+        var r=document.createElement('tr');
+        [when(e.at), e.action, e.scope, e.kind, e.target, e.result].forEach(function(v,i){ var c=td(v); if(i===4) c.className='wc'; r.appendChild(c); });
+        box.querySelector('tbody').appendChild(r); box.hidden=false;
+      });
+    });
+  }).catch(function(){});
+})();
+</script>
 {% endif %}
 {% if rc and rc.groups and report_id %}
 <div class="pmodal" id="pushmodal" hidden><div class="pmbox" role="dialog" aria-modal="true" aria-labelledby="pmtitle">

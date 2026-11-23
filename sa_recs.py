@@ -484,6 +484,40 @@ def _setting_recs(ids, camps, sets, g, goal, multi):
     return recs
 
 
+RANK_PRODUCTS = {"Video", "Native Video"}
+
+
+def _pace_guard(recs, g, ids, camps):
+    """Bids change media cost and delivery, and groups pace to fixed impression
+    goals (kiri 2026-11-23). Bid ups only when the group is behind pace; bid downs
+    only when it isn't. A strong retargeting audience points at the retargeting
+    campaign instead: Raise CPM when behind; when on pace, Rank first for Video /
+    Native Video groups and nothing for click-based groups. Caps and
+    exclusions don't move CPM and always stay."""
+    p = g.get("pacing") or {}
+    behind = bool(p) and (p.get("projected") or 0) < 0.95
+    rt = [i for i in ids if "retarget" in camps[i]["name"].lower()]
+    rt_short = _short(camps[rt[0]]["name"], camps[rt[0]]["advertiser"]) if len(rt) == 1 else None
+    out = []
+    for r in recs:
+        a = r.get("action") or ""
+        if a.startswith("Bid up"):
+            if r["kind"] == "Audience" and r.get("aud_type") == "RetargetingPixel" and rt_short:
+                # Rank only steers Video / Native Video groups; click-based groups
+                # (CBBA) already move impressions to the best-CTR campaign.
+                if len(ids) > 1 and (behind or g.get("product") in RANK_PRODUCTS):
+                    out.append(dict(r, action="Raise CPM" if behind else "Rank first",
+                                    scope=rt_short, key=None))
+                continue
+            if behind:
+                out.append(r)
+            continue
+        if a.startswith("Bid down") and behind:
+            continue
+        out.append(r)
+    return out
+
+
 def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
     """One entry per campaign group. Group recs ("All campaigns") come from the
     group's combined breakdowns; a campaign gets its own rec only when the group
@@ -557,6 +591,8 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         sz = [r for r in recs if r["action"] == "Add sizes"]
         if multi and len(sz) > 1 and len({r["target"] for r in sz}) == 1 and len(sz) == len(ids):
             recs = [r for r in recs if r["action"] != "Add sizes"] + [dict(sz[0], scope="All campaigns")]
+
+        recs = _pace_guard(recs, g, ids, camps)
 
         # On goal: only the upside
         if g["status"] == "On goal":
