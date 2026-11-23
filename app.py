@@ -2111,6 +2111,23 @@ def _line_group(g, done=None):
                 "recs": recs, "sa_url": f"https://www.stackadapt.com/editor?ids={camp_ids}"})
 
 
+@app.route("/api/sa_type/<name>")
+def api_sa_type(name):
+    """Fields of one StackAdapt GraphQL type (read-only introspection), for
+    building pushes against the live schema."""
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,80}", name):
+        return jsonify({"error": "bad name"}), 400
+    q = ("query($n:String!){ __type(name:$n){ name kind "
+         "fields{ name args{ name type{ name kind ofType{ name kind ofType{ name kind } } } } "
+         "type{ name kind ofType{ name kind ofType{ name kind } } } } "
+         "inputFields{ name type{ name kind ofType{ name kind ofType{ name kind } } } } enumValues{ name } } }")
+    try:
+        return jsonify(sa_insights._gql(q, {"n": name}).get("__type"))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/line_recs/<line>")
 def api_line_recs(line):
     """Campaign recs for one line item from the newest report that has them."""
