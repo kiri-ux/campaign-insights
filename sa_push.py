@@ -259,7 +259,71 @@ def _raise_bid(spec):
             campaign{ id } userErrors{ message } } }""", {"i": {ch: {"id": cid, "flights": sent}}})
         _user_errors(r["upsertCampaign"])
         out_msgs.append(f"CPM ${old:.2f} to ${new:.2f}")
-    return "; ".join(out_msgs) + f" on {len(live)} flights"
+    msg = "; ".join(out_msgs) + f" on {len(live)} flights"
+    if spec.get("group_id") and spec.get("share"):
+        msg += ". " + _bump_group_budget(spec["group_id"], spec["share"] * (f - 1))
+    return msg
+
+
+GROUP_FLIGHT_FIELDS = "id name startTime endTime lifetimeBudget dailyBudget isPaceEvenly paceAheadPercent marginRate marginType"
+
+
+def _bump_group_budget(gid, pct):
+    """Raise a Media Cost group's current and future flight budgets by pct (the
+    raised campaign's share x the bid raise), prorated for time left in the
+    current flight and rounded up to the next $10, so impression goals still fit."""
+    import datetime as _dt
+    import math
+    g = _gql("query($ids:[ID!]){ campaignGroups(first:1, filterBy:{ids:$ids}){ nodes{ id budgetType "
+             "flights{ nodes{ " + GROUP_FLIGHT_FIELDS + " } } } } }", {"ids": [gid]})["campaignGroups"]["nodes"]
+    if not g:
+        return "Group budget not changed (group not found)"
+    g = g[0]
+    if str(g.get("budgetType") or "").lower() != "cost":
+        return "Group budget is in impressions, not changed"
+    now = _dt.datetime.now(_dt.timezone.utc)
+    sent, added = [], 0.0
+    for x in (g.get("flights") or {}).get("nodes") or []:
+        y = {k: v for k, v in x.items() if v is not None}
+        st, en = _dt.datetime.fromisoformat(x["startTime"]), _dt.datetime.fromisoformat(x["endTime"])
+        if en >= now and x.get("lifetimeBudget"):
+            left = 1.0 if st >= now else max(0.0, (en - now) / (en - st))
+            add = x["lifetimeBudget"] * pct * left
+            if add > 0:
+                y["lifetimeBudget"] = math.ceil((x["lifetimeBudget"] + add) / 10) * 10
+                added += y["lifetimeBudget"] - x["lifetimeBudget"]
+        sent.append(y)
+    if not added:
+        return "Group budget not changed"
+    r = _gql("""mutation($i: CampaignGroupInput!){ updateCampaignGroup(input:$i){
+        campaignGroup{ id } userErrors{ message } } }""", {"i": {"id": gid, "flights": sent}})
+    _user_errors(r["updateCampaignGroup"])
+    return f"Group budget +${added:,.0f}"
+
+
+def _freq_cap(spec):
+    done, had = 0, 0
+    for cid in spec["campaign_ids"]:
+        nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType freqCapLimit } } }",
+                     {"ids": [cid]})["campaigns"]["nodes"]
+        if not nodes:
+            raise RuntimeError(f"Campaign {cid} not found")
+        c = nodes[0]
+        if c.get("freqCapLimit"):
+            had += 1
+            continue
+        ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+        if not ch:
+            raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
+        r = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+            campaign{ id } userErrors{ message } } }""",
+                 {"i": {ch: {"id": cid, "freqCapLimit": int(spec["limit"]), "freqCapExpiry": int(spec["hours"]) * 60}}})
+        _user_errors(r["upsertCampaign"])
+        done += 1
+    msg = f"Cap {spec['limit']} per {spec['hours']}h set on {done} {'campaign' if done == 1 else 'campaigns'}"
+    if had:
+        msg += f", {had} already capped"
+    return msg
 
 
 def _pause_ads(spec):
@@ -286,6 +350,8 @@ def push(rec):
         return _device_caps(spec)
     if t == "raise_bid":
         return _raise_bid(spec)
+    if t == "freq_cap":
+        return _freq_cap(spec)
     if t == "pause_ads":
         return _pause_ads(spec)
     raise RuntimeError(f"Unknown push type {t}")
