@@ -72,10 +72,12 @@ def list_range(start_iso, end_iso, grace_days=None):
         buckets[kind].append({"name": key.rsplit("/", 1)[-1], "key": key,
                               "date": fdate.isoformat(), "_lm": obj["LastModified"]})
 
+    window = int(os.environ.get("S3_FILE_WINDOW_DAYS", "7"))
     capped = False
     out = []
     for lst in (sites, apps, ttddv, creatives, devices):
         lst.sort(key=lambda m: (m["date"], m["_lm"]))  # oldest first
+        lst = _thin(lst, start, window)
         if len(lst) > cap:
             lst = lst[-cap:]  # keep the newest `cap` files
             capped = True
@@ -83,6 +85,33 @@ def list_range(start_iso, end_iso, grace_days=None):
             m.pop("_lm", None)
         out.append(lst)
     return out[0], out[1], out[2], out[3], out[4], capped
+
+
+def _thin(metas, start, window):
+    """Keep only the files needed to cover [start, newest]. Each export is a
+    rolling `window`-day file dropped the day after its last delivery day, so
+    daily drops overlap ~7x; reading all of them wastes memory and trips the
+    file cap. Greedy cover from the newest file back: at each step take the
+    oldest file that still meets the covered span. Weekly drops keep every file."""
+    import datetime as _dt
+    if len(metas) < 2 or window <= 0:
+        return metas
+    d = lambda m: _dt.date.fromisoformat(m["date"])
+    rest = list(metas)
+    keep = [rest.pop()]  # newest (latest LastModified wins a same-day tie)
+    lo = d(keep[0]) - _dt.timedelta(days=window)
+    while rest and lo > start:
+        # files whose coverage reaches the covered span's start
+        ok = [m for m in rest if d(m) >= lo]
+        pick = min(ok, key=d) if ok else rest[-1]
+        if ok:
+            # same date: prefer the newest upload of that day
+            pick = [m for m in ok if m["date"] == pick["date"]][-1]
+        keep.append(pick)
+        lo = d(pick) - _dt.timedelta(days=window)
+        rest = [m for m in rest if d(m) < d(pick)]
+    keep.sort(key=lambda m: (m["date"], m["_lm"]))
+    return keep
 
 
 def list_available_dates():
