@@ -167,6 +167,64 @@ def _slices(kind, rows, c, goal):
     return recs
 
 
+SUPPLY = {"DESKTOP": "desktop", "MOBILE_WEB": "web", "TABLET_WEB": "web",
+          "MOBILE_APP": "app", "TABLET_APP": "app", "APP": "app"}
+SUPPLY_NAMES = {"desktop": "Desktop", "web": "Mobile web", "app": "In-app"}
+
+
+def _down5(x):
+    return max(0.05, int(x * 20) / 20)
+
+
+def _device_recs(rows, c, goal):
+    """Device recs on SA's supply caps (Desktop / Mobile web / In-app, each a max
+    share of the campaign's impressions). Capping the weak supply moves delivery to
+    the others without paying more. A bid factor is only used when caps can't
+    help: one supply type only, or nothing else is below the campaign's CTR."""
+    ci, cctr = c["impressions"], c["ctr"]
+    sup = {}
+    for key, r in rows.items():
+        k = SUPPLY.get(key)
+        if not k or r["impressions"] <= 0:
+            continue
+        a = sup.setdefault(k, {"name": SUPPLY_NAMES[k], "impressions": 0, "clicks": 0})
+        a["impressions"] += r["impressions"]
+        a["clicks"] += r["clicks"]
+    if len(sup) < 2:
+        return _slices("Device", rows, c, goal)
+    st = {k: dict(a, share=a["impressions"] / ci, ctr=_rate(a["clicks"], a["impressions"]))
+          for k, a in sup.items()}
+    recs = []
+
+    def base(k):
+        a = st[k]
+        return {"kind": "Device", "target": a["name"], "impressions": a["impressions"],
+                "clicks": a["clicks"], "ctr": a["ctr"], "share": a["share"], "key": k}
+
+    weak = [k for k, a in st.items() if a["share"] >= 0.10 and a["impressions"] >= MIN_SITE_IMPR
+            and a["ctr"] < cctr * 0.5]
+    for k in weak:
+        a = st[k]
+        if a["clicks"] == 0:
+            recs.append(dict(base(k), action="Exclude", tone="bad", caps={k: 0}))
+        else:
+            cap = _down5(a["share"] * 0.5)
+            recs.append(dict(base(k), action=f"Cap at {round(cap * 100)}%", tone="warn", caps={k: cap}))
+    if weak:
+        return recs  # the caps already push delivery to the stronger supply
+    for k, a in sorted(st.items(), key=lambda kv: -kv[1]["ctr"]):
+        if not (a["share"] >= 0.05 and cctr > 0 and a["ctr"] >= cctr * 1.5 and a["clicks"] >= 5):
+            continue
+        others = {o: _down5(st[o]["share"] * 0.75) for o in st
+                  if o != k and st[o]["ctr"] < cctr and st[o]["share"] >= 0.10}
+        if others:
+            recs.append(dict(base(k), action="Shift impr here", tone="ok", caps=others))
+        else:
+            recs.append(dict(base(k), action="Bid up 20%", tone="ok"))
+        break
+    return recs
+
+
 def _site_recs(sites, ci, cctr, goal):
     bad = [dict(x, key=k) for k, x in sites.items()
            if x["impressions"] >= MIN_SITE_IMPR
@@ -286,6 +344,7 @@ DEVICE_RULES = {
     "DESKTOP": (["DESKTOP"], None), "CONNECTED_TV": (["CONNECTED_TV"], None),
     "SET_TOP": (["SET_TOP"], None), "CONNECTED_DEVICE": (["CONNECTED_DEVICE"], None),
     "APP": (None, ["IN_APP"]),
+    "desktop": (["DESKTOP"], None), "web": (None, ["MOBILE_WEB"]), "app": (None, ["IN_APP"]),
 }
 BID_OS = {"ANDROID", "IOS", "LINUX", "MACINTOSH", "PLAYSTATION", "ROKU", "TIZEN", "WEBOS",
           "WINDOWS", "WINDOWS_PHONE"}
@@ -317,6 +376,8 @@ def push_spec(r, group_id, campaign_ids, group_wide):
             return {"type": "group_exclude", "group_id": group_id, "domains": [key]}
         return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": 0,
                 "rule": {"domainRule": {"domains": [key]}}}
+    if kind == "Device" and r.get("caps") is not None:
+        return {"type": "device_caps", "campaign_ids": campaign_ids, "caps": r["caps"]}
     if kind == "Creative" and action == "Pause":
         return {"type": "pause_ads", "ad_ids": [key], "campaign_ids": campaign_ids}
     f = _factor(action or "")
@@ -385,7 +446,7 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
 
         # Group-wide recs on the combined breakdowns
         recs = _site_recs(_merge((camp_sites or {}).get(i) for i in ids), gi, gctr, goal)
-        recs += _slices("Device", _merge(br["DEVICE_TYPE"].get(i) for i in ids), g, goal)
+        recs += _device_recs(_merge(br["DEVICE_TYPE"].get(i) for i in ids), g, goal)
         recs += _slices("OS", _merge(br["DEVICE_OS"].get(i) for i in ids), g, goal)
         recs += _slices("Audience", _merge(br["AUDIENCE"].get(i) for i in ids), g, goal)
         multi = len(ids) > 1
@@ -402,7 +463,7 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
             own = []
             if multi and c["impressions"] >= MIN_CAMP_IMPR:
                 own += _site_recs((camp_sites or {}).get(i) or {}, c["impressions"], c["ctr"], goal)
-                own += _slices("Device", br["DEVICE_TYPE"].get(i) or {}, c, goal)
+                own += _device_recs(br["DEVICE_TYPE"].get(i) or {}, c, goal)
                 own += _slices("OS", br["DEVICE_OS"].get(i) or {}, c, goal)
                 own += _slices("Audience", br["AUDIENCE"].get(i) or {}, c, goal)
                 own = [r for r in own if (r["kind"], r["target"]) not in covered]
