@@ -101,18 +101,35 @@ def _group_exclude(spec):
 
 
 def sa_exclusion(v):
-    """Entry in the form SA's UI uses: bare domain, or the app's store URL."""
-    k = _norm_excl(v)
+    """Entry in the form SA's UI uses: bare domain, or the app's store URL.
+    Takes SA report values (storeurl/..., bundle/..., name/...), app:<id>, or a domain."""
+    raw = str(v or "").strip()
+    low = raw.lower()
+    if low.startswith("name/"):
+        raise RuntimeError("SA only reports this app by name, so it can't be excluded by URL")
+    if low.startswith(("bundle/", "app:")):
+        bid = raw.split("/", 1)[1] if low.startswith("bundle/") else raw[4:]
+        if bid.isdigit():
+            return "https://itunes.apple.com/app/id" + bid
+        return "https://play.google.com/store/apps/details?id=" + bid
+    k = _norm_excl(raw)
     if k.startswith("ios:"):
         return "https://itunes.apple.com/app/id" + k[4:]
     if k.startswith("android:"):
         return "https://play.google.com/store/apps/details?id=" + k[8:]
+    if low.startswith("storeurl/"):
+        u = raw[9:]
+        return u if re.match(r"https?://", u) else "https://" + u
     return k
 
 
 def _norm_excl(v):
     """Compare exclusions loosely: SA rewrites app entries to itunes/play URLs."""
     v = str(v).strip().lower().removeprefix("storeurl/")
+    for p in ("bundle/", "app:"):
+        if v.startswith(p):
+            b = v[len(p):]
+            return ("ios:" if b.isdigit() else "android:") + b
     for p in ("https://", "http://", "www."):
         v = v.removeprefix(p)
     m = re.search(r"apple\.com/.*?id(\d+)", v)

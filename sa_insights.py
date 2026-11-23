@@ -213,7 +213,7 @@ def fetch(start, end, blocklist=None, rec_keys=None):
                                   "ctr_impr": 0.0, "ctr_clicks": 0.0})
         i, cl = _num(m.get("impressions")), _num(m.get("clicks"))
         cs = camp_sites.setdefault(cid, {}).setdefault(key, {"name": a.get("title") or dom if is_app else dom,
-                                                            "type": p["type"], "impressions": 0.0, "clicks": 0.0})
+                                                            "type": p["type"], "raw": dom, "impressions": 0.0, "clicks": 0.0})
         cs["impressions"] += i
         cs["clicks"] += cl
         p["impressions"] += i
