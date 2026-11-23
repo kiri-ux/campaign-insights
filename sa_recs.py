@@ -17,8 +17,9 @@ import os
 import re
 import time
 
-MIN_SITE_IMPR = int(os.environ.get("SA_REC_MIN_SITE_IMPR", "2500"))
-MIN_AD_IMPR = int(os.environ.get("SA_REC_MIN_AD_IMPR", "2500"))
+# Every rec row needs this many impressions (kiri 2026-11-23: 5K)
+MIN_SITE_IMPR = int(os.environ.get("SA_REC_MIN_SITE_IMPR", "5000"))
+MIN_AD_IMPR = int(os.environ.get("SA_REC_MIN_AD_IMPR", "5000"))
 MIN_CAMP_IMPR = int(os.environ.get("SA_REC_MIN_CAMP_IMPR", "10000"))
 CORE_SIZES = ["300x250", "728x90", "320x50", "160x600", "300x600"]
 
@@ -161,7 +162,7 @@ def _slices(kind, rows, c, goal):
                 recs.append(dict(base, action="Exclude", tone="bad"))
             else:
                 recs.append(dict(base, action="Bid down 30%", tone="warn"))
-        elif share >= 0.05 and cctr > 0 and ctr >= cctr * 1.5 and r["clicks"] >= 5:
+        elif share >= 0.05 and i >= MIN_SITE_IMPR and cctr > 0 and ctr >= cctr * 1.5 and r["clicks"] >= 5:
             recs.append(dict(base, action="Bid up 20%",
                              tone="ok"))
     return recs
@@ -213,7 +214,8 @@ def _device_recs(rows, c, goal):
     if weak:
         return recs  # the caps already push delivery to the stronger supply
     for k, a in sorted(st.items(), key=lambda kv: -kv[1]["ctr"]):
-        if not (a["share"] >= 0.05 and cctr > 0 and a["ctr"] >= cctr * 1.5 and a["clicks"] >= 5):
+        if not (a["share"] >= 0.05 and a["impressions"] >= MIN_SITE_IMPR and cctr > 0
+                and a["ctr"] >= cctr * 1.5 and a["clicks"] >= 5):
             continue
         others = {o: _down5(st[o]["share"] * 0.75) for o in st
                   if o != k and st[o]["ctr"] < cctr and st[o]["share"] >= 0.10}
@@ -409,6 +411,79 @@ def push_spec(r, group_id, campaign_ids, group_wide):
     return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": f, "rule": rule}
 
 
+MIN_MEASURED = 2000      # measured impressions before a viewability rec
+VIEW_FLOOR = 0.60        # group viewability under this -> DV viewability segment
+FREQ_MAX = 5.0           # impressions per person over the window, no cap set
+CTR_GOAL_CHANNELS = {"DISPLAY", "NATIVE"}
+
+
+def _settings(gql, ids):
+    """Goals and frequency cap per campaign. {} on any failure: these recs are
+    extras and must never take the page down."""
+    out = {}
+    q = ("query($ids:[ID!]){ campaigns(first:50, filterBy:{ids:$ids}){ nodes{ id freqCapLimit "
+         "campaignGoal{ goalsConnection{ nodes{ goalType goalValue } } } } } }")
+    ids = list(ids)
+    try:
+        for k in range(0, len(ids), 50):
+            for n in gql(q, {"ids": ids[k:k + 50]})["campaigns"]["nodes"]:
+                goals = [(x.get("goalType"), x.get("goalValue"))
+                         for x in ((n.get("campaignGoal") or {}).get("goalsConnection") or {}).get("nodes") or []]
+                out[n["id"]] = {"freq_cap": n.get("freqCapLimit"), "goals": goals}
+    except Exception:
+        return {}
+    return out
+
+
+def _goal_fix(goals, goal):
+    types = {t for t, _ in goals}
+    if "MAX_CTR" in types or any(t == "CTR" and v for t, v in goals):
+        return None
+    if "CTR" in types:
+        if types & {"CPA", "MIN_CPA"}:
+            return ("Set CTR target", f"{goal * 100:.2f}%")
+        return ("Switch to Maximize CTR", "CTR target is blank")
+    return ("Add CTR goal", "No CTR goal")
+
+
+def _setting_recs(ids, camps, sets, g, goal, multi):
+    """Goal, frequency and viewability recs. Same fix on every campaign -> one
+    group line; otherwise one line per campaign."""
+    recs = []
+    per = {}
+    for i in ids:
+        c, st = camps[i], sets.get(i)
+        if not st:
+            continue
+        if str(c.get("channel") or "").upper() in CTR_GOAL_CHANNELS:
+            fx = _goal_fix(st["goals"], goal)
+            if fx:
+                per.setdefault(("Goal",) + fx, []).append(i)
+        u = c.get("uniques") or 0
+        freq = c["impressions"] / u if u else 0
+        if not st["freq_cap"] and freq >= FREQ_MAX:
+            per.setdefault(("Frequency", "Add frequency cap", "No cap set"), []).append(i)
+    for (kind, action, target), cids in per.items():
+        if kind == "Frequency":
+            fr = max(camps[i]["impressions"] / camps[i]["uniques"] for i in cids)
+            target = f"{fr:.1f} impr per person"
+        base = {"kind": kind, "action": action, "target": target, "tone": "warn", "key": None,
+                "impressions": 0, "clicks": 0, "ctr": 0, "share": 0}
+        if not multi or len(cids) == len(ids):
+            recs.append(dict(base, scope="All campaigns" if multi else ""))
+        else:
+            recs += [dict(base, scope=_short(camps[i]["name"], camps[i]["advertiser"])) for i in cids]
+    meas = sum(camps[i].get("measured") or 0 for i in ids)
+    if meas >= MIN_MEASURED:
+        v = sum(camps[i].get("viewed") or 0 for i in ids) / meas
+        if v < VIEW_FLOOR:
+            recs.append({"kind": "Viewability", "action": "Add viewability segment",
+                         "target": f"{v * 100:.0f}% viewable. DV All Sizes 70%+ (82031170), +$0.13 CPM",
+                         "tone": "warn", "key": None, "impressions": 0, "clicks": 0, "ctr": 0,
+                         "share": 0, "scope": "All campaigns" if multi else ""})
+    return recs
+
+
 def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
     """One entry per campaign group. Group recs ("All campaigns") come from the
     group's combined breakdowns; a campaign gets its own rec only when the group
@@ -427,6 +502,7 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
     br = _pull(pages, d, gql, page, keep)
     pace = _pacing(gql, list(groups))
     trend = _trend(load_camps, d["to"], set(groups)) if load_camps else {}
+    sets = _settings(gql, keep)
 
     out = []
     for gid, ids in groups.items():
@@ -475,6 +551,8 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
                               "clicks": c["clicks"], "ctr": c["ctr"], "spend": c["spend"],
                               "pct_goal": _rate(c["ctr"], goal)})
 
+        recs += _setting_recs(ids, camps, sets, g, goal, multi)
+
         # Same "Add sizes" on every campaign -> one group line
         sz = [r for r in recs if r["action"] == "Add sizes"]
         if multi and len(sz) > 1 and len({r["target"] for r in sz}) == 1 and len(sz) == len(ids):
@@ -483,7 +561,8 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         # On goal: only the upside
         if g["status"] == "On goal":
             recs = [r for r in recs if r["tone"] == "ok"]
-        order = {"Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4}
+        order = {"Goal": -1, "Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4,
+                 "Frequency": 5, "Viewability": 6}
         recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
         by_short = {_short(camps[i]["name"], camps[i]["advertiser"]): i for i in ids}
         for r in recs:

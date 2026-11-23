@@ -52,7 +52,7 @@ when it has none. DOOH is left out of publishers.
 Details tab of sheet `11IuAikFBQL1bDGx8sOuOQ173SZ69bcbShcQsdtQ_V1k`; CTV, Audio and
 DOOH have no CTR goal) and pulls per-campaign breakdowns by site, device type, OS,
 ad and audience. Rules are in the module docstring. Thresholds:
-`SA_REC_DAYS` 30 (lookback), `SA_REC_MIN_CAMP_IMPR` 10000 (per group), `SA_REC_MIN_SITE_IMPR` 2500, `SA_REC_MIN_AD_IMPR` 2500. One row per campaign group: group-wide recs ("All campaigns") from the combined breakdowns, campaign recs only where the group rec doesn't cover it, live SA pacing, and last 7 days vs prior 7.
+`SA_REC_DAYS` 30 (lookback), `SA_REC_MIN_CAMP_IMPR` 10000 (per group), `SA_REC_MIN_SITE_IMPR` 5000 (every rec row), `SA_REC_MIN_AD_IMPR` 5000. One row per campaign group: group-wide recs ("All in group") from the combined breakdowns, campaign recs only where the group rec doesn't cover it, live SA pacing, and last 7 days vs prior 7. Device recs use SA supply caps (Desktop / Mobile web / In-app) before bid factors. Also flags blank CTR goals, no frequency cap at 5+ impr per person, and group viewability under 60% (DV 70%+ segment).
 Re-render a saved report with `?sa=1` to add recs to it.
 
 **Push** on a rec row writes it to StackAdapt (`sa_push.py`, uses
