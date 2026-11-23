@@ -233,6 +233,7 @@ def _site_recs(sites, ci, cctr, goal):
            and _rate(x["clicks"], x["impressions"]) < min(goal * 0.25, cctr * 0.5)]
     bad.sort(key=lambda x: -x["impressions"])
     return [{"kind": "Site", "target": x["name"], "action": "Exclude", "tone": "bad", "key": x["key"],
+             "site_type": x.get("type", ""), "raw": x.get("raw", ""),
              "impressions": x["impressions"], "clicks": x["clicks"],
              "ctr": _rate(x["clicks"], x["impressions"]), "share": _rate(x["impressions"], ci)}
             for x in bad[:10]]
@@ -244,7 +245,8 @@ def _merge(dicts):
     for d in dicts:
         for k, r in (d or {}).items():
             o = out.setdefault(k, {"name": r["name"], "impressions": 0.0, "clicks": 0.0, "spend": 0.0,
-                                   "size": r.get("size", ""), "type": r.get("type", "")})
+                                   "size": r.get("size", ""), "type": r.get("type", ""),
+                                   "raw": r.get("raw", "")})
             o["impressions"] += r["impressions"]
             o["clicks"] += r["clicks"]
             o["spend"] += r.get("spend", 0.0)
@@ -375,7 +377,10 @@ def push_spec(r, group_id, campaign_ids, group_wide):
         return None
     if kind == "Site":
         if group_wide:
-            return {"type": "group_exclude", "group_id": group_id, "domains": [key]}
+            val = r.get("raw") or (f"app:{key}" if r.get("site_type") == "app" else key)
+            if val.lower().startswith("name/") or (r.get("site_type") == "app" and not re.fullmatch(r"[\w.]+", key)):
+                return None  # SA only names this app; no store URL to exclude
+            return {"type": "group_exclude", "group_id": group_id, "domains": [val]}
         return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": 0,
                 "rule": {"domainRule": {"domains": [key]}}}
     if kind == "Device" and r.get("caps") is not None:
