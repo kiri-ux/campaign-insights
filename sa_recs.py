@@ -390,6 +390,11 @@ def push_spec(r, group_id, campaign_ids, group_wide):
             return None
         return {"type": "raise_bid", "campaign_ids": campaign_ids, "factor": 1.2,
                 "group_id": group_id, "share": round(r.get("camp_share") or 0, 4)}
+    if action in ("Add High CTR inventory", "Copy with High CTR inventory"):
+        return {"type": "high_ctr", "campaign_ids": campaign_ids,
+                "mode": "copy" if action.startswith("Copy") else "edit"} if campaign_ids else None
+    if action == "Add viewability segment":
+        return {"type": "viewability", "campaign_ids": campaign_ids} if campaign_ids else None
     if action == "Add frequency cap":
         return {"type": "freq_cap", "campaign_ids": campaign_ids, "limit": r.get("cap", FREQ_CAP), "hours": 24}
     if not key:
@@ -456,6 +461,28 @@ def _settings(gql, ids):
                 goals = [(x.get("goalType"), x.get("goalValue"))
                          for x in ((n.get("campaignGoal") or {}).get("goalsConnection") or {}).get("nodes") or []]
                 out[n["id"]] = {"freq_cap": n.get("freqCapLimit"), "goals": goals}
+    except Exception:
+        return {}
+    return out
+
+
+def _inventory(gql, ids):
+    """Package setup and current CPM bid per campaign. {} on any failure."""
+    import datetime as dt
+    out, ids = {}, list(ids)
+    q = ("query($ids:[ID!]){ campaigns(first:50, filterBy:{ids:$ids}){ nodes{ id "
+         "inventory{ isInventoryPackagesStrict inventoryPackages(first:100){ nodes{ id } } } "
+         "flights{ nodes{ endTime bidAmount } } } } }")
+    now = dt.datetime.now(dt.timezone.utc)
+    try:
+        for k in range(0, len(ids), 50):
+            for n in gql(q, {"ids": ids[k:k + 50]})["campaigns"]["nodes"]:
+                inv = n.get("inventory") or {}
+                live = [f for f in (n.get("flights") or {}).get("nodes") or []
+                        if f.get("endTime") and dt.datetime.fromisoformat(f["endTime"]) >= now]
+                out[n["id"]] = {"strict": bool(inv.get("isInventoryPackagesStrict")),
+                                "pkgs": {str(p["id"]) for p in (inv.get("inventoryPackages") or {}).get("nodes") or []},
+                                "bid": live[0].get("bidAmount") if live else None}
     except Exception:
         return {}
     return out
@@ -604,6 +631,12 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
     pace = _pacing(gql, list(groups))
     trend = _trend(load_camps, d["to"], set(groups)) if load_camps else {}
     sets = _settings(gql, keep)
+    inv = _inventory(gql, keep)
+    try:
+        import sa_push
+        hc = sa_push.high_ctr_packages(gql)
+    except Exception:
+        hc = {}
 
     out = []
     for gid, ids in groups.items():
@@ -690,11 +723,30 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
                          "impressions": 0, "clicks": 0, "ctr": 0, "share": 0,
                          "scope": "All campaigns" if multi else "", "camp_share": 1.0})
 
+        # High CTR inventory (kiri 2026-11-23): on pace, switch the campaign to SA's
+        # High CTR packages; behind, copy it and switch the copy, so delivery holds.
+        if g["status"] == "Below goal" and hc:
+            behind = bool(g.get("pacing")) and (g["pacing"].get("projected") or 0) < 0.95
+            for i in ids:
+                ch = str(camps[i].get("channel") or "").upper()
+                pk = hc.get(ch) or []
+                st = inv.get(i)
+                if not pk or st is None or (st["strict"] and st["pkgs"] & {p["id"] for p in pk}):
+                    continue
+                lo = min(p["bid"][0] for p in pk if p["bid"][0] is not None)
+                hi = max(p["bid"][1] for p in pk if p["bid"][1] is not None)
+                bid = f" vs ${st['bid']:.2f} CPM" if st.get("bid") else ""
+                recs.append({"kind": "Inventory",
+                             "action": "Copy with High CTR inventory" if behind else "Add High CTR inventory",
+                             "target": f"{len(pk)} US High CTR packages. Bid guidance ${lo:g}-${hi:g}{bid}",
+                             "tone": "warn", "key": None, "impressions": 0, "clicks": 0, "ctr": 0, "share": 0,
+                             "scope": _short(camps[i]["name"], camps[i]["advertiser"]) if multi else ""})
+
         # On goal: only the upside
         if g["status"] == "On goal":
             recs = [r for r in recs if r["tone"] == "ok"]
         order = {"Goal": -1, "Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4,
-                 "Frequency": 5, "Viewability": 6, "Bid": 7}
+                 "Frequency": 5, "Viewability": 6, "Inventory": 6.5, "Bid": 7}
         recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
         by_short = {_short(camps[i]["name"], camps[i]["advertiser"]): i for i in ids}
         for r in recs:

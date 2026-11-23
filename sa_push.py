@@ -333,6 +333,104 @@ def _pause_ads(spec):
     return f"Paused {out.get('pausedCount') or len(spec['ad_ids'])} ad"
 
 
+# High CTR inventory (kiri 2026-11-23): SA's public "High CTR" packages, US,
+# not political, with avails, matched to the campaign's channel.
+HC_SUPPLY = {"DISPLAY": "Display/In-Ad", "VIDEO": "Video", "NATIVE": "Native"}
+VIEW_SEGMENT = "82031170"  # DV All Sizes 70%+ viewability
+_HC_CACHE = {"at": 0, "pkgs": None}
+
+
+def high_ctr_packages(gql=None):
+    """{channel: [{id, name, bid: (min, max), avails}]}, biggest first. Cached 6h."""
+    gql = gql or _gql
+    if _HC_CACHE["pkgs"] is not None and time.time() - _HC_CACHE["at"] < 6 * 3600:
+        return _HC_CACHE["pkgs"]
+    out, after = {k: [] for k in HC_SUPPLY}, None
+    while True:
+        a = "first: 200" + (f', after: "{after}"' if after else "")
+        conn = gql("{ inventoryPackages(" + a + ") { nodes { id name isDeprecated isPrivate supplyTypes "
+                   "countryCodes avails bidGuidanceMin bidGuidanceMax } pageInfo { hasNextPage endCursor } } }")["inventoryPackages"]
+        for p in conn["nodes"]:
+            n = (p.get("name") or "").lower()
+            if ("high ctr" not in n or "political" in n or p.get("isDeprecated") or p.get("isPrivate")
+                    or "US" not in (p.get("countryCodes") or []) or not int(p.get("avails") or 0)):
+                continue
+            for ch, sup in HC_SUPPLY.items():
+                if sup in (p.get("supplyTypes") or []):
+                    out[ch].append({"id": str(p["id"]), "name": " ".join(p["name"].split()),
+                                    "bid": (p.get("bidGuidanceMin"), p.get("bidGuidanceMax")),
+                                    "avails": int(p.get("avails") or 0)})
+        if not conn["pageInfo"]["hasNextPage"]:
+            break
+        after = conn["pageInfo"]["endCursor"]
+    for v in out.values():
+        v.sort(key=lambda x: -x["avails"])
+    _HC_CACHE.update(at=time.time(), pkgs=out)
+    return out
+
+
+def _camp(cid, fields):
+    nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id name channelType "
+                 + fields + " } } }", {"ids": [cid]})["campaigns"]["nodes"]
+    if not nodes:
+        raise RuntimeError(f"Campaign {cid} not found")
+    c = nodes[0]
+    ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+    if not ch:
+        raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
+    return c, ch
+
+
+def _upsert(ch, inp):
+    r = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+        campaign{ id } userErrors{ message } } }""", {"i": {ch: inp}})
+    _user_errors(r["upsertCampaign"])
+
+
+def _high_ctr(spec):
+    """mode "edit": the campaign buys only High CTR packages (strict).
+    mode "copy": copy the campaign into its group and put the packages on the copy,
+    so the original keeps delivering while the group is behind pace."""
+    pk = high_ctr_packages()
+    out = []
+    for cid in spec["campaign_ids"]:
+        c, ch = _camp(cid, "campaignGroup{ id }")
+        ids = [p["id"] for p in pk.get(str(c["channelType"]).upper()) or []]
+        if not ids:
+            raise RuntimeError(f"No US High CTR packages for {c['channelType'].lower()}")
+        inv = {"inventoryPackageIds": ids, "isInventoryPackagesStrict": True}
+        if spec.get("mode") == "copy":
+            r = _gql("""mutation($i: CopyCampaignsInput!){ copyCampaigns(input:$i){
+                copiedCampaignIds userErrors{ message } } }""",
+                     {"i": {"campaignIds": [cid], "campaignGroupId": (c.get("campaignGroup") or {}).get("id")}})["copyCampaigns"]
+            _user_errors(r)
+            new = (r.get("copiedCampaignIds") or [None])[0]
+            if not new:
+                raise RuntimeError("StackAdapt didn't return the copy")
+            _upsert(ch, {"id": new, "name": (c.get("name") or "")[:180] + " - High CTR", "inventory": inv})
+            out.append(f"Copied to {new} with {len(ids)} High CTR packages")
+        else:
+            _upsert(ch, {"id": cid, "inventory": inv})
+            out.append(f"{len(ids)} High CTR packages set")
+    return "; ".join(out)
+
+
+def _viewability(spec):
+    """Add the DV viewability segment to each campaign, keeping its others."""
+    done, had = 0, 0
+    for cid in spec["campaign_ids"]:
+        c, ch = _camp(cid, "audience{ formatPricedSegments(first:100){ nodes{ id } } }")
+        cur = [str(n["id"]) for n in ((c.get("audience") or {}).get("formatPricedSegments") or {}).get("nodes") or []]
+        seg = str(spec.get("segment") or VIEW_SEGMENT)
+        if seg in cur:
+            had += 1
+            continue
+        _upsert(ch, {"id": cid, "audience": {"formatPricedSegmentIds": cur + [seg]}})
+        done += 1
+    msg = f"Viewability segment added to {done} {'campaign' if done == 1 else 'campaigns'}"
+    return msg + (f", {had} already had it" if had else "")
+
+
 def push(rec):
     """Run one rec's push spec. Returns a short result string; raises on failure."""
     spec = rec.get("push")
@@ -354,6 +452,10 @@ def push(rec):
         return _freq_cap(spec)
     if t == "pause_ads":
         return _pause_ads(spec)
+    if t == "high_ctr":
+        return _high_ctr(spec)
+    if t == "viewability":
+        return _viewability(spec)
     raise RuntimeError(f"Unknown push type {t}")
 
 
