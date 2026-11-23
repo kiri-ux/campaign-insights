@@ -251,6 +251,20 @@ def _merge(dicts):
     return out
 
 
+def _slice_impr(r, cid, camp_sites, br):
+    """One campaign's impressions on the slice a group rec targets."""
+    k = r.get("key")
+    if r["kind"] == "Site":
+        return ((camp_sites or {}).get(cid) or {}).get(k, {}).get("impressions", 0)
+    if r["kind"] == "Device":
+        rows = br["DEVICE_TYPE"].get(cid) or {}
+        if k in SUPPLY_NAMES:
+            return sum(x["impressions"] for d, x in rows.items() if SUPPLY.get(d) == k)
+        return (rows.get(k) or {}).get("impressions", 0)
+    attr = {"OS": "DEVICE_OS", "Audience": "AUDIENCE"}.get(r["kind"])
+    return ((br[attr].get(cid) or {}).get(k) or {}).get("impressions", 0) if attr else 0
+
+
 def _creative_recs(ads_d, c):
     recs = []
     ads = [dict(a, key=k) for k, a in (ads_d or {}).items() if a["impressions"] > 0]
@@ -613,21 +627,39 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         multi = len(ids) > 1
         for r in recs:
             r["scope"] = "All campaigns" if multi else ""
-        covered = {(r["kind"], r["target"]) for r in recs}
 
-        # Per-campaign recs the group recs don't cover
-        camp_rows = []
-        for i in sorted(ids, key=lambda i: -camps[i]["impressions"]):
+        # Per-campaign recs. A group rec only stays "All in group" when every
+        # campaign with enough of that slice to judge points the same way
+        # (kiri 2026-11-23); otherwise it's dropped for the per-campaign recs.
+        own_by = {}
+        for i in ids:
             c = dict(camps[i])
             c["ctr"] = _rate(c["clicks"], c["impressions"])
-            c["short"] = _short(c["name"], c["advertiser"])
             own = []
             if multi and c["impressions"] >= MIN_CAMP_IMPR:
                 own += _site_recs((camp_sites or {}).get(i) or {}, c["impressions"], c["ctr"], goal)
                 own += _device_recs(br["DEVICE_TYPE"].get(i) or {}, c, goal)
                 own += _slices("OS", br["DEVICE_OS"].get(i) or {}, c, goal)
                 own += _slices("Audience", br["AUDIENCE"].get(i) or {}, c, goal)
-                own = [r for r in own if (r["kind"], r["target"]) not in covered]
+            own_by[i] = own
+        if multi:
+            keep = []
+            for r in recs:
+                judged = [i for i in ids if camps[i]["impressions"] >= MIN_CAMP_IMPR
+                          and _slice_impr(r, i, camp_sites, br) >= MIN_SITE_IMPR]
+                agree = [i for i in judged if any(o["kind"] == r["kind"] and o.get("key") == r.get("key")
+                                                  and o["tone"] == r["tone"] for o in own_by[i])]
+                if len(agree) == len(judged):
+                    keep.append(r)
+            recs = keep
+        covered = {(r["kind"], r.get("key")) for r in recs}
+
+        camp_rows = []
+        for i in sorted(ids, key=lambda i: -camps[i]["impressions"]):
+            c = dict(camps[i])
+            c["ctr"] = _rate(c["clicks"], c["impressions"])
+            c["short"] = _short(c["name"], c["advertiser"])
+            own = [r for r in own_by[i] if (r["kind"], r.get("key")) not in covered]
             own += _creative_recs(br["AD"].get(i), c)
             for r in own:
                 r["scope"] = c["short"] if multi else ""
