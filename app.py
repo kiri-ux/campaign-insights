@@ -2017,12 +2017,89 @@ def api_sa_log():
     return jsonify({"log": rows[::-1]})
 
 
-@app.route("/reports/<date>/sa_push", methods=["POST"])
+_PACING_ORIGINS = {"https://pacing.reporting.zone", "https://adtini-pacing.onrender.com"}
+_LINE_CACHE = {}
+
+
+@app.after_request
+def _pacing_cors(resp):
+    """The pacing app shows each line's recs and pushes them from its own page."""
+    o = request.headers.get("Origin", "")
+    if o in _PACING_ORIGINS and (request.path.startswith("/api/line_recs/") or request.path.endswith("/sa_push")):
+        resp.headers["Access-Control-Allow-Origin"] = o
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+def _line_index(date):
+    """line id -> campaign group (with recs) for one saved report, cached by mtime."""
+    try:
+        mt = os.path.getmtime(_ctx_path(date))
+    except OSError:
+        return {}
+    hit = _LINE_CACHE.get(date)
+    if hit and hit[0] == mt:
+        return hit[1]
+    ctx = _load_ctx(date) or {}
+    rs = ((ctx.get("sa") or {}).get("recs") or {})
+    idx = {}
+    for g in rs.get("groups") or []:
+        ln = str(g.get("line") or "").strip()
+        if ln:
+            idx.setdefault(ln, []).append(dict(g, _window=rs.get("window") or rs.get("range") or ""))
+    _LINE_CACHE[date] = (mt, idx)
+    return idx
+
+
+@app.route("/api/line_recs/<line>")
+def api_line_recs(line):
+    """Campaign recs for one line item from the newest report that has them."""
+    line = str(line).strip()
+    for date in _list_reports():
+        idx = _line_index(date)
+        if not idx:
+            continue
+        groups = idx.get(line)
+        if groups is None:
+            return jsonify({"line": line, "report": date, "groups": []})
+        out = []
+        for g in groups:
+            camp_ids = ",".join(str(c.get("id")) for c in g.get("campaigns") or [])
+            recs = []
+            for r in g.get("recs") or []:
+                p = r.get("push")
+                link = None
+                if p:
+                    if p.get("type") == "group_exclude" or not p.get("campaign_ids"):
+                        link = f"https://www.stackadapt.com/cg-editor?ids={g.get('id')}"
+                    else:
+                        tab = {"pause_ads": "creative", "device_caps": "inventory", "bid_factor": "strategy",
+                               "raise_bid": "flights", "freq_cap": "targeting"}.get(p.get("type"), "setup")
+                        link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
+                recs.append({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
+                                                   "impressions", "share", "ctr")}
+                            | {"can_push": bool(p), "link": link, "pushed": r.get("pushed")})
+            out.append({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
+                        "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
+                        "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),
+                        "pacing": g.get("pacing"), "trend": g.get("trend"), "window": g.get("_window"),
+                        "campaigns": [{k: c.get(k) for k in ("id", "name", "impressions", "clicks", "ctr", "pct_goal")}
+                                      for c in g.get("campaigns") or []],
+                        "recs": recs, "sa_url": f"https://www.stackadapt.com/editor?ids={camp_ids}"})
+        return jsonify({"line": line, "report": date, "report_name": _fmt_report_name(date), "groups": out})
+    return jsonify({"line": line, "report": None, "groups": []})
+
+
+@app.route("/reports/<date>/sa_push", methods=["POST", "OPTIONS"])
 def reports_sa_push(date):
     """Push one Campaign recs row to StackAdapt. Only rows saved in this report's
     snapshot can be pushed; the page sends the row id, never the change itself."""
     import re
     import sa_push
+    if request.method == "OPTIONS":
+        return ("", 204)
     if not re.fullmatch(_REPORT_ID_RE, date or ""):
         return jsonify({"ok": False, "error": "Bad report id."}), 400
     rid = str((request.get_json(silent=True) or {}).get("rid") or "")
