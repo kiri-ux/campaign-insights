@@ -2171,6 +2171,26 @@ def api_sa_hc_copy():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/sa_archive_draft", methods=["POST"])
+def api_sa_archive_draft():
+    """Archive a campaign only if it is still a draft (a failed copy)."""
+    import sa_push
+    d = request.get_json(silent=True) or request.form
+    cid = str(d.get("campaign") or "")
+    if not cid.isdigit():
+        return jsonify({"ok": False, "error": "campaign id needed"}), 400
+    try:
+        c, _ = sa_push._camp(cid, "isDraft")
+        if not c.get("isDraft"):
+            return jsonify({"ok": False, "error": "Not a draft; left alone"}), 400
+        r = sa_push._gql("""mutation($i: ArchiveCampaignInput!){ archiveCampaign(input:$i){ userErrors{ message } } }""",
+                         {"i": {"id": cid}})["archiveCampaign"]
+        sa_push._user_errors(r)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/line_recs/<line>")
 def api_line_recs(line):
     """Campaign recs for one line item from the newest report that has them."""
