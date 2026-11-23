@@ -206,11 +206,9 @@ def _device_recs(rows, c, goal):
             and a["ctr"] < cctr * 0.5]
     for k in weak:
         a = st[k]
-        if a["clicks"] == 0:
-            recs.append(dict(base(k), action="Exclude", tone="bad", caps={k: 0}))
-        else:
-            cap = _down5(a["share"] * 0.5)
-            recs.append(dict(base(k), action=f"Cap at {round(cap * 100)}%", tone="warn", caps={k: cap}))
+        # Never cut a device to 0: zero clicks gets the 5% floor, not an exclude
+        cap = 0.05 if a["clicks"] == 0 else _down5(a["share"] * 0.5)
+        recs.append(dict(base(k), action=f"Cap at {round(cap * 100)}%", tone="warn", caps={k: cap}))
     if weak:
         return recs  # the caps already push delivery to the stronger supply
     for k, a in sorted(st.items(), key=lambda kv: -kv[1]["ctr"]):
@@ -373,6 +371,8 @@ def push_spec(r, group_id, campaign_ids, group_wide):
       bid_factor:    add a bid factor (100 = no change, 0 = no bids) to each campaign
       pause_ads:     pause ads"""
     kind, action, key = r.get("kind"), r.get("action"), r.get("key")
+    if action == "Raise CPM":
+        return {"type": "raise_bid", "campaign_ids": campaign_ids, "factor": 1.2} if campaign_ids else None
     if not key:
         return None
     if kind == "Site":
