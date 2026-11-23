@@ -372,7 +372,12 @@ def push_spec(r, group_id, campaign_ids, group_wide):
       pause_ads:     pause ads"""
     kind, action, key = r.get("kind"), r.get("action"), r.get("key")
     if action == "Raise CPM":
-        return {"type": "raise_bid", "campaign_ids": campaign_ids, "factor": 1.2} if campaign_ids else None
+        if not campaign_ids:
+            return None
+        return {"type": "raise_bid", "campaign_ids": campaign_ids, "factor": 1.2,
+                "group_id": group_id, "share": round(r.get("camp_share") or 0, 4)}
+    if action == "Add frequency cap":
+        return {"type": "freq_cap", "campaign_ids": campaign_ids, "limit": r.get("cap", FREQ_CAP), "hours": 24}
     if not key:
         return None
     if kind == "Site":
@@ -418,6 +423,8 @@ def push_spec(r, group_id, campaign_ids, group_wide):
 
 MIN_MEASURED = 2000      # measured impressions before a viewability rec
 VIEW_FLOOR = 0.60        # group viewability under this -> DV viewability segment
+FREQ_CAP = 3             # recommended cap: impressions per person per 24 hours
+FREQ_CAP_RT = 5          # retargeting pools are small and warm
 FREQ_MAX = 5.0           # impressions per person over the window, no cap set
 CTR_GOAL_CHANNELS = {"DISPLAY", "NATIVE"}
 
@@ -469,11 +476,16 @@ def _setting_recs(ids, camps, sets, g, goal, multi):
         if not st["freq_cap"] and freq >= FREQ_MAX:
             per.setdefault(("Frequency", "Add frequency cap", "No cap set"), []).append(i)
     for (kind, action, target), cids in per.items():
+        cap = None
         if kind == "Frequency":
             fr = max(camps[i]["impressions"] / camps[i]["uniques"] for i in cids)
-            target = f"{fr:.1f} impr per person"
+            rt = all("retarget" in camps[i]["name"].lower() for i in cids)
+            cap = FREQ_CAP_RT if rt else FREQ_CAP
+            target = f"{fr:.1f} impr per person. Cap {cap} per day"
         base = {"kind": kind, "action": action, "target": target, "tone": "warn", "key": None,
                 "impressions": 0, "clicks": 0, "ctr": 0, "share": 0}
+        if cap:
+            base["cap"] = cap
         if not multi or len(cids) == len(ids):
             recs.append(dict(base, scope="All campaigns" if multi else ""))
         else:
@@ -511,8 +523,10 @@ def _pace_guard(recs, g, ids, camps):
                 # Rank only steers Video / Native Video groups; click-based groups
                 # (CBBA) already move impressions to the best-CTR campaign.
                 if len(ids) > 1 and (behind or g.get("product") in RANK_PRODUCTS):
+                    tot = sum(camps[i]["impressions"] for i in ids) or 1
                     out.append(dict(r, action="Raise CPM" if behind else "Rank first",
-                                    scope=rt_short, key=None))
+                                    scope=rt_short, key=None,
+                                    camp_share=camps[rt[0]]["impressions"] / tot))
                 continue
             if behind:
                 out.append(r)

@@ -55,7 +55,7 @@
         <td class="num">{{ r.impressions|n0 if r.impressions else '—' }}</td>
         <td class="num">{{ r.share|pct(0) if r.impressions else '—' }}</td>
         <td class="num">{{ r.ctr|pct if r.impressions else '—' }}</td>
-        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-gname="{{ g.name }}" data-link="{% if r.push.type == 'group_exclude' or not r.push.campaign_ids %}https://www.stackadapt.com/cg-editor?ids={{ g.id }}{% else %}https://www.stackadapt.com/editor?ids={{ r.push.campaign_ids|join(',') }}&tab={{ {'pause_ads': 'creative', 'device_caps': 'inventory', 'bid_factor': 'strategy', 'raise_bid': 'flights'}.get(r.push.type, 'setup') }}{% endif %}">Push</button>{% endif %}</td>
+        <td class="pushcell">{% if r.pushed %}<span class="pushed" data-tip="{{ r.pushed.at }}">{{ r.pushed.result }}</span>{% elif r.push and report_id %}<button type="button" class="btn ghost sapush" data-rid="{{ r.rid }}" data-gname="{{ g.name }}" data-link="{% if r.push.type == 'group_exclude' or not r.push.campaign_ids %}https://www.stackadapt.com/cg-editor?ids={{ g.id }}{% else %}https://www.stackadapt.com/editor?ids={{ r.push.campaign_ids|join(',') }}&tab={{ {'pause_ads': 'creative', 'device_caps': 'inventory', 'bid_factor': 'strategy', 'raise_bid': 'flights', 'freq_cap': 'targeting'}.get(r.push.type, 'setup') }}{% endif %}">Push</button>{% endif %}</td>
       </tr>{% endfor %}
       </tbody></table>
       {% else %}<p class="note">No changes.</p>{% endif %}
