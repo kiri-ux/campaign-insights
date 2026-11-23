@@ -735,9 +735,16 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
             # the month sat at 73%).
             p = g.get("pacing") or {}
             behind = bool(p) and ((p.get("projected") or 0) < 0.95 or (p.get("daily") or 1) < 0.95)
+            # A copy keeps the original's name: an original whose namesake already
+            # buys High CTR packages has its copy.
+            hc_ids = {p["id"] for v in hc.values() for p in v}
+            copied = {camps[j]["name"] for j in ids
+                      if inv.get(j) and inv[j]["strict"] and inv[j]["pkgs"] & hc_ids}
             for i in ids:
                 ch = str(camps[i].get("channel") or "").upper()
                 pk = hc.get(ch) or []
+                if camps[i]["name"] in copied:
+                    continue
                 st = inv.get(i)
                 if not pk or st is None or (st["strict"] and st["pkgs"] & {p["id"] for p in pk}):
                     continue

@@ -405,6 +405,10 @@ def _high_ctr(spec):
             raise RuntimeError(f"No US High CTR packages for {c['channelType'].lower()}")
         inv = {"inventoryPackageIds": ids, "isInventoryPackagesStrict": True}
         if spec.get("mode") == "copy":
+            have = _existing_copy(c, ids)
+            if have:
+                out.append(f"Copy {have} already buys High CTR packages")
+                continue
             r = _gql("""mutation($i: CopyCampaignsInput!){ copyCampaigns(input:$i){
                 copiedCampaignIds userErrors{ message } } }""",
                      {"i": {"campaignIds": [cid], "campaignGroupId": (c.get("campaignGroup") or {}).get("id"),
@@ -420,6 +424,25 @@ def _high_ctr(spec):
             _check_inventory(cid, ids)
             out.append(f"{len(ids)} High CTR packages set")
     return "; ".join(out)
+
+
+def _existing_copy(c, ids):
+    """A live campaign in the same group, with the same name, already strict on
+    these packages: the copy made earlier."""
+    gid = (c.get("campaignGroup") or {}).get("id")
+    if not gid:
+        return None
+    nodes = _gql("""query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{
+        id name isArchived inventory{ isInventoryPackagesStrict inventoryPackages(first:50){ nodes{ id } } } } } }""",
+                 {"g": [gid]})["campaigns"]["nodes"]
+    want = {str(i) for i in ids}
+    for n in nodes:
+        inv = n.get("inventory") or {}
+        pk = {str(x["id"]) for x in (inv.get("inventoryPackages") or {}).get("nodes") or []}
+        if (str(n["id"]) != str(c["id"]) and not n.get("isArchived") and n.get("name") == c.get("name")
+                and inv.get("isInventoryPackagesStrict") and pk & want):
+            return n["id"]
+    return None
 
 
 def _labels(c, label):
