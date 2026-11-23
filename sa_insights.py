@@ -350,4 +350,12 @@ def fetch_recs(end, active_ids=None, days=None):
         cs["clicks"] += _num(m.get("clicks"))
     out = sa_recs.build(d, camps, camp_sites, _pages, _gql, PAGE, load_camps=_load_camps)
     out["start"], out["end"], out["days"] = d["from"], d["to"], days
+    # Every line's impressions in the window, so a line under the recs minimum
+    # can say so instead of showing nothing.
+    lines = {}
+    for c in camps.values():
+        if c.get("line"):
+            lines[c["line"]] = lines.get(c["line"], 0) + (c.get("impressions") or 0)
+    out["lines"] = lines
+    out["min_impr"] = sa_recs.MIN_CAMP_IMPR
     return out

@@ -2130,6 +2130,8 @@ def api_line_recs(line):
         return jsonify({"line": line, "report": "live", "updated": snap["at"],
                         "window": f"{r.get('start')} to {r.get('end')}",
                         "push_url": "/recs/sa_push",
+                        "impressions": (r.get("lines") or {}).get(line),
+                        "min_impr": r.get("min_impr"),
                         "groups": [_line_group(g, _pushed_index()) for g in hit[1].get(line, [])]})
     for date in _list_reports():
         idx = _line_index(date)
