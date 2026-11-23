@@ -124,6 +124,9 @@ def _rec_keys(ctx):
     return {k for k in keys if k}
 
 
+_SA_LOCK = threading.Lock()
+
+
 def _add_sa(ctx, blocklist=None):
     """StackAdapt delivery for the same window. Never takes the report down."""
     if not sa_insights.configured():
@@ -134,7 +137,8 @@ def _add_sa(ctx, blocklist=None):
     try:
         if blocklist is None:
             blocklist = load_blocklist()
-        ctx["sa"] = sa_insights.fetch(start, end, blocklist, _rec_keys(ctx))
+        with _SA_LOCK:  # one SA pull at a time; two at once run the instance out
+            ctx["sa"] = sa_insights.fetch(start, end, blocklist, _rec_keys(ctx))
     except Exception as e:
         ctx["sa"] = {"error": f"StackAdapt: {e}"}
     return ctx
@@ -2062,10 +2066,51 @@ def _line_index(date):
     return idx
 
 
+def _line_group(g):
+    camp_ids = ",".join(str(c.get("id")) for c in g.get("campaigns") or [])
+    recs = []
+    for r in g.get("recs") or []:
+        p = r.get("push")
+        link = None
+        if p:
+            if p.get("type") == "group_exclude" or not p.get("campaign_ids"):
+                link = f"https://www.stackadapt.com/cg-editor?ids={g.get('id')}"
+            else:
+                tab = {"pause_ads": "creative", "device_caps": "inventory", "bid_factor": "strategy",
+                       "raise_bid": "flights", "freq_cap": "targeting"}.get(p.get("type"), "setup")
+                link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
+        recs.append({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
+                                           "impressions", "share", "ctr")}
+                    | {"can_push": bool(p), "link": link, "pushed": r.get("pushed")})
+    return ({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
+                "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
+                "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),
+                "pacing": g.get("pacing"), "trend": g.get("trend"), "window": g.get("_window"),
+                "campaigns": [{k: c.get(k) for k in ("id", "name", "impressions", "clicks", "ctr", "pct_goal")}
+                              for c in g.get("campaigns") or []],
+                "recs": recs, "sa_url": f"https://www.stackadapt.com/editor?ids={camp_ids}"})
+
+
 @app.route("/api/line_recs/<line>")
 def api_line_recs(line):
     """Campaign recs for one line item from the newest report that has them."""
     line = str(line).strip()
+    snap = _live_load()
+    if snap:
+        hit = _LINE_CACHE.get("__live__")
+        if not hit or hit[0] != snap["at"]:
+            idx = {}
+            for g in (snap.get("recs") or {}).get("groups") or []:
+                ln = str(g.get("line") or "").strip()
+                if ln:
+                    idx.setdefault(ln, []).append(g)
+            hit = (snap["at"], idx)
+            _LINE_CACHE["__live__"] = hit
+        r = snap.get("recs") or {}
+        return jsonify({"line": line, "report": "live", "updated": snap["at"],
+                        "window": f"{r.get('start')} to {r.get('end')}",
+                        "push_url": "/recs/sa_push",
+                        "groups": [_line_group(g) for g in hit[1].get(line, [])]})
     for date in _list_reports():
         idx = _line_index(date)
         if not idx:
@@ -2073,32 +2118,127 @@ def api_line_recs(line):
         groups = idx.get(line)
         if groups is None:
             return jsonify({"line": line, "report": date, "groups": []})
-        out = []
-        for g in groups:
-            camp_ids = ",".join(str(c.get("id")) for c in g.get("campaigns") or [])
-            recs = []
-            for r in g.get("recs") or []:
-                p = r.get("push")
-                link = None
-                if p:
-                    if p.get("type") == "group_exclude" or not p.get("campaign_ids"):
-                        link = f"https://www.stackadapt.com/cg-editor?ids={g.get('id')}"
-                    else:
-                        tab = {"pause_ads": "creative", "device_caps": "inventory", "bid_factor": "strategy",
-                               "raise_bid": "flights", "freq_cap": "targeting"}.get(p.get("type"), "setup")
-                        link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
-                recs.append({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
-                                                   "impressions", "share", "ctr")}
-                            | {"can_push": bool(p), "link": link, "pushed": r.get("pushed")})
-            out.append({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
-                        "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
-                        "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),
-                        "pacing": g.get("pacing"), "trend": g.get("trend"), "window": g.get("_window"),
-                        "campaigns": [{k: c.get(k) for k in ("id", "name", "impressions", "clicks", "ctr", "pct_goal")}
-                                      for c in g.get("campaigns") or []],
-                        "recs": recs, "sa_url": f"https://www.stackadapt.com/editor?ids={camp_ids}"})
+        out = [_line_group(g) for g in groups]
         return jsonify({"line": line, "report": date, "report_name": _fmt_report_name(date), "groups": out})
     return jsonify({"line": line, "report": None, "groups": []})
+
+
+# ---------------------------------------------------------------------------
+# Live campaign recs: straight from StackAdapt on their own schedule, not tied
+# to a saved report (kiri 2026-11-23). Used by the pacing app's line pages.
+# ---------------------------------------------------------------------------
+_LIVE_RECS = os.path.join(REPORTS_DIR, "sa_recs_live.pkl")
+LIVE_RECS_MAX_AGE_H = float(os.environ.get("LIVE_RECS_MAX_AGE_H", "6"))
+
+
+def _live_load():
+    try:
+        import pickle
+        with open(_LIVE_RECS, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _live_save(snap):
+    import pickle
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    tmp = _LIVE_RECS + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(snap, f)
+    os.replace(tmp, _LIVE_RECS)
+    _LINE_CACHE.pop("__live__", None)
+
+
+def _live_refresh():
+    """Pull 30-day recs for campaigns that served in the last 7 days. Pushed
+    marks carry over by row id. Returns False when another SA pull is running."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    if not sa_insights.configured() or not _SA_LOCK.acquire(blocking=False):
+        return False
+    try:
+        end = _dt.datetime.now(ZoneInfo("America/New_York")).date() - _dt.timedelta(days=1)
+        wk = {"from": (end - _dt.timedelta(days=6)).isoformat(), "to": end.isoformat()}
+        active = {k for k, c in sa_insights._load_camps(wk).items() if c.get("impressions")}
+        recs = sa_insights.fetch_recs(end.isoformat(), active)
+        old = _live_load() or {}
+        pushed = {r["rid"]: r["pushed"] for g in ((old.get("recs") or {}).get("groups") or [])
+                  for r in g.get("recs") or [] if r.get("pushed")}
+        for g in recs.get("groups") or []:
+            for r in g.get("recs") or []:
+                if r.get("rid") in pushed:
+                    r["pushed"] = pushed[r["rid"]]
+        _live_save({"at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), "recs": recs})
+        return True
+    except Exception as e:
+        app.logger.warning("live recs refresh failed: %s", e)
+        return False
+    finally:
+        _SA_LOCK.release()
+
+
+def _live_age_h():
+    import datetime as _dt
+    snap = _live_load()
+    if not snap:
+        return None
+    return (_dt.datetime.now(_dt.timezone.utc) - _dt.datetime.fromisoformat(snap["at"])).total_seconds() / 3600
+
+
+def _live_loop():
+    import time as _t
+    _t.sleep(90)  # let the instance settle after a deploy
+    while True:
+        age = _live_age_h()
+        if age is None or age >= LIVE_RECS_MAX_AGE_H:
+            _live_refresh()
+        _t.sleep(1800)
+
+
+if os.environ.get("LIVE_RECS", "1") == "1" and not os.environ.get("PYTEST_CURRENT_TEST"):
+    threading.Thread(target=_live_loop, daemon=True, name="live-recs").start()
+
+
+@app.route("/recs/refresh", methods=["POST"])
+def recs_refresh():
+    threading.Thread(target=_live_refresh, daemon=True).start()
+    return jsonify({"ok": True, "started": True})
+
+
+def _push_rec(groups, rid, label, save):
+    """Push one rec row found in `groups`; `save` persists the pushed mark."""
+    import sa_push
+    import datetime as _dt
+    hit = next(((g, r) for g in groups for r in g.get("recs") or [] if r.get("rid") == rid), None)
+    grp, rec = hit if hit else (None, None)
+    if rec is None:
+        return jsonify({"ok": False, "error": "Rec not found."}), 404
+    if rec.get("pushed"):
+        return jsonify({"ok": True, "result": rec["pushed"]["result"], "already": True})
+    try:
+        result = sa_push.push(rec)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    rec["pushed"] = {"result": result, "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
+    save()
+    _log_push({"at": rec["pushed"]["at"], "report": label, "group_id": str(grp.get("id") or ""),
+               "line": str(grp.get("line") or ""),
+               "group": grp.get("name"), "advertiser": grp.get("advertiser"),
+               "scope": rec.get("scope") or "All in group", "kind": rec.get("kind"),
+               "action": rec.get("action"), "target": rec.get("target"), "result": result})
+    return jsonify({"ok": True, "result": result})
+
+
+@app.route("/recs/sa_push", methods=["POST", "OPTIONS"])
+def live_sa_push():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    snap = _live_load()
+    if not snap:
+        return jsonify({"ok": False, "error": "Recs are still loading."}), 404
+    rid = str((request.get_json(silent=True) or {}).get("rid") or "")
+    return _push_rec((snap.get("recs") or {}).get("groups") or [], rid, "live", lambda: _live_save(snap))
 
 
 @app.route("/reports/<date>/sa_push", methods=["POST", "OPTIONS"])
