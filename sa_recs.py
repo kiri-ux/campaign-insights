@@ -609,6 +609,10 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         for r in recs:
             wide = r["scope"] in ("", "All campaigns")
             cids = list(ids) if wide else [by_short.get(r["scope"])]
+            if wide and r["kind"] == "Audience":
+                # Only campaigns that serve this audience; SA rejects a bid factor
+                # for an audience the campaign doesn't target.
+                cids = [i for i in ids if r.get("key") in (br["AUDIENCE"].get(i) or {})] or cids
             r["push"] = push_spec(r, gid, [c for c in cids if c], wide) if all(cids) else None
             r["rid"] = hashlib.sha1("|".join(str(x) for x in (gid, r["scope"], r["kind"], r.get("key"),
                                                                r["action"])).encode()).hexdigest()[:12]
