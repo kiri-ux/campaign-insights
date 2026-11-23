@@ -1929,6 +1929,12 @@ def reports_index():
     return render_template("reports.html", dates=_list_reports())
 
 
+@app.route("/api/reports")
+def api_reports():
+    """Saved report ids, newest first, for the dashboard's date picker."""
+    return jsonify({"reports": [{"id": d, "name": _fmt_report_name(d)} for d in _list_reports()]})
+
+
 @app.route("/reports/latest")
 def reports_latest():
     dates = _list_reports()

@@ -236,3 +236,29 @@ p.note[style*="border-left"]{border-left:0 !important;border-radius:10px !import
 .pmbox .pmresult{margin:8px 0 16px;font-size:13.5px;font-weight:600;color:var(--green)}
 .pmbtns{display:flex;gap:8px;justify-content:flex-end}
 .pmbtns a.btn{text-decoration:none;color:#fff}
+
+/* date range picker */
+.drp{position:relative}
+.drbtn{display:inline-flex;align-items:center;gap:7px;background:var(--fill);border:1px solid var(--line);border-radius:999px;
+  padding:6px 12px;font:inherit;font-size:13px;color:var(--navy);font-weight:600;cursor:pointer}
+.drbtn:hover{border-color:var(--blue-lt)}
+.drbtn svg{width:15px;height:15px;fill:currentColor}
+.drbtn .chev{width:16px;height:16px;color:var(--muted)}
+.drpop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:320px;max-width:calc(100vw - 32px);background:var(--card);
+  border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(18,58,99,.16);padding:14px}
+.drpre{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.drpre button{background:var(--fill);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font:inherit;
+  font-size:12px;color:var(--navy);cursor:pointer}
+.drpre button:hover,.drpre button.on{background:var(--blue-bg);border-color:var(--blue-lt);color:var(--blue)}
+.drcustom{display:flex;gap:8px}
+.drcustom label{flex:1;display:flex;flex-direction:column;font-size:11px;color:var(--muted);gap:3px}
+.drcustom input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;color:var(--text);min-width:0}
+.drfoot{display:flex;align-items:center;gap:10px;margin-top:12px}
+.drfoot .btn{margin-left:auto}
+.drmsg{font-size:12px;color:var(--muted)}
+.drsaved{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.drlbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.drsaved ul{list-style:none;margin:0;padding:0;max-height:200px;overflow:auto}
+.drsaved li a{display:block;padding:4px 6px;border-radius:6px;font-size:12.5px;text-decoration:none;color:var(--text)}
+.drsaved li a:hover{background:var(--fill)}
+.drsaved li a.on{color:var(--blue);font-weight:600}
