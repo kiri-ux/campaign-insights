@@ -2067,7 +2067,7 @@ def _line_index(date):
 
 
 def _pushed_index():
-    """(group id, kind, target, action) -> newest logged push, so a rec that was
+    """(group id, scope, kind, target, action) -> newest logged push, so a rec that was
     already pushed from any page or report shows as done."""
     out = {}
     try:
@@ -2077,7 +2077,8 @@ def _pushed_index():
                     e = json.loads(line)
                 except ValueError:
                     continue
-                k = (str(e.get("group_id") or ""), e.get("kind"), e.get("target"), e.get("action"))
+                k = (str(e.get("group_id") or ""), e.get("scope") or "All in group",
+                     e.get("kind"), e.get("target"), e.get("action"))
                 out[k] = {"result": e.get("result"), "at": e.get("at")}
     except OSError:
         pass
@@ -2101,7 +2102,8 @@ def _line_group(g, done=None):
                                            "impressions", "share", "ctr")}
                     | {"can_push": bool(p), "link": link,
                        "pushed": r.get("pushed") or (done or {}).get(
-                           (str(g.get("id") or ""), r.get("kind"), r.get("target"), r.get("action")))})
+                           (str(g.get("id") or ""), r.get("scope") or "All in group",
+                            r.get("kind"), r.get("target"), r.get("action")))})
     return ({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
                 "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
                 "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),
@@ -2318,7 +2320,8 @@ def _push_rec(groups, rid, label, save):
     if rec is None:
         return jsonify({"ok": False, "error": "Rec not found."}), 404
     prev = rec.get("pushed") or _pushed_index().get(
-        (str(grp.get("id") or ""), rec.get("kind"), rec.get("target"), rec.get("action")))
+        (str(grp.get("id") or ""), rec.get("scope") or "All in group",
+         rec.get("kind"), rec.get("target"), rec.get("action")))
     if prev:
         return jsonify({"ok": True, "result": prev["result"], "already": True})
     try:
