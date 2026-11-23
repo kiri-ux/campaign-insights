@@ -67,7 +67,8 @@ CAMPAIGNS = """query($d: DateRangeInput, $after: String) {
   campaignDelivery(date: $d, granularity: TOTAL, dataType: TABLE) {
     ... on CampaignDeliveryOutcome { records(first: 500, after: $after) {
       nodes { campaign { id name channelType advertiser { id name } campaignGroup { id name } }
-        metrics { impressionsBigint clicksBigint cost conversionsBigint } }
+        metrics { impressionsBigint clicksBigint cost conversionsBigint measuredImpressionsBigint
+          viewedMeasuredImpressionsBigint uniqueImpressionsBigint } }
       pageInfo { hasNextPage endCursor } } } } }"""
 
 PUBLISHERS = """query($d: DateRangeInput, $after: String) {
@@ -150,6 +151,9 @@ def _load_camps(d):
             "product": product, "line": line,
             "impressions": _num(m.get("impressionsBigint")), "clicks": _num(m.get("clicksBigint")),
             "spend": _num(m.get("cost")), "conversions": _num(m.get("conversionsBigint")),
+            "measured": _num(m.get("measuredImpressionsBigint")),
+            "viewed": _num(m.get("viewedMeasuredImpressionsBigint")),
+            "uniques": _num(m.get("uniqueImpressionsBigint")),
         }
     camps = {k: v for k, v in camps.items()
              if v["impressions"] > 0 and not any(str(v[f]).lower().startswith("test_")
