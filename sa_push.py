@@ -441,8 +441,17 @@ def finish_copy(new, c, ch, ids):
     the packages, and take it live (kiri 2026-11-23). Returns its state."""
     # The copy's flights come over without end dates, which SA then rejects, so
     # it gets the original's flights.
-    flights = [{k: v for k, v in f.items() if v is not None and k != "id"}
-               for f in (c.get("flights") or {}).get("nodes") or []]
+    # Only current and future ones, starting now: SA won't start a new campaign in the past.
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    flights = []
+    for f in (c.get("flights") or {}).get("nodes") or []:
+        if not f.get("endTime") or _dt.datetime.fromisoformat(f["endTime"]) < now:
+            continue
+        y = {k: v for k, v in f.items() if v is not None and k != "id"}
+        if _dt.datetime.fromisoformat(y["startTime"]) < now:
+            y["startTime"] = (now + _dt.timedelta(minutes=10)).replace(microsecond=0).isoformat()
+        flights.append(y)
     inp = {"id": new, "name": c.get("name"), "inventory": {"inventoryPackageIds": ids,
            "isInventoryPackagesStrict": True}, "isDraft": False, "userMetadata": _labels(c, "High CTR")}
     if flights:
