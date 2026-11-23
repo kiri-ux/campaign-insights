@@ -733,14 +733,11 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
                 st = inv.get(i)
                 if not pk or st is None or (st["strict"] and st["pkgs"] & {p["id"] for p in pk}):
                     continue
-                lo = min(p["bid"][0] for p in pk if p["bid"][0] is not None)
-                hi = max(p["bid"][1] for p in pk if p["bid"][1] is not None)
-                bid = f" vs ${st['bid']:.2f} CPM" if st.get("bid") else ""
                 # Retargeting pools are small: always a copy, never an edit (kiri 2026-11-23).
                 copy = behind or "retarget" in camps[i]["name"].lower()
                 recs.append({"kind": "Inventory",
                              "action": "Copy with High CTR inventory" if copy else "Add High CTR inventory",
-                             "target": f"{len(pk)} US High CTR packages. Bid guidance ${lo:g}-${hi:g}{bid}",
+                             "target": f"{len(pk)} US High CTR packages",
                              "tone": "warn", "key": None, "impressions": 0, "clicks": 0, "ctr": 0, "share": 0,
                              "scope": _short(camps[i]["name"], camps[i]["advertiser"]) if multi else ""})
 

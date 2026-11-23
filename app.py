@@ -2134,12 +2134,27 @@ def api_sa_campaign(cid):
     if not str(cid).isdigit():
         return jsonify({"error": "bad id"}), 400
     q = ("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id name isDraft isArchived "
-         "campaignStatus{ state status } channelType "
+         "campaignStatus{ state status } channelType userMetadata "
          "inventory{ isInventoryPackagesStrict inventoryPackages(first:100){ nodes{ id name } } } } } }")
     try:
         return jsonify(sa_insights._gql(q, {"ids": [cid]})["campaigns"]["nodes"])
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/sa_hc_finish", methods=["POST"])
+def api_sa_hc_finish():
+    """Finish a High CTR copy made before the copy rules changed: original name,
+    High CTR label, US packages, live."""
+    import sa_push
+    d = request.get_json(silent=True) or request.form
+    new, orig = str(d.get("copy") or ""), str(d.get("original") or "")
+    if not (new.isdigit() and orig.isdigit()):
+        return jsonify({"ok": False, "error": "copy and original ids needed"}), 400
+    try:
+        return jsonify({"ok": True, "state": sa_push.finish_existing_copy(new, orig)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 @app.route("/api/line_recs/<line>")
