@@ -72,7 +72,7 @@ def list_range(start_iso, end_iso, grace_days=None):
         buckets[kind].append({"name": key.rsplit("/", 1)[-1], "key": key,
                               "date": fdate.isoformat(), "_lm": obj["LastModified"]})
 
-    window = int(os.environ.get("S3_FILE_WINDOW_DAYS", "7"))
+    window = int(os.environ.get("S3_FILE_WINDOW_DAYS", "3"))
     capped = False
     out = []
     for lst in (sites, apps, ttddv, creatives, devices):
@@ -88,10 +88,11 @@ def list_range(start_iso, end_iso, grace_days=None):
 
 
 def _thin(metas, start, window):
-    """Keep only the files needed to cover [start, newest]. Each export is a
-    rolling `window`-day file dropped the day after its last delivery day, so
-    daily drops overlap ~7x; reading all of them wastes memory and trips the
-    file cap. Greedy cover from the newest file back: at each step take the
+    """Keep only the files needed to cover [start, newest]. Daily exports are
+    rolling `window`-day files (Last 3 days, since 2026-11-23) dropped the day
+    after their last delivery day, so they overlap; reading all of them wastes
+    memory and trips the file cap. Older weekly 7-day files have no overlap at
+    this window, so every one of them is kept. Greedy cover from the newest file back: at each step take the
     oldest file that still meets the covered span. Weekly drops keep every file."""
     import datetime as _dt
     if len(metas) < 2 or window <= 0:
