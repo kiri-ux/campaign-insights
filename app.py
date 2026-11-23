@@ -2157,6 +2157,20 @@ def api_sa_hc_finish():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/sa_hc_copy", methods=["POST"])
+def api_sa_hc_copy():
+    """Run the High CTR copy for one campaign (same as the rec's Push)."""
+    import sa_push
+    d = request.get_json(silent=True) or request.form
+    cid = str(d.get("campaign") or "")
+    if not cid.isdigit():
+        return jsonify({"ok": False, "error": "campaign id needed"}), 400
+    try:
+        return jsonify({"ok": True, "result": sa_push._high_ctr({"campaign_ids": [cid], "mode": "copy"})})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/line_recs/<line>")
 def api_line_recs(line):
     """Campaign recs for one line item from the newest report that has them."""
