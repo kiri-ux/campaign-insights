@@ -487,7 +487,9 @@ def _setting_recs(ids, camps, sets, g, goal, multi):
                 per.setdefault(("Goal",) + fx, []).append(i)
         u = c.get("uniques") or 0
         freq = c["impressions"] / u if u else 0
-        if not st["freq_cap"] and freq >= FREQ_MAX:
+        # No cap on a campaign that's beating goal: it's the one we want to serve
+        # more (kiri 2026-11-23, Keystone retargeting).
+        if not st["freq_cap"] and freq >= FREQ_MAX and _rate(c["clicks"], c["impressions"]) < goal:
             per.setdefault(("Frequency", "Add frequency cap", "No cap set"), []).append(i)
     for (kind, action, target), cids in per.items():
         cap = None
