@@ -11,6 +11,7 @@ in StackAdapt is dropped:
 """
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -59,20 +60,47 @@ def _user_errors(payload):
 
 
 def _group_exclude(spec):
+    """Add exclusions to every campaign in the group, merged into each campaign's
+    own list. SA's API applies group domainExclusions to the campaigns and
+    replaces their lists, so write per campaign to keep what's there."""
     gid = spec["group_id"]
-    g = _gql("query($ids:[ID!]){ campaignGroups(first:1, filterBy:{ids:$ids}){ nodes{ id domainExclusions } } }",
-             {"ids": [gid]})["campaignGroups"]["nodes"]
-    if not g:
-        raise RuntimeError(f"Campaign group {gid} not found")
-    cur = [x for x in (g[0].get("domainExclusions") or []) if x]
-    add = [d for d in spec["domains"] if d.lower() not in {c.lower() for c in cur}]
-    if not add:
-        return "Already excluded"
-    out = _gql("""mutation($i: CampaignGroupInput!){ updateCampaignGroup(input:$i){
-        campaignGroup{ id domainExclusions } userErrors{ message } } }""",
-               {"i": {"id": gid, "domainExclusions": cur + add}})["updateCampaignGroup"]
-    _user_errors(out)
-    return f"Excluded on the campaign group ({len(cur) + len(add)} exclusions)"
+    camps = _gql("query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{ id channelType "
+                 "inventory{ domainExclusions } } } }", {"g": [gid]})["campaigns"]["nodes"]
+    if not camps:
+        raise RuntimeError(f"No campaigns found in group {gid}")
+    done = 0
+    for c in camps:
+        ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+        if not ch:
+            raise RuntimeError(f"Campaign {c['id']}: unsupported channel {c.get('channelType')}")
+        cur = [x for x in ((c.get("inventory") or {}).get("domainExclusions") or []) if x]
+        have = {_norm_excl(x) for x in cur}
+        add = [d for d in spec["domains"] if _norm_excl(d) not in have]
+        if not add:
+            continue
+        out = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+            campaign{ id } userErrors{ message } } }""",
+                   {"i": {ch: {"id": c["id"], "inventory": {"domainExclusions": cur + add}}}})
+        _user_errors(out["upsertCampaign"])
+        done += 1
+    n = len(camps)
+    if not done:
+        return f"Already excluded on all {n} campaigns in the group"
+    return f"Excluded on {done} of {n} campaigns in the group"
+
+
+def _norm_excl(v):
+    """Compare exclusions loosely: SA rewrites app entries to itunes/play URLs."""
+    v = str(v).strip().lower().removeprefix("storeurl/")
+    for p in ("https://", "http://", "www."):
+        v = v.removeprefix(p)
+    m = re.search(r"apple\.com/.*?id(\d+)", v)
+    if m:
+        return "ios:" + m.group(1)
+    m = re.search(r"play\.google\.com/.*?id=([\w.]+)", v)
+    if m:
+        return "android:" + m.group(1)
+    return v
 
 
 def _rule_in(rule_name, val):
@@ -125,7 +153,7 @@ def _bid_factor(spec, name):
 def _device_caps(spec):
     """Lower SA's supply caps (max share of impressions; 0 = none). Each cap only
     ever goes down from what's set."""
-    done = []
+    done, lower = [], []
     for cid in spec["campaign_ids"]:
         nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType "
                      "inventory{ deviceCaps{ app desktop web } } } } }", {"ids": [cid]})["campaigns"]["nodes"]
@@ -137,6 +165,9 @@ def _device_caps(spec):
             raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
         cur = (c.get("inventory") or {}).get("deviceCaps") or {"app": 1, "desktop": 1, "web": 1}
         caps = {k: float(cur.get(k, 1)) for k in ("app", "desktop", "web")}
+        if all(caps[k] <= float(v) for k, v in spec["caps"].items()):
+            lower.append(cid)
+            continue
         for k, v in spec["caps"].items():
             caps[k] = min(caps[k], float(v))
         out = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
@@ -145,7 +176,10 @@ def _device_caps(spec):
         done.append(cid)
     names = {"desktop": "Desktop", "web": "Mobile web", "app": "In-app"}
     what = ", ".join(f"{names[k]} {round(v * 100)}%" for k, v in spec["caps"].items())
-    return f"Caps set ({what}) on {len(done)} {'campaign' if len(done) == 1 else 'campaigns'}"
+    msg = f"Caps set ({what}) on {len(done)} {'campaign' if len(done) == 1 else 'campaigns'}"
+    if lower:
+        msg += f", {len(lower)} already lower"
+    return msg
 
 
 def _pause_ads(spec):
