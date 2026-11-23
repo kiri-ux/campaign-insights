@@ -10,7 +10,7 @@ Rules (all on the report window):
     with >= 5% of impressions and CTR 1.5x the campaign's gets "Bid up".
   - Ads: pause an ad with >= MIN_AD_IMPR impressions and CTR under half the best
     ad's; flag campaigns running one ad, and display campaigns missing core sizes.
-  - Audiences: same split as devices: "Remove" or "Shift budget to".
+  - Audiences: same split as devices: "Remove" or "Bid up 20%".
 """
 import hashlib
 import os
@@ -162,7 +162,7 @@ def _slices(kind, rows, c, goal):
             else:
                 recs.append(dict(base, action="Bid down 30%", tone="warn"))
         elif share >= 0.05 and cctr > 0 and ctr >= cctr * 1.5 and r["clicks"] >= 5:
-            recs.append(dict(base, action="Shift budget to" if kind == "Audience" else "Bid up 20%",
+            recs.append(dict(base, action="Bid up 20%",
                              tone="ok"))
     return recs
 
