@@ -26,6 +26,7 @@
   <div class="drp" id="drp">
     <button type="button" class="drbtn" id="drBtn" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10zm0-2h12V6H6z"/></svg><span>{{ t.date_range if t else 'Select dates' }}</span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg></button>
     <div class="drpop" id="drPop" hidden>
+      <div class="drthru" id="drThru"></div>
       <div class="drpre">
         <button type="button" data-p="7">Last 7 days</button>
         <button type="button" data-p="14">Last 14 days</button>
@@ -587,14 +588,25 @@
   if(!btn) return;
   var S=document.getElementById('drStart'), E=document.getElementById('drEnd'),
       msg=document.getElementById('drMsg'), go=document.getElementById('drGo'),
-      list=document.getElementById('drList'), cur={{ (report_id or '')|tojson }}, loaded=false;
+      list=document.getElementById('drList'), lbl=btn.querySelector('span'),
+      cur={{ (report_id or '')|tojson }}, loaded=false, busy=false, maxDay='';
   function iso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
-  function setRange(s,e){ S.value=iso(s); E.value=iso(e); msg.textContent=''; }
+  function fmt(x){ var p=x.split('-'); return (+p[1])+'/'+(+p[2]); }
   var m=/^(\d{4}-\d{2}-\d{2})(?:_to_(\d{4}-\d{2}-\d{2}))?$/.exec(cur);
   if(m){ S.value=m[1]; E.value=m[2]||m[1]; }
+  var days=fetch('/ui/s3dates',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+    var d=(j.days||[]).map(function(x){return x.date;});
+    if(d.length){ S.min=E.min=d[0]; S.max=E.max=maxDay=d[d.length-1]; }
+  }).catch(function(){});
+  var lastDay='';
+  var reps=fetch('/api/reports',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+    (j.reports||[]).forEach(function(r){ var e=r.id.split('_to_').pop(); if(e>lastDay) lastDay=e; });
+    if(lastDay) document.getElementById('drThru').textContent='Data through '+fmt(lastDay);
+    return j;
+  });
   function load(){
     if(loaded) return; loaded=true;
-    fetch('/api/reports',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+    reps.then(function(j){
       list.innerHTML='';
       (j.reports||[]).slice(0,15).forEach(function(r){
         var li=document.createElement('li'), a=document.createElement('a');
@@ -604,41 +616,66 @@
       });
       if(!list.children.length) list.innerHTML='<li class="drmsg">None</li>';
     }).catch(function(){ list.innerHTML='<li class="drmsg">Could not load</li>'; });
-    fetch('/ui/s3dates',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
-      var d=(j.days||[]).map(function(x){return x.date;});
-      if(d.length){ S.min=E.min=d[0]; S.max=E.max=d[d.length-1]; }
-    }).catch(function(){});
   }
-  function toggle(open){ pop.hidden=!open; btn.setAttribute('aria-expanded',open); if(open) load(); }
+  function toggle(open){ if(!open && busy) return; pop.hidden=!open; btn.setAttribute('aria-expanded',open); if(open) load(); }
   btn.onclick=function(e){ e.stopPropagation(); toggle(pop.hidden); };
   document.addEventListener('click',function(e){ if(!pop.hidden && !pop.contains(e.target)) toggle(false); });
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') toggle(false); });
+  function done(text){ busy=false; go.disabled=false; pop.classList.remove('busy'); lbl.textContent=lbl.dataset.orig||lbl.textContent; msg.textContent=text; }
+  function waitFor(id, tries){
+    // the pull can outlast the request; watch for the saved report instead
+    return fetch('/api/reports',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      if((j.reports||[]).some(function(r){return r.id===id;})){ location.href='/reports/'+id; return; }
+      if(tries<=0){ done('Still pulling. Check Saved reports in a few minutes.'); return; }
+      return new Promise(function(r){setTimeout(r,15000);}).then(function(){ return waitFor(id,tries-1); });
+    }).catch(function(){ return new Promise(function(r){setTimeout(r,15000);}).then(function(){ return waitFor(id,tries-1); }); });
+  }
+  function view(){
+    if(busy) return;
+    Promise.all([days,reps.catch(function(){})]).then(function(){
+      var s=S.value, e=E.value;
+      if(!s||!e){ msg.textContent='Pick a start and end date'; return; }
+      if(s>e){ var x=s; s=e; e=x; }
+      if(maxDay && s>maxDay){ msg.textContent='No data after '+fmt(maxDay); return; }
+      if(maxDay && e>maxDay){ e=maxDay; E.value=e; }
+      var id=s+'_to_'+e;
+      if(id===cur){ msg.textContent='Already showing '+fmt(s)+' - '+fmt(e); return; }
+      busy=true; go.disabled=true; pop.classList.add('busy');
+      lbl.dataset.orig=lbl.textContent; lbl.textContent='Loading '+fmt(s)+' - '+fmt(e)+'...';
+      msg.textContent='Loading...';
+      fetch('/reports/'+id,{method:'HEAD',cache:'no-store'}).then(function(r){
+        if(r.ok){ location.href='/reports/'+id; return; }
+        msg.textContent='Pulling '+fmt(s)+' - '+fmt(e)+'. Takes a few minutes.';
+        var pulled=fetch('/ui/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start:s,end:e})})
+          .then(function(r){return r.json();})
+          .then(function(j){
+            if(j.view_url){
+              if(j.date===cur){ done('No newer data. Data runs through '+fmt(cur.split('_to_').pop())+'.'); return; }
+              location.href=j.view_url; return;
+            }
+            if(j.busy){ msg.textContent='Another pull is running. Waiting for it...'; return waitFor(id,40); }
+            done(j.message||j.error||'Pull failed');
+          })
+          .catch(function(){ return waitFor(id,40); });
+        return pulled;
+      }).catch(function(err){ done('Pull failed'); console.log(err); });
+    });
+  }
   pop.querySelectorAll('.drpre button').forEach(function(b){
     b.onclick=function(){
+      if(busy) return;
       var p=b.dataset.p, t=new Date(); t.setDate(t.getDate()-1);
-      if(p==='tm'){ setRange(new Date(t.getFullYear(),t.getMonth(),1),t); }
-      else if(p==='lm'){ setRange(new Date(t.getFullYear(),t.getMonth()-1,1),new Date(t.getFullYear(),t.getMonth(),0)); }
-      else { var s=new Date(t); s.setDate(s.getDate()-(+p)+1); setRange(s,t); }
+      if(lastDay){ var q=lastDay.split('-'); t=new Date(+q[0],q[1]-1,+q[2]); }
+      var s, e=t;
+      if(p==='tm'){ s=new Date(t.getFullYear(),t.getMonth(),1); }
+      else if(p==='lm'){ s=new Date(t.getFullYear(),t.getMonth()-1,1); e=new Date(t.getFullYear(),t.getMonth(),0); }
+      else { s=new Date(t); s.setDate(s.getDate()-(+p)+1); }
+      S.value=iso(s); E.value=iso(e);
       pop.querySelectorAll('.drpre button').forEach(function(x){x.classList.toggle('on',x===b);});
+      view();
     };
   });
-  go.onclick=function(){
-    var s=S.value, e=E.value;
-    if(!s||!e){ msg.textContent='Pick a start and end date'; return; }
-    if(s>e){ var x=s; s=e; e=x; }
-    var id=s+'_to_'+e;
-    if(id===cur){ toggle(false); return; }
-    go.disabled=true; msg.textContent='Loading...';
-    fetch('/reports/'+id,{method:'HEAD',cache:'no-store'}).then(function(r){
-      if(r.ok){ location.href='/reports/'+id; return; }
-      msg.textContent='Pulling '+s+' to '+e+'. Takes a few minutes.';
-      return fetch('/ui/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start:s,end:e})})
-        .then(function(r){return r.json();}).then(function(j){
-          if(j.view_url){ location.href=j.view_url; return; }
-          go.disabled=false; msg.textContent=j.message||j.error||'Pull failed';
-        });
-    }).catch(function(err){ go.disabled=false; msg.textContent='Pull failed'; console.log(err); });
-  };
+  go.onclick=view;
 })();
 </script>
 </body>
