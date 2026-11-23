@@ -354,7 +354,7 @@ def high_ctr_packages(gql=None):
                    "countryCodes avails bidGuidanceMin bidGuidanceMax } pageInfo { hasNextPage endCursor } } }")["inventoryPackages"]
         for p in conn["nodes"]:
             n = (p.get("name") or "").lower()
-            if ("high ctr" not in n or "political" in n or not n.rstrip().endswith("| us") or p.get("isDeprecated") or p.get("isPrivate")
+            if ("high ctr" not in n or "political" in n or p.get("isDeprecated") or p.get("isPrivate")
                     or "US" not in (p.get("countryCodes") or []) or not int(p.get("avails") or 0)):
                 continue
             for ch, sup in HC_SUPPLY.items():
@@ -396,7 +396,7 @@ def _high_ctr(spec):
     pk = high_ctr_packages()
     out = []
     for cid in spec["campaign_ids"]:
-        c, ch = _camp(cid, "campaignGroup{ id } userMetadata")
+        c, ch = _camp(cid, ORIG_FIELDS)
         ids = [p["id"] for p in pk.get(str(c["channelType"]).upper()) or []]
         if not ids:
             raise RuntimeError(f"No US High CTR packages for {c['channelType'].lower()}")
@@ -433,11 +433,21 @@ def _labels(c, label):
     return pairs
 
 
+ORIG_FIELDS = "campaignGroup{ id } userMetadata flights{ nodes{ " + FLIGHT_FIELDS + " } }"
+
+
 def finish_copy(new, c, ch, ids):
     """Give a copy the original's name (so reporting merges), a High CTR label,
     the packages, and take it live (kiri 2026-11-23). Returns its state."""
-    _upsert(ch, {"id": new, "name": c.get("name"), "inventory": {"inventoryPackageIds": ids,
-                 "isInventoryPackagesStrict": True}, "isDraft": False, "userMetadata": _labels(c, "High CTR")})
+    # The copy's flights come over without end dates, which SA then rejects, so
+    # it gets the original's flights.
+    flights = [{k: v for k, v in f.items() if v is not None and k != "id"}
+               for f in (c.get("flights") or {}).get("nodes") or []]
+    inp = {"id": new, "name": c.get("name"), "inventory": {"inventoryPackageIds": ids,
+           "isInventoryPackagesStrict": True}, "isDraft": False, "userMetadata": _labels(c, "High CTR")}
+    if flights:
+        inp["flights"] = flights
+    _upsert(ch, inp)
     state = _check_inventory(new, ids)
     if state not in ("LIVE", "APPROVED", "PENDING"):
         r = _gql("""mutation($i: ResumeCampaignsInput!){ resumeCampaigns(input:$i){ userErrors{ message } } }""",
@@ -449,7 +459,7 @@ def finish_copy(new, c, ch, ids):
 
 def finish_existing_copy(new, original):
     """Apply finish_copy to a copy made earlier."""
-    c, ch = _camp(original, "campaignGroup{ id } userMetadata")
+    c, ch = _camp(original, ORIG_FIELDS)
     ids = [p["id"] for p in high_ctr_packages().get(str(c["channelType"]).upper()) or []]
     return finish_copy(new, c, ch, ids)
 
