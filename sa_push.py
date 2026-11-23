@@ -338,6 +338,8 @@ def _pause_ads(spec):
 HC_SUPPLY = {"DISPLAY": "Display/In-Ad", "VIDEO": "Video", "NATIVE": "Native"}
 VIEW_SEGMENT = "82031170"  # DV All Sizes 70%+ viewability
 _HC_CACHE = {"at": 0, "pkgs": None}
+COPY_FIELDS = ["BID_AND_GOAL_BUDGET", "BID_AND_GOAL_DATE", "BID_AND_GOAL_TYPE", "CREATIVE", "GOALS", "INVENTORY",
+               "STRATEGY", "TARGETING_AUDIENCE", "TARGETING_FREQUENCY", "TARGETING_GEO", "TRACKING"]
 
 
 def high_ctr_packages(gql=None):
@@ -402,17 +404,39 @@ def _high_ctr(spec):
         if spec.get("mode") == "copy":
             r = _gql("""mutation($i: CopyCampaignsInput!){ copyCampaigns(input:$i){
                 copiedCampaignIds userErrors{ message } } }""",
-                     {"i": {"campaignIds": [cid], "campaignGroupId": (c.get("campaignGroup") or {}).get("id")}})["copyCampaigns"]
+                     {"i": {"campaignIds": [cid], "campaignGroupId": (c.get("campaignGroup") or {}).get("id"),
+                            "fields": COPY_FIELDS}})["copyCampaigns"]
             _user_errors(r)
             new = (r.get("copiedCampaignIds") or [None])[0]
             if not new:
                 raise RuntimeError("StackAdapt didn't return the copy")
-            _upsert(ch, {"id": new, "name": (c.get("name") or "")[:180] + " - High CTR", "inventory": inv})
-            out.append(f"Copied to {new} with {len(ids)} High CTR packages")
+            _upsert(ch, {"id": new, "name": (c.get("name") or "")[:180] + " - High CTR", "inventory": inv,
+                         "isDraft": False})
+            state = _check_inventory(new, ids)
+            if state not in ("LIVE", "APPROVED", "PENDING"):
+                r = _gql("""mutation($i: ResumeCampaignsInput!){ resumeCampaigns(input:$i){ userErrors{ message } } }""",
+                         {"i": {"campaignIds": [new]}})["resumeCampaigns"]
+                _user_errors(r)
+                state = _check_inventory(new, ids)
+            out.append(f"Copied to {new} with {len(ids)} High CTR packages, {state.lower()}")
         else:
             _upsert(ch, {"id": cid, "inventory": inv})
+            _check_inventory(cid, ids)
             out.append(f"{len(ids)} High CTR packages set")
     return "; ".join(out)
+
+
+def _check_inventory(cid, ids):
+    """Read the campaign back; raise unless the packages stuck. Returns its state."""
+    for attempt in range(3):
+        c, _ = _camp(cid, "isDraft campaignStatus{ state } inventory{ isInventoryPackagesStrict "
+                          "inventoryPackages(first:100){ nodes{ id } } }")
+        inv = c.get("inventory") or {}
+        have = {str(n["id"]) for n in (inv.get("inventoryPackages") or {}).get("nodes") or []}
+        if set(ids) <= have and inv.get("isInventoryPackagesStrict"):
+            return ("DRAFT" if c.get("isDraft") else ((c.get("campaignStatus") or {}).get("state") or "?"))
+        time.sleep(2)
+    raise RuntimeError(f"StackAdapt didn't keep the High CTR packages on campaign {cid}")
 
 
 def _viewability(spec):
