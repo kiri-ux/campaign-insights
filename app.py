@@ -2128,6 +2128,20 @@ def api_sa_type(name):
         return jsonify({"error": str(e)}), 502
 
 
+@app.route("/api/sa_campaign/<cid>")
+def api_sa_campaign(cid):
+    """Read-only: a campaign's draft/status and inventory packages, to check a push."""
+    if not str(cid).isdigit():
+        return jsonify({"error": "bad id"}), 400
+    q = ("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id name isDraft isArchived "
+         "campaignStatus{ state status } channelType "
+         "inventory{ isInventoryPackagesStrict inventoryPackages(first:100){ nodes{ id name } } } } } }")
+    try:
+        return jsonify(sa_insights._gql(q, {"ids": [cid]})["campaigns"]["nodes"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/line_recs/<line>")
 def api_line_recs(line):
     """Campaign recs for one line item from the newest report that has them."""

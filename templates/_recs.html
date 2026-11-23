@@ -99,7 +99,8 @@ function pushModal(result, gname, url){
   var m=document.getElementById('pushmodal');
   m.querySelector('.pmgroup').textContent=gname||'';
   m.querySelector('.pmresult').textContent=result||'';
-  document.getElementById('pmlink').href=url;
+  var cp=/Copied to (\d+)/.exec(result||'');
+  document.getElementById('pmlink').href=cp ? 'https://www.stackadapt.com/editor?ids='+cp[1]+'&tab=inventory' : url;
   m.hidden=false;
 }
 (function(){
