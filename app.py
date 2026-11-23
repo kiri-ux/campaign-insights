@@ -1994,6 +1994,32 @@ def reports_rerender(date):
 _PUSH_LOG = os.path.join(REPORTS_DIR, "sa_push_log.jsonl")
 
 
+_AMEND_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sa_push_amend.json")
+
+
+def _amends():
+    """Corrections to logged pushes for changes made later outside the app (say a
+    push undone and redone another way): match on group, scope and action."""
+    try:
+        with open(_AMEND_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def _amend_for(group_id, scope, action):
+    for a in _amends():
+        if (str(a.get("group_id")) == str(group_id or "") and a.get("scope") == (scope or "All in group")
+                and a.get("action") == action):
+            return a.get("set") or {}
+    return None
+
+
+def _amend(e):
+    fix = _amend_for(e.get("group_id"), e.get("scope"), e.get("action"))
+    return dict(e, **fix) if fix else e
+
+
 def _log_push(entry):
     """Append one StackAdapt change to the push log (kept beside the reports, so
     it survives deploys and covers every report)."""
@@ -2013,7 +2039,7 @@ def api_sa_log():
         with open(_PUSH_LOG, encoding="utf-8") as f:
             for line in f:
                 try:
-                    rows.append(json.loads(line))
+                    rows.append(_amend(json.loads(line)))
                 except ValueError:
                     pass
     except OSError:
@@ -2079,7 +2105,7 @@ def _pushed_index():
                     continue
                 k = (str(e.get("group_id") or ""), e.get("scope") or "All in group",
                      e.get("kind"), e.get("target"), e.get("action"))
-                out[k] = {"result": e.get("result"), "at": e.get("at")}
+                out[k] = {"result": _amend(e).get("result"), "at": e.get("at")}
     except OSError:
         pass
     return out
@@ -2098,12 +2124,17 @@ def _line_group(g, done=None):
                 tab = {"pause_ads": "creative", "device_caps": "inventory", "bid_factor": "strategy",
                        "raise_bid": "flights", "freq_cap": "targeting", "high_ctr": "inventory", "viewability": "targeting"}.get(p.get("type"), "setup")
                 link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
-        recs.append({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
-                                           "impressions", "share", "ctr")}
-                    | {"can_push": bool(p), "link": link,
-                       "pushed": r.get("pushed") or (done or {}).get(
-                           (str(g.get("id") or ""), r.get("scope") or "All in group",
-                            r.get("kind"), r.get("target"), r.get("action")))})
+        row = ({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
+                                      "impressions", "share", "ctr")}
+               | {"can_push": bool(p), "link": link,
+                  "pushed": r.get("pushed") or (done or {}).get(
+                      (str(g.get("id") or ""), r.get("scope") or "All in group",
+                       r.get("kind"), r.get("target"), r.get("action")))})
+        fix = row["pushed"] and _amend_for(g.get("id"), r.get("scope"), r.get("action"))
+        if fix:
+            row["action"] = fix.get("action", row["action"])
+            row["pushed"] = dict(row["pushed"], result=fix.get("result", row["pushed"].get("result")))
+        recs.append(row)
     return ({"id": g.get("id"), "name": g.get("name"), "product": g.get("product"),
                 "status": g.get("status"), "ctr": g.get("ctr"), "goal": g.get("goal"),
                 "pct_goal": g.get("pct_goal"), "impressions": g.get("impressions"),

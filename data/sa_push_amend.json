@@ -1,0 +1,42 @@
+[
+ {
+  "note": "NRF 139578 (kiri 11/23): in-place High CTR edits undone, copies made instead",
+  "group_id": "519721",
+  "scope": "B2B Decision Makers/Retail Industry Behavioral Native Video",
+  "action": "Add High CTR inventory",
+  "set": {
+   "action": "Copy with High CTR inventory",
+   "result": "Copied to 3477398 with 3 High CTR packages, live. Add label High CTR in SA"
+  }
+ },
+ {
+  "note": "NRF 139578 (kiri 11/23): in-place High CTR edits undone, copies made instead",
+  "group_id": "519721",
+  "scope": "Decision Makers - Retail Industry Content Native Video",
+  "action": "Add High CTR inventory",
+  "set": {
+   "action": "Copy with High CTR inventory",
+   "result": "Copied to 3477399 with 3 High CTR packages, live. Add label High CTR in SA"
+  }
+ },
+ {
+  "note": "NRF 139578 (kiri 11/23): in-place High CTR edits undone, copies made instead",
+  "group_id": "519721",
+  "scope": "Retargeting Lookalike Native Video",
+  "action": "Add High CTR inventory",
+  "set": {
+   "action": "Copy with High CTR inventory",
+   "result": "Copied to 3477400 with 3 High CTR packages, live. Add label High CTR in SA"
+  }
+ },
+ {
+  "note": "NRF 139578 (kiri 11/23): in-place High CTR edits undone, copies made instead",
+  "group_id": "519721",
+  "scope": "Retargeting Native Video",
+  "action": "Add High CTR inventory",
+  "set": {
+   "action": "Copy with High CTR inventory",
+   "result": "Copied to 3477401 with 3 High CTR packages, live. Add label High CTR in SA"
+  }
+ }
+]
