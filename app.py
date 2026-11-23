@@ -1987,6 +1987,36 @@ def reports_rerender(date):
     return jsonify({"ok": True}), 200
 
 
+_PUSH_LOG = os.path.join(REPORTS_DIR, "sa_push_log.jsonl")
+
+
+def _log_push(entry):
+    """Append one StackAdapt change to the push log (kept beside the reports, so
+    it survives deploys and covers every report)."""
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        with open(_PUSH_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        app.logger.warning("Push log write failed: %s", e)
+
+
+@app.route("/api/sa_log")
+def api_sa_log():
+    """Every StackAdapt change pushed from the app, newest first."""
+    rows = []
+    try:
+        with open(_PUSH_LOG, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return jsonify({"log": rows[::-1]})
+
+
 @app.route("/reports/<date>/sa_push", methods=["POST"])
 def reports_sa_push(date):
     """Push one Campaign recs row to StackAdapt. Only rows saved in this report's
@@ -1998,7 +2028,8 @@ def reports_sa_push(date):
     rid = str((request.get_json(silent=True) or {}).get("rid") or "")
     ctx = _load_ctx(date)
     groups = (((ctx or {}).get("sa") or {}).get("recs") or {}).get("groups") or []
-    rec = next((r for g in groups for r in g.get("recs") or [] if r.get("rid") == rid), None)
+    hit = next(((g, r) for g in groups for r in g.get("recs") or [] if r.get("rid") == rid), None)
+    grp, rec = hit if hit else (None, None)
     if rec is None:
         return jsonify({"ok": False, "error": "Rec not found in this report."}), 404
     if rec.get("pushed"):
@@ -2010,6 +2041,10 @@ def reports_sa_push(date):
     import datetime as _dt
     rec["pushed"] = {"result": result, "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
     _save_ctx(date, ctx)
+    _log_push({"at": rec["pushed"]["at"], "report": date, "group_id": str(grp.get("id") or ""),
+               "group": grp.get("name"), "advertiser": grp.get("advertiser"),
+               "scope": rec.get("scope") or "All in group", "kind": rec.get("kind"),
+               "action": rec.get("action"), "target": rec.get("target"), "result": result})
     try:  # keep the saved page in step so the row stays marked after a reload
         path = os.path.join(REPORTS_DIR, f"insights-{date}.html")
         st = os.stat(path)
@@ -2195,6 +2230,13 @@ def sa_block_push():
         out = sa_push.block_advertisers(entries)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "skipped": skipped}), 200
+    import datetime as _dt
+    _log_push({"at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+               "report": str((request.get_json(silent=True) or {}).get("report") or ""),
+               "group_id": "", "group": "", "advertiser": "All advertisers", "scope": "Account",
+               "kind": "Block list", "action": "Exclude", "target": ", ".join(entries[:50])
+               + (f" +{len(entries) - 50} more" if len(entries) > 50 else ""),
+               "result": f"{len(entries)} excluded on {out['advertisers']} of {out['total']} advertisers"})
     return jsonify(dict(out, ok=True, skipped=skipped))
 
 

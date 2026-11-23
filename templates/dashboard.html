@@ -459,7 +459,7 @@
     if(!rows.length){ if(msg) msg.textContent='Nothing checked.'; return; }
     if(btn.dataset.state!=='confirm'){ btn.dataset.state='confirm'; btn.textContent='Confirm '+rows.length+' to StackAdapt'; btn.classList.add('go'); return; }
     btn.dataset.state=''; btn.disabled=true; btn.textContent='Pushing...'; if(msg) msg.textContent='';
-    fetch('/sa_block_push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows})})
+    fetch('/sa_block_push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows, report:{{ (report_id or '')|tojson }}})})
       .then(function(r){return r.json();})
       .then(function(d){
         if(msg){
