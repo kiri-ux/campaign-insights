@@ -134,6 +134,7 @@
     {% if block_rows %}
     <div class="blkbar">
       {% if has_blocklist %}<button class="btn go" id="pushbtn" type="button" onclick="pushBlocklist()">Push checked to block sheet</button>{% endif %}
+      {% if sa_ok %}<button class="btn ghost" id="sablkbtn" type="button" onclick="pushSaBlocks()">Push checked to StackAdapt</button>{% endif %}
       <button class="btn ghost" type="button" onclick="downloadSelected()">Download CSV</button>
       <span id="pushmsg" class="note"></span>
       <span id="reviewstate" class="note"></span>
@@ -443,9 +444,37 @@
     a.download='to_block.csv'; document.body.appendChild(a); a.click(); a.remove();
   }
   window.downloadSelected=downloadSelected;
+  // Pushes act on the rows in the active filter (all pages), not hidden ones.
+  function inFilter(cb){
+    var a=document.querySelector('.seg[data-filter-for="blkgrid"] .fbtn.active'), f=a?a.dataset.f:'';
+    if(!f) return true;
+    var tr=cb.closest('tr'); return (' '+(tr.dataset.tags||'')+' ').indexOf(' '+f+' ')>=0;
+  }
+  function pushSaBlocks(){
+    var btn=document.getElementById('sablkbtn'), msg=document.getElementById('pushmsg');
+    var rows=[];
+    document.querySelectorAll('.blkchk').forEach(function(cb){
+      if(cb.checked && inFilter(cb)) rows.push({kind:cb.dataset.kind, val:cb.dataset.val, products:cb.dataset.products||''});
+    });
+    if(!rows.length){ if(msg) msg.textContent='Nothing checked.'; return; }
+    if(btn.dataset.state!=='confirm'){ btn.dataset.state='confirm'; btn.textContent='Confirm '+rows.length+' to StackAdapt'; btn.classList.add('go'); return; }
+    btn.dataset.state=''; btn.disabled=true; btn.textContent='Pushing...'; if(msg) msg.textContent='';
+    fetch('/sa_block_push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(msg){
+          msg.textContent = d.ok ? ('StackAdapt: '+d.added+' excluded on '+d.advertisers+' of '+d.total+' advertisers'+(d.skipped?('. Skipped '+d.skipped):'')+'.') : ('Error: '+(d.error||'push failed'));
+          msg.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+        }
+      })
+      .catch(function(e){ if(msg){ msg.textContent='Error: '+e; msg.style.color='var(--red)'; } })
+      .finally(function(){ btn.disabled=false; btn.textContent='Push checked to StackAdapt'; btn.classList.remove('go'); });
+  }
+  window.pushSaBlocks=pushSaBlocks;
   function pushBlocklist(){
     var placements=[], excluded=[];
     document.querySelectorAll('.blkchk').forEach(function(cb){
+      if(!inFilter(cb)) return;
       var p={type:cb.dataset.kind, name:cb.dataset.name, value:cb.dataset.val, products:cb.dataset.products||'',
              flag:cb.dataset.flag||'', tabs:routeTabs(cb.dataset.products, cb.dataset.flag)};
       (cb.checked?placements:excluded).push(p);

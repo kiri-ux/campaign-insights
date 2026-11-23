@@ -2176,6 +2176,28 @@ def push_blocklist():
         return jsonify({"ok": False, "error": f"Push failed: {e}"}), 502
 
 
+@app.route("/sa_block_push", methods=["POST"])
+def sa_block_push():
+    """Checked To-block rows -> every StackAdapt advertiser's domain exclusions.
+    Social Mirror-only rows are skipped (SA has no SM-only list), as are apps
+    with no usable App ID."""
+    import sa_push
+    rows = (request.get_json(silent=True) or {}).get("rows") or []
+    entries, skipped = [], 0
+    for r in rows:
+        prods = [p.strip() for p in str(r.get("products") or "").split(",") if p.strip()]
+        e = sa_push.exclusion_entry(r.get("kind"), r.get("val"))
+        if not e or (prods and all(p == "Social Mirror" for p in prods)):
+            skipped += 1
+            continue
+        entries.append(e)
+    try:
+        out = sa_push.block_advertisers(entries)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "skipped": skipped}), 200
+    return jsonify(dict(out, ok=True, skipped=skipped))
+
+
 # ---------------------------------------------------------------- AdLib direct
 # Read AdLib's own S3 bucket rather than a hand-made TapClicks export, so the
 # dashboard has current data without anyone exporting anything — and so the two

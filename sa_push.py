@@ -144,3 +144,59 @@ def push(rec):
     if t == "pause_ads":
         return _pause_ads(spec)
     raise RuntimeError(f"Unknown push type {t}")
+
+
+def exclusion_entry(kind, val):
+    """Block-list value -> StackAdapt domainExclusions entry, or None.
+    Sites go in as bare domains. Apps use SA's store-URL form (seen on existing
+    group exclusions): iOS numeric ids and Android bundle ids."""
+    v = str(val or "").strip()
+    if not v or " " in v:
+        return None
+    if kind == "site":
+        return v.lower().removeprefix("www.")
+    if v.isdigit():
+        return f"storeurl/apps.apple.com/us/app/id{v}"
+    if "." in v:
+        return f"storeurl/play.google.com/store/apps/details?id={v}"
+    return None
+
+
+def _split(vals):
+    out = []
+    for x in vals or []:
+        out.extend(s.strip() for s in str(x).split("\n") if s.strip())
+    return out
+
+
+def block_advertisers(entries):
+    """Add entries to every StackAdapt advertiser's domain exclusions (read,
+    merge, write; nothing already there is dropped). SA's account-wide Global
+    Exclusion List isn't in the API, so the advertiser level is the widest one
+    we can write. Returns {"advertisers": n_updated, "total": n, "added": k}."""
+    entries = [e for e in dict.fromkeys(entries) if e]
+    if not entries:
+        raise RuntimeError("Nothing StackAdapt can take")
+    if not configured():
+        raise RuntimeError("Add STACKADAPT_TOKEN to the adlib-insights service on Render")
+    advs, after = [], None
+    while True:
+        page = _gql("query($a:String){ advertisers(first:100, after:$a){ nodes{ id domainExclusions } "
+                    "pageInfo{ hasNextPage endCursor } } }", {"a": after})["advertisers"]
+        advs += page["nodes"]
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
+    updated = 0
+    for a in advs:
+        cur = _split(a.get("domainExclusions"))
+        have = {c.lower() for c in cur}
+        add = [e for e in entries if e.lower() not in have]
+        if not add:
+            continue
+        out = _gql("""mutation($i: AdvertiserInput!){ updateAdvertiser(input:$i){
+            advertiser{ id } userErrors{ message } } }""",
+                   {"i": {"id": a["id"], "domainExclusions": cur + add}})["updateAdvertiser"]
+        _user_errors(out)
+        updated += 1
+    return {"advertisers": updated, "total": len(advs), "added": len(entries)}
