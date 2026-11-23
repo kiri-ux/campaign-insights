@@ -2014,6 +2014,15 @@ def api_sa_log():
                     pass
     except OSError:
         pass
+    lines = {x.strip() for x in (request.args.get("lines") or "").split(",") if x.strip()}
+    if lines:
+        def _line(e):
+            ln = str(e.get("line") or "")
+            if not ln:
+                m = re.search(r"-\s*(\d+)\s*$", str(e.get("group") or ""))
+                ln = m.group(1) if m else ""
+            return ln
+        rows = [dict(e, line=_line(e)) for e in rows if _line(e) in lines]
     return jsonify({"log": rows[::-1]})
 
 
@@ -2119,6 +2128,7 @@ def reports_sa_push(date):
     rec["pushed"] = {"result": result, "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
     _save_ctx(date, ctx)
     _log_push({"at": rec["pushed"]["at"], "report": date, "group_id": str(grp.get("id") or ""),
+               "line": str(grp.get("line") or ""),
                "group": grp.get("name"), "advertiser": grp.get("advertiser"),
                "scope": rec.get("scope") or "All in group", "kind": rec.get("kind"),
                "action": rec.get("action"), "target": rec.get("target"), "result": result})
