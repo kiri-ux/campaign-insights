@@ -142,17 +142,28 @@ def _pull(pages, d, gql, page, wanted):
     return out
 
 
+def _breakout(rows, ci, top=8):
+    """Every slice of the breakdown, biggest first, so a cut can be weighed
+    against how the rest of the inventory does."""
+    out = [{"name": r["name"], "impressions": r["impressions"], "share": r["impressions"] / ci if ci else 0,
+            "ctr": _rate(r["clicks"], r["impressions"])}
+           for r in sorted(rows.values(), key=lambda r: -r["impressions"]) if r["impressions"] > 0]
+    return out[:top]
+
+
 def _slices(kind, rows, c, goal):
     """Device / OS / audience recs for one campaign or group."""
     recs = []
     ci, cctr = c["impressions"], c["ctr"]
+    brk = _breakout(rows, ci)
     for key, r in sorted(rows.items(), key=lambda kv: -kv[1]["impressions"]):
         i = r["impressions"]
         if i <= 0:
             continue
         share, ctr = i / ci, _rate(r["clicks"], i)
         base = {"kind": kind, "target": r["name"], "impressions": i, "clicks": r["clicks"],
-                "ctr": ctr, "share": share, "key": key, "aud_type": r.get("type", "")}
+                "ctr": ctr, "share": share, "key": key, "aud_type": r.get("type", ""),
+                "breakout": brk}
         if share > 0.5:
             continue  # most of the campaign; cutting it isn't a tweak
         if share >= 0.10 and i >= MIN_SITE_IMPR and ctr < cctr * 0.5:
@@ -196,11 +207,12 @@ def _device_recs(rows, c, goal):
     st = {k: dict(a, share=a["impressions"] / ci, ctr=_rate(a["clicks"], a["impressions"]))
           for k, a in sup.items()}
     recs = []
+    brk = _breakout(sup, ci)
 
     def base(k):
         a = st[k]
         return {"kind": "Device", "target": a["name"], "impressions": a["impressions"],
-                "clicks": a["clicks"], "ctr": a["ctr"], "share": a["share"], "key": k}
+                "clicks": a["clicks"], "ctr": a["ctr"], "share": a["share"], "key": k, "breakout": brk}
 
     weak = [k for k, a in st.items() if a["share"] >= 0.10 and a["impressions"] >= MIN_SITE_IMPR
             and a["ctr"] < cctr * 0.5]
@@ -492,6 +504,24 @@ def _inventory(gql, ids):
     return out
 
 
+def _hc_copies(gql, gid, hc_ids):
+    """Names of the group's live campaigns already strict on High CTR packages,
+    serving or not (a copy made today has no serve in the report yet)."""
+    q = ("query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{ name isArchived "
+         "inventory{ isInventoryPackagesStrict inventoryPackages(first:100){ nodes{ id } } } } } }")
+    try:
+        nodes = gql(q, {"g": [gid]})["campaigns"]["nodes"]
+    except Exception:
+        return set()
+    out = set()
+    for n in nodes:
+        inv = n.get("inventory") or {}
+        pk = {str(p["id"]) for p in (inv.get("inventoryPackages") or {}).get("nodes") or []}
+        if not n.get("isArchived") and inv.get("isInventoryPackagesStrict") and pk & hc_ids:
+            out.add(n.get("name"))
+    return out
+
+
 def _goal_fix(goals, goal):
     types = {t for t, _ in goals}
     if "MAX_CTR" in types or any(t == "CTR" and v for t, v in goals):
@@ -740,6 +770,7 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
             hc_ids = {p["id"] for v in hc.values() for p in v}
             copied = {camps[j]["name"] for j in ids
                       if inv.get(j) and inv[j]["strict"] and inv[j]["pkgs"] & hc_ids}
+            copied |= _hc_copies(gql, gid, {str(x) for x in hc_ids})
             for i in ids:
                 ch = str(camps[i].get("channel") or "").upper()
                 pk = hc.get(ch) or []

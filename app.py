@@ -2125,7 +2125,7 @@ def _line_group(g, done=None):
                        "raise_bid": "flights", "freq_cap": "targeting", "high_ctr": "inventory", "viewability": "targeting"}.get(p.get("type"), "setup")
                 link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
         row = ({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
-                                      "impressions", "share", "ctr")}
+                                      "impressions", "share", "ctr", "breakout")}
                | {"can_push": bool(p), "link": link,
                   "pushed": r.get("pushed") or (done or {}).get(
                       (str(g.get("id") or ""), r.get("scope") or "All in group",
