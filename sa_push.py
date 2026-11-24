@@ -288,6 +288,8 @@ def _bump_group_budget(gid, pct):
     sent, added = [], 0.0
     for x in (g.get("flights") or {}).get("nodes") or []:
         y = {k: v for k, v in x.items() if v is not None}
+        if not x.get("marginRate"):
+            y.pop("marginType", None)  # SA: "Margin type cannot be set for non-margin campaign group"
         st, en = _dt.datetime.fromisoformat(x["startTime"]), _dt.datetime.fromisoformat(x["endTime"])
         if en >= now and x.get("lifetimeBudget"):
             left = 1.0 if st >= now else max(0.0, (en - now) / (en - st))
@@ -504,8 +506,8 @@ ORIG_FIELDS = "campaignGroup{ id name } userMetadata flights{ nodes{ " + FLIGHT_
 
 # High CTR copies (kiri 2026-11-24): the packages already narrow supply, so a copy
 # drops the caps and bid ups/downs our recs pushed onto the original (removals and
-# paused ads stay), and bids $0.25 more than the original.
-HC_CPM_ADD = 0.25
+# paused ads stay), and bids $0.50 more than the original.
+HC_CPM_ADD = 0.50  # kiri 11/24, was 0.25
 
 
 def _relaxed(cid):
