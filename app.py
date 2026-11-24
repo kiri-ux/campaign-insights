@@ -2324,11 +2324,18 @@ def _live_age_h():
 
 def _live_loop():
     import time as _t
+    import datetime as _dt
+    started = _dt.datetime.now(_dt.timezone.utc)
     _t.sleep(90)  # let the instance settle after a deploy
+    first = True
     while True:
         age = _live_age_h()
-        if age is None or age >= LIVE_RECS_MAX_AGE_H:
+        snap = _live_load() if first else None
+        # Recs built before this deploy miss its rule changes: rebuild once.
+        stale = bool(snap) and _dt.datetime.fromisoformat(snap["at"]) < started
+        if age is None or age >= LIVE_RECS_MAX_AGE_H or stale:
             _live_refresh()
+        first = False
         _t.sleep(1800)
 
 
