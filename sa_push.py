@@ -339,6 +339,13 @@ def _pause_ads(spec):
 # High CTR inventory (kiri 2026-11-23): SA's public "High CTR" packages, US,
 # not political, with avails, matched to the campaign's channel.
 HC_SUPPLY = {"DISPLAY": "Display/In-Ad", "VIDEO": "Video", "NATIVE": "Native"}
+# Packages kiri added to the High CTR set (11/24) though their names don't say
+# High CTR. Video and native video campaigns (SA channel Video) get the first list;
+# native video also gets the second.
+HC_EXTRA_VIDEO = ["Video | High Engagement Web | US", "Video | High Attention Rate | US",
+                  "Video | Adelaide-High Attention Rate | US", "In-App Display | Banner - Top 100 CTR | US",
+                  "In-App Display | Interstitial - Top 100 CTR | US"]
+HC_EXTRA_NATIVE_VIDEO = ["In-App Native | RON | US"]
 VIEW_SEGMENT = "82031170"  # DV All Sizes 70%+ viewability
 _HC_CACHE = {"at": 0, "pkgs": None}
 COPY_FIELDS = ["BID_AND_GOAL_BUDGET", "BID_AND_GOAL_DATE", "BID_AND_GOAL_TYPE", "CREATIVE", "GOALS", "INVENTORY",
@@ -357,6 +364,12 @@ def high_ctr_packages(gql=None):
                    "countryCodes avails bidGuidanceMin bidGuidanceMax } pageInfo { hasNextPage endCursor } } }")["inventoryPackages"]
         for p in conn["nodes"]:
             n = (p.get("name") or "").lower()
+            clean = " ".join((p.get("name") or "").split())
+            for key, names in (("VIDEO_EXTRA", HC_EXTRA_VIDEO), ("NATIVE_VIDEO_EXTRA", HC_EXTRA_NATIVE_VIDEO)):
+                if clean in names and not p.get("isDeprecated") and int(p.get("avails") or 0):
+                    out.setdefault(key, []).append({"id": str(p["id"]), "name": clean,
+                                                    "bid": (p.get("bidGuidanceMin"), p.get("bidGuidanceMax")),
+                                                    "avails": int(p.get("avails") or 0)})
             if ("high ctr" not in n or "political" in n or p.get("isDeprecated") or p.get("isPrivate")
                     or "US" not in (p.get("countryCodes") or []) or not int(p.get("avails") or 0)):
                 continue
@@ -372,6 +385,18 @@ def high_ctr_packages(gql=None):
         v.sort(key=lambda x: -x["avails"])
     _HC_CACHE.update(at=time.time(), pkgs=out)
     return out
+
+
+def hc_ids_for(pk, channel, names=""):
+    """The High CTR package ids for a campaign: its channel's High CTR packages,
+    plus kiri's extras for video, and native video (named so in `names`)."""
+    ch = str(channel or "").upper()
+    out = [p["id"] for p in pk.get(ch) or []]
+    if ch == "VIDEO":
+        out += [p["id"] for p in pk.get("VIDEO_EXTRA") or []]
+        if "native video" in (names or "").lower():
+            out += [p["id"] for p in pk.get("NATIVE_VIDEO_EXTRA") or []]
+    return list(dict.fromkeys(out))
 
 
 def _camp(cid, fields):
@@ -397,10 +422,10 @@ def _high_ctr(spec):
     mode "copy": copy the campaign into its group and put the packages on the copy,
     so the original keeps delivering while the group is behind pace."""
     pk = high_ctr_packages()
-    out = []
+    out, raised, raises = [], [], []
     for cid in spec["campaign_ids"]:
         c, ch = _camp(cid, ORIG_FIELDS)
-        ids = [p["id"] for p in pk.get(str(c["channelType"]).upper()) or []]
+        ids = hc_ids_for(pk, c["channelType"], f"{c.get('name')} {(c.get('campaignGroup') or {}).get('name')}")
         if not ids:
             raise RuntimeError(f"No US High CTR packages for {c['channelType'].lower()}")
         inv = {"inventoryPackageIds": ids, "isInventoryPackagesStrict": True}
@@ -419,11 +444,26 @@ def _high_ctr(spec):
                 raise RuntimeError("StackAdapt didn't return the copy")
             state = finish_copy(new, c, ch, ids)
             out.append(f"Copied to {new} with {len(ids)} High CTR packages, CPM +${HC_CPM_ADD:.2f}, rec caps and bid factors off, {state.lower()}. Add label High CTR in SA")
+            bid = next((float(f["bidAmount"]) for f in (c.get("flights") or {}).get("nodes") or []
+                        if f.get("bidType") == "CPM" and f.get("bidAmount")), 0)
+            if bid:
+                raised.append((c.get("campaignGroup") or {}).get("id"))
+                raises.append(HC_CPM_ADD / bid)
         else:
             _upsert(ch, {"id": cid, "inventory": inv})
             _check_inventory(cid, ids)
             out.append(f"{len(ids)} High CTR packages set")
+    if raises and raised[0]:
+        out.append(_budget_for_copies(raised[0], raises))
     return "; ".join(out)
+
+
+def _budget_for_copies(gid, raises):
+    """Room in a Media Cost group's budget for copies bidding more: each copy is
+    taken to get an even share of the group's live campaigns."""
+    n = len([x for x in _gql("query($g:[ID!]){ campaigns(first:100, filterBy:{campaignGroupIds:$g}){ nodes{ id isArchived } } }",
+                             {"g": [gid]})["campaigns"]["nodes"] if not x.get("isArchived")])
+    return _bump_group_budget(gid, sum(raises) / max(n, 1))
 
 
 def _existing_copy(c, ids):
@@ -459,7 +499,7 @@ def _labels(c, label):
     return pairs
 
 
-ORIG_FIELDS = "campaignGroup{ id } userMetadata flights{ nodes{ " + FLIGHT_FIELDS + " } }"
+ORIG_FIELDS = "campaignGroup{ id name } userMetadata flights{ nodes{ " + FLIGHT_FIELDS + " } }"
 
 
 # High CTR copies (kiri 2026-11-24): the packages already narrow supply, so a copy
@@ -562,7 +602,7 @@ def finish_copy(new, c, ch, ids):
 def finish_existing_copy(new, original):
     """Apply finish_copy to a copy made earlier."""
     c, ch = _camp(original, ORIG_FIELDS)
-    ids = [p["id"] for p in high_ctr_packages().get(str(c["channelType"]).upper()) or []]
+    ids = hc_ids_for(high_ctr_packages(), c["channelType"], f"{c.get('name')} {(c.get('campaignGroup') or {}).get('name')}")
     return finish_copy(new, c, ch, ids)
 
 
