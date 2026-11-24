@@ -774,11 +774,11 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
             copied |= _hc_copies(gql, gid, {str(x) for x in hc_ids})
             for i in ids:
                 ch = str(camps[i].get("channel") or "").upper()
-                pk = hc.get(ch) or []
+                pk = sa_push.hc_ids_for(hc, ch, f"{camps[i]['name']} {camps[i]['group']}")
                 if camps[i]["name"] in copied:
                     continue
                 st = inv.get(i)
-                if not pk or st is None or (st["strict"] and st["pkgs"] & {p["id"] for p in pk}):
+                if not pk or st is None or (st["strict"] and st["pkgs"] & set(pk)):
                     continue
                 # Retargeting pools are small: always a copy, never an edit (kiri 2026-11-23).
                 copy = behind or "retarget" in camps[i]["name"].lower()

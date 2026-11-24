@@ -382,6 +382,12 @@ HC_EXTRA_VIDEO = ["Video | High Engagement Web | US", "Video | High Attention Ra
                   "Video | Adelaide-High Attention Rate | US", "In-App Display | Banner - Top 100 CTR | US",
                   "In-App Display | Interstitial - Top 100 CTR | US"]
 HC_EXTRA_NATIVE_VIDEO = ["In-App Native | RON | US"]
+# Display, Social Mirror and Geo-Framing campaigns (SA channel Display) get these (kiri 11/24).
+HC_EXTRA_DISPLAY = ["Display | High Engagement Web | US", "In-App Display | Premium High Performing | US",
+                    "Display | High Attention Rate | US", "Display | High Impact Units | In-Feed | US",
+                    "Display | 33Across | High Impact Units | Parallax | US",
+                    "Display | 33Across | High Impact Units | Pillar | US"]
+HC_DISPLAY_PRODUCTS = ("display", "social mirror", "geo-framing", "geo framing", "geoframing")
 VIEW_SEGMENT = "82031170"  # DV All Sizes 70%+ viewability
 _HC_CACHE = {"at": 0, "pkgs": None}
 COPY_FIELDS = ["BID_AND_GOAL_BUDGET", "BID_AND_GOAL_DATE", "BID_AND_GOAL_TYPE", "CREATIVE", "GOALS", "INVENTORY",
@@ -401,7 +407,8 @@ def high_ctr_packages(gql=None):
         for p in conn["nodes"]:
             n = (p.get("name") or "").lower()
             clean = " ".join((p.get("name") or "").split())
-            for key, names in (("VIDEO_EXTRA", HC_EXTRA_VIDEO), ("NATIVE_VIDEO_EXTRA", HC_EXTRA_NATIVE_VIDEO)):
+            for key, names in (("VIDEO_EXTRA", HC_EXTRA_VIDEO), ("NATIVE_VIDEO_EXTRA", HC_EXTRA_NATIVE_VIDEO),
+                                ("DISPLAY_EXTRA", HC_EXTRA_DISPLAY)):
                 if clean in names and not p.get("isDeprecated") and int(p.get("avails") or 0):
                     out.setdefault(key, []).append({"id": str(p["id"]), "name": clean,
                                                     "bid": (p.get("bidGuidanceMin"), p.get("bidGuidanceMax")),
@@ -425,13 +432,16 @@ def high_ctr_packages(gql=None):
 
 def hc_ids_for(pk, channel, names=""):
     """The High CTR package ids for a campaign: its channel's High CTR packages,
-    plus kiri's extras for video, and native video (named so in `names`)."""
+    plus kiri's extras for video, native video, and display / Social Mirror /
+    Geo-Framing (product named in `names`)."""
     ch = str(channel or "").upper()
     out = [p["id"] for p in pk.get(ch) or []]
     if ch == "VIDEO":
         out += [p["id"] for p in pk.get("VIDEO_EXTRA") or []]
         if "native video" in (names or "").lower():
             out += [p["id"] for p in pk.get("NATIVE_VIDEO_EXTRA") or []]
+    if ch == "DISPLAY" and any(k in (names or "").lower() for k in HC_DISPLAY_PRODUCTS):
+        out += [p["id"] for p in pk.get("DISPLAY_EXTRA") or []]
     return list(dict.fromkeys(out))
 
 
