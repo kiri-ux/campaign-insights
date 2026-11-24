@@ -103,6 +103,40 @@ def _group_exclude(spec):
     return f"Excluded on the campaign group ({len(cur) + len(add)} exclusions)"
 
 
+def _campaign_exclude(spec):
+    """Add exclusions to each campaign's own Domain Exclusion List (Inventory),
+    keeping what's there."""
+    done, had = 0, 0
+    for cid in spec["campaign_ids"]:
+        nodes = _gql("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id channelType "
+                     "inventory{ domainExclusions } } } }", {"ids": [cid]})["campaigns"]["nodes"]
+        if not nodes:
+            raise RuntimeError(f"Campaign {cid} not found")
+        c = nodes[0]
+        cur = [x for x in ((c.get("inventory") or {}).get("domainExclusions") or []) if x]
+        have = {_norm_excl(x) for x in cur}
+        add = [sa_exclusion(d) for d in spec["domains"] if _norm_excl(d) not in have]
+        if not add:
+            had += 1
+            continue
+        ch = CHANNEL_KEY.get(str(c.get("channelType") or "").upper())
+        if not ch:
+            raise RuntimeError(f"Campaign {cid}: unsupported channel {c.get('channelType')}")
+        r = _gql("""mutation($i: CampaignInput!){ upsertCampaign(input:$i){
+            campaign{ id inventory{ domainExclusions } } userErrors{ message } } }""",
+                 {"i": {ch: {"id": cid, "inventory": {"domainExclusions": cur + add}}}})
+        _user_errors(r["upsertCampaign"])
+        saved = {_norm_excl(x) for x in ((((r["upsertCampaign"].get("campaign") or {}).get("inventory") or {})
+                                         .get("domainExclusions")) or [])}
+        if not all(_norm_excl(d) in saved for d in add):
+            raise RuntimeError(f"StackAdapt didn't keep the exclusion on campaign {cid}")
+        done += 1
+    msg = f"Excluded on {done} {'campaign' if done == 1 else 'campaigns'}"
+    if had:
+        msg += f", {had} already excluded"
+    return msg
+
+
 def sa_exclusion(v):
     """Entry in the form SA's UI uses: bare domain, or the app's store URL.
     Takes SA report values (storeurl/..., bundle/..., name/...), app:<id>, or a domain."""
@@ -702,6 +736,8 @@ def push(rec):
     t = spec["type"]
     if t == "group_exclude":
         return _group_exclude(spec)
+    if t == "campaign_exclude":
+        return _campaign_exclude(spec)
     if t == "bid_factor":
         name = f"Insights: {rec.get('kind')} {rec.get('target')}"[:120]
         return _bid_factor(spec, name)

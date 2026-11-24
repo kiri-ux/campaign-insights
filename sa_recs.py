@@ -394,6 +394,7 @@ def _factor(action):
 def push_spec(r, group_id, campaign_ids, group_wide):
     """What the Push button does for a rec, or None when it can't be pushed.
       group_exclude: add domains to the campaign group's domain exclusions
+      campaign_exclude: add domains to each campaign's Domain Exclusion List
       bid_factor:    add a bid factor (100 = no change, 0 = no bids) to each campaign
       pause_ads:     pause ads
       remove_audience: take the segment off each campaign's audience"""
@@ -413,13 +414,13 @@ def push_spec(r, group_id, campaign_ids, group_wide):
     if not key:
         return None
     if kind == "Site":
+        # A site to remove is excluded, never bid down to 0 (kiri 2026-11-24).
+        val = r.get("raw") or (f"app:{key}" if r.get("site_type") == "app" else key)
+        if val.lower().startswith("name/") or (r.get("site_type") == "app" and not re.fullmatch(r"[\w.]+", key)):
+            return None  # SA only names this app; no store URL to exclude
         if group_wide:
-            val = r.get("raw") or (f"app:{key}" if r.get("site_type") == "app" else key)
-            if val.lower().startswith("name/") or (r.get("site_type") == "app" and not re.fullmatch(r"[\w.]+", key)):
-                return None  # SA only names this app; no store URL to exclude
             return {"type": "group_exclude", "group_id": group_id, "domains": [val]}
-        return {"type": "bid_factor", "campaign_ids": campaign_ids, "factor": 0,
-                "rule": {"domainRule": {"domains": [key]}}}
+        return {"type": "campaign_exclude", "campaign_ids": campaign_ids, "domains": [val]}
     if kind == "Device" and r.get("caps") is not None:
         return {"type": "device_caps", "campaign_ids": campaign_ids, "caps": r["caps"]}
     if kind == "Creative" and action == "Pause":
