@@ -418,7 +418,7 @@ def _high_ctr(spec):
             if not new:
                 raise RuntimeError("StackAdapt didn't return the copy")
             state = finish_copy(new, c, ch, ids)
-            out.append(f"Copied to {new} with {len(ids)} High CTR packages, {state.lower()}. Add label High CTR in SA")
+            out.append(f"Copied to {new} with {len(ids)} High CTR packages, CPM +${HC_CPM_ADD:.2f}, rec caps and bid factors off, {state.lower()}. Add label High CTR in SA")
         else:
             _upsert(ch, {"id": cid, "inventory": inv})
             _check_inventory(cid, ids)
@@ -462,6 +462,65 @@ def _labels(c, label):
 ORIG_FIELDS = "campaignGroup{ id } userMetadata flights{ nodes{ " + FLIGHT_FIELDS + " } }"
 
 
+# High CTR copies (kiri 2026-11-24): the packages already narrow supply, so a copy
+# drops the caps and bid ups/downs our recs pushed onto the original (removals and
+# paused ads stay), and bids $0.25 more than the original.
+HC_CPM_ADD = 0.25
+
+
+def _relaxed(cid):
+    """A copy's inventory caps and bid factors without our rec optimizations: all
+    caps back to 100%, and "Insights: ..." bid factors dropped unless 0% (a removal)."""
+    q = ("query($ids:[ID!]){ campaigns(first:1, filterBy:{ids:$ids}){ nodes{ id "
+         "inventory{ deviceCaps{ app desktop web } } "
+         "bidFactors{ nodes{ id name factorPercent paused %s } } } } }") % " ".join(RULES.values())
+    c = _gql(q, {"ids": [cid]})["campaigns"]["nodes"][0]
+    out, dropped = {}, 0
+    caps = (c.get("inventory") or {}).get("deviceCaps") or {}
+    if any(float(caps.get(k) if caps.get(k) is not None else 1) < 1 for k in ("app", "desktop", "web")):
+        out["deviceCaps"] = {"app": 1.0, "desktop": 1.0, "web": 1.0}
+    keep = []
+    for f in (c.get("bidFactors") or {}).get("nodes") or []:
+        if str(f.get("name") or "").startswith("Insights:") and f.get("factorPercent") not in (0, None):
+            dropped += 1
+            continue
+        item = {"id": f["id"], "name": f.get("name"), "factorPercent": f.get("factorPercent"),
+                "paused": bool(f.get("paused"))}
+        for rn in RULES:
+            v = _rule_in(rn, f.get(rn))
+            if v:
+                item[rn] = v
+        keep.append(item)
+    if dropped:
+        out["bidFactors"] = keep
+    return out
+
+
+def relax_copy(cid, add=HC_CPM_ADD):
+    """Apply the High CTR copy rules to a copy made before them: caps and bid
+    factors relaxed, CPM up `add` on current and future flights."""
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    c, ch = _camp(cid, "flights{ nodes{ " + FLIGHT_FIELDS + " } }")
+    r = _relaxed(cid)
+    inp = {"id": cid}
+    if "deviceCaps" in r:
+        inp["inventory"] = {"deviceCaps": r["deviceCaps"]}
+    if "bidFactors" in r:
+        inp["bidFactors"] = r["bidFactors"]
+    fl, bids = [], []
+    for x in (c.get("flights") or {}).get("nodes") or []:
+        y = {k: v for k, v in x.items() if v is not None}
+        if add and x.get("endTime") and _dt.datetime.fromisoformat(x["endTime"]) >= now and x.get("bidType") == "CPM":
+            y["bidAmount"] = round(float(x["bidAmount"]) + add, 2)
+            bids.append(f"${x['bidAmount']:.2f} to ${y['bidAmount']:.2f}")
+        fl.append(y)
+    if bids:
+        inp["flights"] = fl
+    _upsert(ch, inp)
+    return {"caps": "deviceCaps" in r, "bid_factors": "bidFactors" in r, "cpm": bids}
+
+
 def finish_copy(new, c, ch, ids):
     """Give a copy the original's name (so reporting merges), a High CTR label,
     the packages, and take it live (kiri 2026-11-23). Returns its state."""
@@ -477,9 +536,17 @@ def finish_copy(new, c, ch, ids):
         y = {k: v for k, v in f.items() if v is not None and k != "id"}
         if _dt.datetime.fromisoformat(y["startTime"]) < now:
             y["startTime"] = (now + _dt.timedelta(minutes=10)).replace(microsecond=0).isoformat()
+        if y.get("bidType") == "CPM" and y.get("bidAmount") is not None:
+            y["bidAmount"] = round(float(y["bidAmount"]) + HC_CPM_ADD, 2)
         flights.append(y)
-    inp = {"id": new, "name": c.get("name"), "inventory": {"inventoryPackageIds": ids,
-           "isInventoryPackagesStrict": True}, "isDraft": False, "userMetadata": _labels(c, "High CTR")}
+    relaxed = _relaxed(new)
+    inv = {"inventoryPackageIds": ids, "isInventoryPackagesStrict": True}
+    if "deviceCaps" in relaxed:
+        inv["deviceCaps"] = relaxed["deviceCaps"]
+    inp = {"id": new, "name": c.get("name"), "inventory": inv, "isDraft": False,
+           "userMetadata": _labels(c, "High CTR")}
+    if "bidFactors" in relaxed:
+        inp["bidFactors"] = relaxed["bidFactors"]
     if flights:
         inp["flights"] = flights
     _upsert(ch, inp)
