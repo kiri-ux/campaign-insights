@@ -2122,7 +2122,7 @@ def _line_group(g, done=None):
                 link = f"https://www.stackadapt.com/cg-editor?ids={g.get('id')}"
             else:
                 tab = {"pause_ads": "creative", "device_caps": "inventory", "bid_factor": "strategy",
-                       "raise_bid": "flights", "freq_cap": "targeting", "high_ctr": "inventory", "viewability": "targeting", "campaign_exclude": "inventory"}.get(p.get("type"), "setup")
+                       "raise_bid": "flights", "freq_cap": "targeting", "high_ctr": "inventory", "viewability": "targeting", "campaign_exclude": "inventory", "group_budget": "flights"}.get(p.get("type"), "setup")
                 link = "https://www.stackadapt.com/editor?ids=" + ",".join(p["campaign_ids"]) + "&tab=" + tab
         row = ({k: r.get(k) for k in ("rid", "kind", "action", "target", "tone", "scope",
                                       "impressions", "share", "ctr", "breakout")}

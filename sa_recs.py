@@ -317,6 +317,71 @@ PACING_Q = """query($ids: [ID!]) { campaignGroups(first: 50, filterBy: {ids: $id
            projectedDailySpend { currentPacePercentVar } } } } }"""
 
 
+BUDGET_Q = """query($ids: [ID!]) { campaignGroups(first: 1, filterBy: {ids: $ids}) { nodes { id budgetType
+  flights { nodes { id name startTime endTime lifetimeBudget } } } } }"""
+DELIVERY_Q = """query($f: CampaignFilters, $d: DateRangeInput) {
+  campaignDelivery(filterBy: $f, date: $d, granularity: TOTAL, dataType: TABLE) {
+    ... on CampaignDeliveryOutcome { records(first: 500) { nodes { metrics { impressionsBigint cost } } } } } }"""
+GOAL_IMPS_RE = re.compile(r"([\d,]+)\s*imps", re.I)
+ECPM_DAYS = 3        # recent eCPM = last 3 full days (same as the nightly job)
+ECPM_GAP = 0.15      # recent eCPM 15%+ off what the remaining budget assumes
+BUDGET_BUFFER = 0.03  # pad what's owed 3%, round up to the next $10
+
+
+def _budget_rec(gql, gid, cids):
+    """Media Cost groups (kiri 11/25): when the last 3 days' eCPM is 15%+ under
+    (or over) the eCPM the rest of the flight budget assumes, the budget that
+    buys the impressions still owed: spent + owed x recent eCPM, +3%, next $10.
+    Same rule as the nightly job's low-eCPM alert. None when it doesn't apply."""
+    import datetime as dt
+    import math
+    try:
+        g = (gql(BUDGET_Q, {"ids": [gid]})["campaignGroups"]["nodes"] or [None])[0]
+    except Exception:
+        return None
+    if not g or str(g.get("budgetType") or "").lower() != "cost" or not cids:
+        return None
+    today = _now().date()
+    f = next((x for x in (g.get("flights") or {}).get("nodes") or []
+              if dt.date.fromisoformat(x["startTime"][:10]) <= today <= dt.date.fromisoformat(x["endTime"][:10])), None)
+    m = GOAL_IMPS_RE.search((f or {}).get("name") or "")
+    if not f or not m or not f.get("lifetimeBudget"):
+        return None
+    goal = int(m.group(1).replace(",", ""))
+    start = dt.date.fromisoformat(f["startTime"][:10])
+    end = dt.date.fromisoformat(f["endTime"][:10])
+    yday = today - dt.timedelta(days=1)
+    if (yday - start).days < ECPM_DAYS or (end - today).days < 2:
+        return None  # learning, or too late to matter
+
+    def tot(a, b):
+        r = gql(DELIVERY_Q, {"f": {"ids": [str(c) for c in cids]}, "d": {"from": a.isoformat(), "to": b.isoformat()}})
+        nodes = ((r.get("campaignDelivery") or {}).get("records") or {}).get("nodes") or []
+        return (sum(_num((n.get("metrics") or {}).get("impressionsBigint")) for n in nodes),
+                sum(_num((n.get("metrics") or {}).get("cost")) for n in nodes))
+    try:
+        delivered, spent = tot(start, yday)
+        r_imps, r_cost = tot(yday - dt.timedelta(days=ECPM_DAYS - 1), yday)
+    except Exception:
+        return None
+    budget = float(f["lifetimeBudget"])
+    owed = goal - delivered
+    if owed <= 0 or not r_imps or budget <= spent:
+        return None
+    ecpm, planned = r_cost / r_imps * 1000, (budget - spent) / owed * 1000
+    new = float(math.ceil((spent + owed * ecpm / 1000 * (1 + BUDGET_BUFFER)) / 10) * 10)
+    if ecpm <= planned * (1 - ECPM_GAP) and new < budget:
+        action, tone = "Lower group budget", "warn"
+    elif ecpm >= planned * (1 + ECPM_GAP) and new > budget:
+        action, tone = "Raise group budget", "warn"
+    else:
+        return None
+    return {"kind": "Budget", "action": action, "tone": tone, "key": None,
+            "target": f"${budget:,.0f} to ${new:,.0f}: {owed:,.0f} imps owed at ${ecpm:,.2f} eCPM vs ${planned:,.2f} planned",
+            "impressions": 0, "clicks": 0, "ctr": 0, "share": 0, "scope": "",
+            "budget": {"group_id": gid, "flight_id": f["id"], "old": budget, "new": new}}
+
+
 def _pacing(gql, ids):
     """SA's live pacing per group: projected share of the flight budget and
     current daily pace vs what's needed (1.0 = on pace)."""
@@ -409,6 +474,8 @@ def push_spec(r, group_id, campaign_ids, group_wide):
     if action in ("Add High CTR inventory", "Copy with High CTR inventory"):
         return {"type": "high_ctr", "campaign_ids": campaign_ids,
                 "mode": "copy" if action.startswith("Copy") else "edit"} if campaign_ids else None
+    if action in ("Lower group budget", "Raise group budget") and r.get("budget"):
+        return dict(r["budget"], type="group_budget")
     if action == "Add viewability segment":
         return {"type": "viewability", "campaign_ids": campaign_ids} if campaign_ids else None
     if action == "Add frequency cap":
@@ -793,7 +860,11 @@ def build(d, camps, camp_sites, pages, gql, page=2400, load_camps=None):
         # On goal: only the upside
         if g["status"] == "On goal":
             recs = [r for r in recs if r["tone"] == "ok"]
-        order = {"Goal": -1, "Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4,
+        # Pacing: a Media Cost group whose eCPM has moved off what its budget assumes
+        b = _budget_rec(gql, gid, ids)
+        if b:
+            recs.insert(0, b)
+        order = {"Budget": -2, "Goal": -1, "Site": 0, "Device": 1, "OS": 2, "Audience": 3, "Creative": 4,
                  "Frequency": 5, "Viewability": 6, "Inventory": 6.5, "Bid": 7}
         recs.sort(key=lambda r: (r["scope"] not in ("", "All campaigns"), order.get(r["kind"], 9)))
         by_short = {_short(camps[i]["name"], camps[i]["advertiser"]): i for i in ids}

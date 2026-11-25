@@ -340,6 +340,33 @@ def _bump_group_budget(gid, pct):
     return f"Group budget +${added:,.0f}"
 
 
+def _group_budget(spec):
+    """Set the current flight's budget on a Media Cost group (pacing rec), other flights unchanged."""
+    gid, fid, new = spec["group_id"], str(spec["flight_id"]), float(spec["new"])
+    g = _gql("query($ids:[ID!]){ campaignGroups(first:1, filterBy:{ids:$ids}){ nodes{ id budgetType "
+             "flights{ nodes{ " + GROUP_FLIGHT_FIELDS + " } } } } }", {"ids": [gid]})["campaignGroups"]["nodes"]
+    if not g:
+        raise RuntimeError("Campaign group not found")
+    g = g[0]
+    if str(g.get("budgetType") or "").lower() != "cost":
+        raise RuntimeError("Group budget is in impressions")
+    sent, old = [], None
+    for x in (g.get("flights") or {}).get("nodes") or []:
+        y = {k: v for k, v in x.items() if v is not None}
+        if not x.get("marginRate"):
+            y.pop("marginType", None)
+        if str(x["id"]) == fid:
+            old = x.get("lifetimeBudget")
+            y["lifetimeBudget"] = new
+        sent.append(y)
+    if old is None:
+        raise RuntimeError("Flight not found on the group")
+    r = _gql("""mutation($i: CampaignGroupInput!){ updateCampaignGroup(input:$i){
+        campaignGroup{ id } userErrors{ message } } }""", {"i": {"id": gid, "flights": sent}})
+    _user_errors(r["updateCampaignGroup"])
+    return f"Group budget ${float(old):,.0f} to ${new:,.0f}"
+
+
 def _freq_cap(spec):
     done, had = 0, 0
     for cid in spec["campaign_ids"]:
@@ -763,6 +790,8 @@ def push(rec):
         return _high_ctr(spec)
     if t == "viewability":
         return _viewability(spec)
+    if t == "group_budget":
+        return _group_budget(spec)
     if t == "remove_audience":
         return _remove_audience(spec, f"Insights: {rec.get('kind')} {rec.get('target')}"[:120])
     raise RuntimeError(f"Unknown push type {t}")
