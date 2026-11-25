@@ -281,6 +281,7 @@ def _creative_recs(ads_d, c):
     recs = []
     ads = [dict(a, key=k) for k, a in (ads_d or {}).items() if a["impressions"] > 0]
     big = [a for a in ads if a["impressions"] >= MIN_AD_IMPR]
+    brk = _breakout({a["key"]: a for a in ads}, c["impressions"], top=12)
     if len(big) > 1:
         best = max(_rate(a["clicks"], a["impressions"]) for a in big)
         for a in sorted(big, key=lambda a: -a["impressions"]):
@@ -288,7 +289,8 @@ def _creative_recs(ads_d, c):
             share = _rate(a["impressions"], c["impressions"])
             if best > 0 and ctr < best * 0.5 and share <= 0.5:
                 recs.append({"kind": "Creative", "target": a["name"], "action": "Pause", "tone": "warn", "key": a["key"],
-                             "impressions": a["impressions"], "clicks": a["clicks"], "ctr": ctr, "share": share})
+                             "impressions": a["impressions"], "clicks": a["clicks"], "ctr": ctr, "share": share,
+                             "breakout": brk})
     if len(ads) == 1:
         recs.append({"kind": "Creative", "target": "1 ad running", "action": "Add creatives", "tone": "warn",
                      "impressions": ads[0]["impressions"], "clicks": ads[0]["clicks"],
